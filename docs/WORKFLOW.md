@@ -467,3 +467,15 @@ Key frozen items:
 - 11 smoke tests, all passing
 - Recommendation consistency verified (snapshot/dispatch/batch-plan agree)
 -  permanently locked as audit_tainted
+
+
+## Feature Work Order Template
+
+For converting user requirements into executable Work Orders, see [WORK_ORDER_TEMPLATE.md](WORK_ORDER_TEMPLATE.md).
+
+Key features:
+- **Structured YAML**: work_order_id, scope, acceptance_criteria, review_criteria
+- **Type prefixes**: wo-code-, wo-doc-, wo-maint-, wo-test-, wo-fix-
+- **8-phase pipeline**: prepare → implement → test → commit → push → review → wrapper → freeze
+- **Failure handling**: stop on blocker, preserve state, escalate if needed
+- **QQ/Hermes integration**: user message → structured Work Order → approval → execution → report
