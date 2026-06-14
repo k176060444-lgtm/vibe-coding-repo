@@ -99,10 +99,12 @@ python3 scripts/vibe_autonomous_merge.py \
 
 Queue Advisor 提供任务队列的下一步动作建议。
 
+**重要**: Queue Advisor v2 会自动检测已合入 main 的 job，避免重复建议 merge。
+
 ### 使用方法
 
 ```bash
-# 查看所有任务建议
+# 查看所有任务建议（自动排除已合入 main 的任务）
 python3 scripts/vibe_queue_advisor.py
 
 # JSON 输出
@@ -113,14 +115,29 @@ python3 scripts/vibe_queue_advisor.py --limit 5
 
 # 包含 audit_tainted 任务
 python3 scripts/vibe_queue_advisor.py --include-tainted
+
+# 显示已合入 main 的任务
+python3 scripts/vibe_queue_advisor.py --include-merged
 ```
+
+### Merged-State 检测
+
+Queue Advisor v2 会检查每个 job 的 `result_sha` 是否已在 main 历史中：
+
+- **已合入 main**: 标记为 `merged`，默认不显示在 action items 中
+- **未合入**: 正常显示为 `ready_for_merge` 或其他状态
+- **缺失 result_sha**: 输出 warning，不误判为 ready_for_merge
+- **audit_tainted**: 始终进入 blocked/warnings，从不建议 push/merge
+
+**重要**: 合并必须通过 `scripts/vibe_autonomous_merge.py` wrapper，禁止裸 `gh pr merge`。
 
 ### 输出说明
 
 - **⛔ BLOCKED JOBS**: audit_tainted 任务，需要人工审查
 - **🔴 HIGH PRIORITY**: 失败任务或阻塞任务
 - **🟡 MEDIUM PRIORITY**: 待处理任务
-- **🟢 LOW PRIORITY**: 已准备好 merge 的任务
+- **🟢 LOW PRIORITY**: 已准备好 merge 的任务（排除已合入）
+- **📊 MERGED**: 已合入 main 的任务计数（默认不列出详情）
 - **⚠️ WARNINGS**: 缺少 work-order 或其他警告
 
 ### 与其他工具的关系
@@ -128,7 +145,7 @@ python3 scripts/vibe_queue_advisor.py --include-tainted
 - `vibe_repo_status.py`: Job registry 和队列摘要
 - `vibe_merge_gate.py`: Merge 前验证
 - `vibe_autonomous_merge.py`: 受控 merge wrapper
-- `vibe_queue_advisor.py`: 下一步动作建议
+- `vibe_queue_advisor.py`: 下一步动作建议（含 merged-state 检测）
 
 ## 关键设计决策
 
