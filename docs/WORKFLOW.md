@@ -479,3 +479,28 @@ Key features:
 - **8-phase pipeline**: prepare → implement → test → commit → push → review → wrapper → freeze
 - **Failure handling**: stop on blocker, preserve state, escalate if needed
 - **QQ/Hermes integration**: user message → structured Work Order → approval → execution → report
+
+
+## Work Order Intake (v1)
+
+Natural language requirements can be converted to structured Work Order drafts:
+
+```
+python scripts/vibe_workorder_intake.py 'your requirement here'
+```
+
+The intake script:
+- Auto-classifies risk level (low/medium/high/critical)
+- Auto-detects Work Order type (code/doc/test/fix/maint)
+- Infers allowed paths from requirement text
+- Generates acceptance test criteria
+- Detects forbidden action patterns
+- Outputs draft only — never executes
+
+### From Requirement to Execution
+
+1. User provides requirement (text or file)
+2. Intake generates draft (Markdown or JSON)
+3. Human reviews and approves draft
+4. Executor creates Work Order from approved draft
+5. Pipeline executes: prepare → implement → test → commit → review → merge
