@@ -319,3 +319,68 @@ Defines command entry points for QQ / Hermes orchestrator. Each command maps to 
 - `scripts/vibe_queue_advisor.py`: Queue Advisor script
 - `scripts/vibe_dispatch_planner.py`: Dispatch Planner script
 - `scripts/vibe_autonomous_merge.py`: Merge wrapper script
+
+
+## Live QQ Examples
+
+### Quick Status Check
+
+```
+User: /s
+Bot:
+════════════════════════════════════════
+  📊 Operator Snapshot
+════════════════════════════════════════
+  Main:     32f81591d42f
+  Remote:   32f81591d42f
+  Sync:     YES
+  Jobs:     26
+  Merged:   18
+  Actions:  0
+  Warnings: 0
+  ➡ NEXT: queue_clean
+════════════════════════════════════════
+```
+
+### Dispatch Suggestion
+
+```
+User: /d --compact
+Bot:
+  ➡ RECOMMENDED: queue_clean
+  Queue is clean. Consider next phase:
+```
+
+### Health Check
+
+```
+User: /h
+Bot:
+  ✓ py_compile: PASS - 8 scripts compiled
+  ✓ import: PASS - 8 scripts importable
+  ✓ Overall: PASS (7 pass, 0 warn, 0 fail)
+```
+
+### Typo Recovery
+
+```
+User: /snapsho
+Bot: ERROR: Unknown command 'snapsho'. Did you mean 'snapshot'?
+```
+
+### JSON for Automation
+
+```
+User: /a --json
+Bot: { "total_jobs": 26, "action_items": [], ... }
+```
+
+## QQ Command Safety
+
+| Category | Commands | Side Effects |
+|----------|----------|-------------|
+| Read-only | /s, /a, /d, /b, /h, /sm | None |
+| Informational | /?, /v | None |
+| Destructive | (none exposed) | N/A |
+
+All QQ-facing commands are read-only. The merge command is NOT exposed via QQ routing — it requires direct CLI access with wrapper gate.

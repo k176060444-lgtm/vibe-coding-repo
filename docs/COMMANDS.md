@@ -255,3 +255,132 @@ See [TOOLCHAIN_FREEZE.md](TOOLCHAIN_FREEZE.md) for the complete frozen toolchain
 - Human stop conditions
 - Known reserved items (wo-code-repo-status-001)
 - Merge policy and scope boundaries
+
+
+## Live Examples (Real Output)
+
+### Short Aliases
+
+```
+$ python scripts/vibe_command_router.py s --compact
+════════════════════════════════════════
+  📊 Operator Snapshot
+════════════════════════════════════════
+  Main:     32f81591d42f
+  Remote:   32f81591d42f
+  Sync:     YES
+  Jobs:     26
+  Merged:   18
+  Blocked:  1 (1 hidden)
+  Actions:  0
+  Warnings: 0
+  ...
+  ➡ NEXT: queue_clean: consider documentation, next phase planning, or queue cleanup
+════════════════════════════════════════
+```
+
+```
+$ python scripts/vibe_command_router.py a --json | python -c "import sys,json; d=json.load(sys.stdin); print(d['total_jobs'])"
+26
+```
+
+```
+$ python scripts/vibe_command_router.py d --json | python -c "import sys,json; d=json.load(sys.stdin); print(d['recommended_action'])"
+queue_clean
+```
+
+### Typo Correction
+
+```
+$ python scripts/vibe_command_router.py snapsho
+ERROR: Unknown command 'snapsho'. Did you mean 'snapshot'?
+```
+
+```
+$ python scripts/vibe_command_router.py helpp
+ERROR: Unknown command 'helpp'. Did you mean 'help'?
+```
+
+### Version
+
+```
+$ python scripts/vibe_command_router.py v
+vibe_command_router 2.0.0
+Scripts: 6 registered
+Aliases: 8 defined
+```
+
+### Health Check
+
+```
+$ python scripts/vibe_command_router.py h
+========================================
+  Health Check v1
+========================================
+  ✓ py_compile: PASS - 8 scripts compiled
+  ✓ import: PASS - 8 scripts importable
+  ✓ operator_snapshot: PASS - total=26
+  ✓ queue_advisor: PASS - total=26
+  ✓ dispatch_planner: PASS - recommended=queue_clean
+  ✓ batch_plan: PASS - tasks=0
+  ✓ audit_tainted_lock: PASS - 1 tainted lock(s) visible
+----------------------------------------
+  Overall: PASS (7 pass, 0 warn, 0 fail)
+========================================
+```
+
+### Smoke Suite
+
+```
+$ python scripts/vibe_command_router.py sm
+========================================
+  Toolchain Smoke Suite v1
+========================================
+  ✓ command_router_help: PASS - help works
+  ✓ command_router_snapshot: PASS - snapshot works
+  ✓ command_router_advisor: PASS - total=26
+  ✓ command_router_dispatch: PASS - recommended=queue_clean
+  ✓ command_router_batch_plan: PASS - tasks=0
+  ✓ health_check: PASS - overall=PASS
+  ✓ operator_snapshot: PASS - total=26
+  ✓ queue_advisor: PASS - total=26
+  ✓ dispatch_planner: PASS - recommended=queue_clean
+  ✓ batch_plan: PASS - tasks=0
+  ✓ recommendation_consistency: PASS - consistent: all report queue_clean/0-tasks
+----------------------------------------
+  Overall: PASS (11 passed, 0 failed)
+========================================
+```
+
+### Batch Plan (JSON)
+
+```
+$ python scripts/vibe_command_router.py b --json
+{
+  "batch_id": "batch-0-tasks",
+  "task_order": [],
+  "task_count": 0,
+  "risk_level": "low",
+  ...
+}
+```
+
+### Batch Plan (with limit)
+
+```
+$ python scripts/vibe_command_router.py b --json --limit 3
+```
+
+## Command Behavior Matrix
+
+| Command | Read-Only | Triggers Work Order | Human Approval |
+|---------|-----------|-------------------|----------------|
+| `snapshot` | ✅ | No | No |
+| `advisor` | ✅ | No | No |
+| `dispatch` | ✅ | Suggests only | No |
+| `batch-plan` | ✅ | Plans only | No |
+| `health` | ✅ | No | No |
+| `smoke` | ✅ | No | No |
+| `merge` | ❌ | Executes merge | Wrapper gate |
+
+**All commands except `merge` are read-only.** The `merge` command is the only one with side effects and requires wrapper gate approval.
