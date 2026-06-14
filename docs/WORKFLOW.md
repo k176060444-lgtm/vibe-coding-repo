@@ -99,7 +99,25 @@ python3 scripts/vibe_autonomous_merge.py \
 
 Queue Advisor 提供任务队列的下一步动作建议。
 
-**重要**: Queue Advisor v4 具备 result_sha recovery 能力，可从 job records、feature branch、PR merge history 中恢复缺失的 result_sha，避免已合入任务被误报为 missing result_sha。
+**重要**: Queue Advisor v5 具备 summary 统计一致性保证和 result_sha recovery 能力。
+
+### Summary 统计一致性
+
+v5 保证以下一致性规则：
+
+- `summary.merged_total` = `len(merged_jobs)`（始终成立）
+- 默认（merged 隐藏）：`merged_jobs` 列表为空，`summary.hidden_merged` = `merged_total`
+- `--include-merged`：`merged_jobs` 列表完整，`summary.hidden_merged` = 0
+- `recovered_jobs` 中 `outcome=already_merged` 的 job 是 `merged_jobs` 的**子集**，不重复计数
+- 文本输出的 Merged/Recovered/Unresolved 计数与 JSON 完全一致
+
+### Result SHA Recovery
+
+当 review_passed/clean 的 job 缺少 result_sha 时，按优先级恢复：
+
+1. **本地文件**: manifest.json / state.json / approval-snapshot.json / run-record.json / review-record.json
+2. **Feature branch**: vibedev/{job_id} 或 vibedev/wo-{job_id} 的 HEAD
+3. **PR merge parent**: main 历史中包含 job_id 的 merge commit 的 feature parent
 
 ### Result SHA Recovery
 
