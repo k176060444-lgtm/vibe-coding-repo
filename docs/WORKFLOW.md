@@ -537,3 +537,14 @@ python scripts/vibe_release_notes.py --limit 10 --since <SHA>
 ```
 
 Reports include: merged PRs, capability changes, toolchain status, safety status, and recommended next phase.
+
+
+## Smoke Suite v3 (20 tests)
+
+Release notes smoke coverage added:
+- 17: Release Notes basic compact output
+- 18: Release Notes JSON with all required fields
+- 19: Release Notes safety status (audit_tainted lock visible)
+- 20: Release Notes via router (notes command)
+
+Run: `python scripts/test_toolchain_smoke.py`
