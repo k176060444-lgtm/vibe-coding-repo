@@ -157,6 +157,11 @@ git push origin --delete <branch_name>
 - **ALWAYS** verify `origin/main` before starting a Work Order
 - **ALWAYS** run post-merge freeze after wrapper merge
 
+## Autonomous Operation Runbook
+
+For detailed autonomous operation boundaries, stop conditions, and human approval points, see:
+- **[AUTONOMOUS_OPERATION_RUNBOOK.md](AUTONOMOUS_OPERATION_RUNBOOK.md)**: Full autonomous operation runbook
+
 ## QQ Command Routing
 
 For detailed command specifications, permission boundaries, and prohibited behaviors, see:
