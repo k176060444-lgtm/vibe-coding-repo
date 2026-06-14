@@ -320,6 +320,10 @@ python3 scripts/vibe_dispatch_planner.py --compact
 
 详见 [COMMANDS.md](COMMANDS.md)，覆盖 snapshot、queue advisor、failed triage、创建 Work Order、wrapper merge、freeze、只读核验、维护清理。
 
+## 模型切换
+
+详见 [MODEL_SWITCH_RUNBOOK.md](MODEL_SWITCH_RUNBOOK.md)，覆盖额度耗尽、429、timeout、质量不足时的人工切换流程。
+
 ## 关键设计决策
 
 | 决策 | 原因 |
