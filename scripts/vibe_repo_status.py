@@ -3,6 +3,7 @@
 
 Usage:
     python scripts/vibe_repo_status.py --repo-id <id> --base-sha <sha> [--job-id <id>] [--json]
+    python scripts/vibe_repo_status.py --jobs [--jobs-dir <dir>] [--json]
 
 Constraints:
     - No network access.
@@ -17,6 +18,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 def _run_git(*args):
@@ -113,6 +115,187 @@ def _git_status_summary():
     return info
 
 
+def _read_json_file(path):
+    """Read a JSON file safely, return dict or None."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+def _collect_job_info(job_dir):
+    """Collect read-only info for a single job directory."""
+    job_path = Path(job_dir)
+    job_id = job_path.name
+
+    # Read work-order.json (primary source)
+    wo = _read_json_file(job_path / "work-order.json")
+    if not wo:
+        return {
+            "job_id": job_id,
+            "job_status": "unknown",
+            "audit_status": "unknown",
+            "push_allowed": False,
+            "base_sha": None,
+            "result_sha": None,
+            "changed_paths": [],
+            "fallback_used": False,
+            "actual_model_used": None,
+            "records_count": 0,
+            "worktree_present": False,
+            "error": "missing_work_order",
+        }
+
+    # Read optional files
+    state = _read_json_file(job_path / "state.json")
+    manifest = _read_json_file(job_path / "manifest.json")
+    run_record = _read_json_file(job_path / "run-record.json")
+    model_policy = _read_json_file(job_path / "model-policy.json")
+
+    # Determine job_status: prefer state.json > work-order.status
+    job_status = "unknown"
+    if state and "status" in state:
+        job_status = state["status"]
+    elif "status" in wo:
+        job_status = wo["status"]
+
+    # Determine audit_status
+    audit_status = wo.get("audit_status", "clean")
+
+    # Determine push_allowed
+    push_allowed = wo.get("push_allowed", wo.get("allow_push", False))
+    if audit_status == "audit_tainted":
+        push_allowed = False
+
+    # Determine base_sha
+    base_sha = wo.get("base_sha")
+
+    # Determine result_sha from manifest
+    result_sha = None
+    if manifest:
+        result_sha = manifest.get("result_sha")
+
+    # Determine changed_paths from run_record
+    changed_paths = []
+    if run_record and "changed_paths" in run_record:
+        cp = run_record["changed_paths"]
+        if isinstance(cp, str):
+            changed_paths = [p.strip() for p in cp.split(",") if p.strip()]
+        elif isinstance(cp, list):
+            changed_paths = cp
+
+    # Determine fallback_used and actual_model_used
+    fallback_used = False
+    actual_model_used = wo.get("implementer_model")
+
+    if model_policy:
+        primary = model_policy.get("implementer", {}).get("primary")
+        if run_record and "model" in run_record:
+            actual_model_used = run_record["model"]
+            if primary and actual_model_used != primary:
+                fallback_used = True
+    elif run_record and "model" in run_record:
+        actual_model_used = run_record["model"]
+
+    # Count records (files in job directory)
+    records_count = 0
+    try:
+        records_count = len([f for f in job_path.iterdir() if f.is_file()])
+    except OSError:
+        pass
+
+    # Check worktree presence
+    worktree_present = False
+    if manifest and "worktree" in manifest:
+        worktree_path = Path(manifest["worktree"])
+        worktree_present = worktree_path.exists()
+
+    return {
+        "job_id": job_id,
+        "job_status": job_status,
+        "audit_status": audit_status,
+        "push_allowed": push_allowed,
+        "base_sha": base_sha,
+        "result_sha": result_sha,
+        "changed_paths": changed_paths,
+        "fallback_used": fallback_used,
+        "actual_model_used": actual_model_used,
+        "records_count": records_count,
+        "worktree_present": worktree_present,
+    }
+
+
+def _collect_jobs_summary(jobs_dir):
+    """Collect summary for all jobs in directory."""
+    jobs_path = Path(jobs_dir)
+    if not jobs_path.exists() or not jobs_path.is_dir():
+        return []
+
+    jobs = []
+    try:
+        entries = sorted(jobs_path.iterdir())
+    except OSError:
+        return []
+
+    for entry in entries:
+        if entry.is_dir() and not entry.name.startswith("."):
+            job_info = _collect_job_info(entry)
+            jobs.append(job_info)
+
+    return jobs
+
+
+def _format_jobs_text(jobs):
+    """Return human-readable jobs summary."""
+    if not jobs:
+        return "No jobs found."
+
+    lines = [
+        "========================================",
+        "  Vibe Coding Job Registry",
+        "========================================",
+        f"  Total Jobs: {len(jobs)}",
+        "----------------------------------------",
+    ]
+
+    for job in jobs:
+        push_flag = "PUSH_OK" if job["push_allowed"] else "NO_PUSH"
+        audit_flag = (
+            f"audit={job['audit_status']}" if job["audit_status"] != "clean" else ""
+        )
+        fallback_flag = "FALLBACK" if job["fallback_used"] else ""
+
+        status_line = f"  {job['job_id']}: {job['job_status']} [{push_flag}]"
+        if audit_flag:
+            status_line += f" [{audit_flag}]"
+        if fallback_flag:
+            status_line += f" [{fallback_flag}]"
+
+        lines.append(status_line)
+        lines.append(
+            f"    base={job['base_sha'][:12] if job['base_sha'] else 'N/A'}"
+        )
+        lines.append(
+            f"    result={job['result_sha'][:12] if job['result_sha'] else 'N/A'}"
+        )
+        lines.append(f"    model={job['actual_model_used'] or 'N/A'}")
+        lines.append(
+            f"    records={job['records_count']}  worktree={'yes' if job['worktree_present'] else 'no'}"
+        )
+        if job["changed_paths"]:
+            lines.append(f"    changed={', '.join(job['changed_paths'][:3])}")
+        lines.append("----------------------------------------")
+
+    lines.append("========================================")
+    return "\n".join(lines)
+
+
+def _format_jobs_json(jobs):
+    """Return JSON jobs summary."""
+    return json.dumps({"jobs": jobs, "total": len(jobs)}, indent=2)
+
+
 def _format_text(repo_id, base_sha, job_id, git_info):
     """Return a human-readable status summary string."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -164,7 +347,9 @@ def _format_text(repo_id, base_sha, job_id, git_info):
         lines.append(f"  Tags at HEAD : {', '.join(tags)}")
 
     lines.append("========================================")
-    lines.append("  Clean: " + ("No" if git_info.get("has_uncommitted_changes") else "Yes"))
+    lines.append(
+        "  Clean: " + ("No" if git_info.get("has_uncommitted_changes") else "Yes")
+    )
     lines.append("========================================")
 
     return "\n".join(lines)
@@ -190,18 +375,29 @@ def build_parser():
     )
     parser.add_argument(
         "--repo-id",
-        required=True,
+        default=None,
         help="Repository identifier.",
     )
     parser.add_argument(
         "--base-sha",
-        required=True,
+        default=None,
         help="Base commit SHA to compare against.",
     )
     parser.add_argument(
         "--job-id",
         default=None,
         help="Optional job identifier.",
+    )
+    parser.add_argument(
+        "--jobs",
+        action="store_true",
+        default=False,
+        help="List jobs overview from jobs directory.",
+    )
+    parser.add_argument(
+        "--jobs-dir",
+        default=None,
+        help="Jobs directory path (default: VIBEDEV_JOBS_DIR env or ~/vibedev/jobs).",
     )
     parser.add_argument(
         "--json",
@@ -217,6 +413,29 @@ def main(argv=None):
     """Entry point. Accepts optional argv for testing."""
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Jobs mode
+    if args.jobs:
+        jobs_dir = (
+            args.jobs_dir
+            or os.environ.get("VIBEDEV_JOBS_DIR")
+            or os.path.expanduser("~/vibedev/jobs")
+        )
+        jobs = _collect_jobs_summary(jobs_dir)
+
+        if args.output_json:
+            output = _format_jobs_json(jobs)
+        else:
+            output = _format_jobs_text(jobs)
+
+        print(output)
+        return 0
+
+    # Repo status mode (requires --repo-id and --base-sha)
+    if not args.repo_id or not args.base_sha:
+        parser.error(
+            "--repo-id and --base-sha are required for repo status mode (or use --jobs)"
+        )
 
     git_info = _git_status_summary()
 
