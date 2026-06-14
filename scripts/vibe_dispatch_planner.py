@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Dispatch Planner v1 - Next Work Order suggestions for QQ/Hermes orchestrator.
+"""Dispatch Planner v2 - Enhanced lifecycle-aware next Work Order suggestions.
 
 Usage:
     python scripts/vibe_dispatch_planner.py [--jobs-dir <dir>] [--json] [--compact]
 
 Reads Operator Snapshot and Queue Advisor output, generates actionable Work Order suggestions.
+
+Changes from v1:
+- Lifecycle-aware: handles tainted_lock, superseded, non_production, informational
+- Passes --jobs-dir to sub-scripts correctly
+- Scenario-stable output for queue_clean, blocked, failed, superseded, non-production
 
 Constraints:
     - Read-only, no IO on import, standard library only.
@@ -31,9 +36,16 @@ def _run_script(script, *args):
 
 
 def _generate_plan(snapshot, advisor):
-    """Generate dispatch plan based on current state."""
+    """Generate dispatch plan based on current state.
+    
+    Priority order:
+    1. critical: tainted locks (manual resolution required)
+    2. high: investigation failures
+    3. medium: superseded conflicts, in-progress jobs
+    4. low: ready_for_merge
+    5. info: queue_clean, non-production informational
+    """
     suggestions = []
-    priority_order = []
 
     # Extract key metrics
     locks = snapshot.get("locks", [])
@@ -43,7 +55,8 @@ def _generate_plan(snapshot, advisor):
     medium_priority = [a for a in action_items if a.get("priority") == "medium"]
     low_priority = [a for a in action_items if a.get("priority") == "low"]
     superseded = advisor.get("superseded_jobs", []) if advisor else []
-    unresolved = advisor.get("unresolved_jobs", []) if advisor else []
+    informational = advisor.get("informational_jobs", []) if advisor else []
+    blocked = advisor.get("blocked_jobs", []) if advisor else []
 
     # Rule 1: If there are blocked/tainted locks
     if locks:
@@ -65,7 +78,17 @@ def _generate_plan(snapshot, advisor):
             "work_order_template": "wo-maint-investigate-{id}",
         })
 
-    # Rule 3: If there are pending/in-progress jobs
+    # Rule 3: If there are superseded jobs (conflict risk)
+    if superseded:
+        suggestions.append({
+            "action": "resolve_superseded",
+            "priority": "medium",
+            "description": f"{len(superseded)} job(s) superseded by newer versions",
+            "details": [s["job_id"] for s in superseded],
+            "work_order_template": "wo-maint-resolve-superseded-{id}",
+        })
+
+    # Rule 4: If there are in-progress jobs
     if medium_priority:
         suggestions.append({
             "action": "continue_processing",
@@ -74,7 +97,7 @@ def _generate_plan(snapshot, advisor):
             "details": [a["job_id"] for a in medium_priority],
         })
 
-    # Rule 4: If there are ready_for_merge items
+    # Rule 5: If there are ready_for_merge items
     if low_priority:
         suggestions.append({
             "action": "process_merge_queue",
@@ -83,7 +106,16 @@ def _generate_plan(snapshot, advisor):
             "details": [a["job_id"] for a in low_priority],
         })
 
-    # Rule 5: If queue is clean
+    # Rule 6: Non-production informational (no action needed)
+    if informational:
+        suggestions.append({
+            "action": "non_production_info",
+            "priority": "info",
+            "description": f"{len(informational)} non-production job(s) (smoke/fixture/test)",
+            "details": [i["job_id"] for i in informational],
+        })
+
+    # Rule 7: If queue is clean (no high/medium/locks)
     if not high_priority and not medium_priority and not locks:
         suggestions.append({
             "action": "queue_clean",
@@ -108,7 +140,7 @@ def _generate_plan(snapshot, advisor):
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="vibe_dispatch_planner",
-        description="Dispatch Planner v1 - Next Work Order suggestions.",
+        description="Dispatch Planner v2 - lifecycle-aware next Work Order suggestions.",
     )
     parser.add_argument("--jobs-dir", default=None)
     parser.add_argument("--json", dest="output_json", action="store_true", default=False)
@@ -130,14 +162,14 @@ def main(argv=None):
     script_dir = Path(__file__).parent
 
     # Run Operator Snapshot
-    snapshot = _run_script(str(script_dir / "vibe_operator_snapshot.py"), "--json",
-                           "--jobs-dir", jobs_dir)
+    snapshot_args = ["--json", "--jobs-dir", jobs_dir]
+    snapshot = _run_script(str(script_dir / "vibe_operator_snapshot.py"), *snapshot_args)
     if not snapshot:
         snapshot = {"locks": [], "recommended_next_action": "unknown", "jobs_summary": {}}
 
     # Run Queue Advisor
-    advisor = _run_script(str(script_dir / "vibe_queue_advisor.py"), "--json",
-                          "--jobs-dir", jobs_dir)
+    advisor_args = ["--json", "--jobs-dir", jobs_dir]
+    advisor = _run_script(str(script_dir / "vibe_queue_advisor.py"), *advisor_args)
     if not advisor:
         advisor = {"action_items": [], "superseded_jobs": [], "unresolved_jobs": [],
                    "lifecycle_summary": {}, "summary": {}}
@@ -172,7 +204,7 @@ def _print_text(plan, compact):
     state = plan["current_state"]
     lines = [
         "\u2550" * 40,
-        "  \U0001f4cb Dispatch Planner",
+        "  \U0001f4cb Dispatch Planner v2",
         "\u2550" * 40,
         f"  Main: {str(state.get('main_sha', '?'))[:12]}",
         f"  Jobs: {state.get('total_jobs', '?')}",

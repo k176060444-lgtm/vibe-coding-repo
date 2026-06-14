@@ -58,6 +58,8 @@ def _get_repo_info(repo_root):
 def _run_advisor(jobs_dir, include_tainted=False, include_merged=False):
     """Run vibe_queue_advisor.py --json and parse output."""
     cmd = [sys.executable, "scripts/vibe_queue_advisor.py", "--json"]
+    if jobs_dir:
+        cmd.extend(["--jobs-dir", jobs_dir])
     if include_tainted:
         cmd.append("--include-tainted")
     if include_merged:
@@ -74,6 +76,8 @@ def _run_advisor(jobs_dir, include_tainted=False, include_merged=False):
 def _run_repo_status_jobs(jobs_dir):
     """Run vibe_repo_status.py --jobs --json for job registry."""
     cmd = [sys.executable, "scripts/vibe_repo_status.py", "--jobs", "--json"]
+    if jobs_dir:
+        cmd.extend(["--jobs-dir", jobs_dir])
     stdout, rc = _run_cmd(*cmd)
     if rc != 0:
         return None
