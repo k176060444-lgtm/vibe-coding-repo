@@ -99,7 +99,24 @@ python3 scripts/vibe_autonomous_merge.py \
 
 Queue Advisor 提供任务队列的下一步动作建议。
 
-**重要**: Queue Advisor v2 会自动检测已合入 main 的 job，避免重复建议 merge。
+**重要**: Queue Advisor v3 具备 actionability 规则，自动过滤 smoke/fixture/test/debug/legacy job，避免误报 ready_for_merge。
+
+### Actionability 规则
+
+Queue Advisor v3 的 ready_for_merge 建议需要同时满足：
+
+1. **真实 Work Order**: job_id 不匹配 smoke/fixture/test/debug/legacy/e2e 模式
+2. **审计清洁**: audit_status=clean
+3. **已通过审查**: job_status=review_passed
+4. **result_sha 存在**: 可验证代码变更
+5. **未合入 main**: result_sha 不在 main 历史中
+
+不满足上述条件的 job 会被归入：
+- **blocked_jobs**: audit_tainted job（始终计入 blocked_total）
+- **informational_jobs**: smoke/fixture/test/debug/legacy job
+- **warnings**: 缺少 work-order 或 result_sha 的 job
+
+**重要**: blocked_total 即使在默认隐藏 tainted job 时也反映真实数量。
 
 ### 使用方法
 
