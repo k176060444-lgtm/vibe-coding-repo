@@ -193,3 +193,12 @@ Same as individual Work Order stop conditions, PLUS:
 - `scripts/vibe_batch_plan.py`: Batch Queue Plan
 - `scripts/vibe_autonomous_merge.py`: Merge Wrapper
 - `scripts/vibe_merge_gate.py`: Merge Gate
+
+
+## Toolchain Freeze Reference
+
+The current toolchain state is documented in [TOOLCHAIN_FREEZE.md](TOOLCHAIN_FREEZE.md). When operating in autonomous mode:
+1. Verify smoke suite passes before any Work Order: 
+2. Use wrapper for all merges: 
+3. Check recommendation consistency: snapshot/dispatch/batch-plan must agree
+4. Respect the permanent audit_tainted lock on 
