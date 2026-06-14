@@ -411,3 +411,29 @@ Bot: { "work_order_id": "wo-fix-fix-advisor-crash-001", "type": "fix", "risk_lev
 | Risk=high/critical | Marks `requires_human_approval=true` |
 | Draft only | Never auto-executes |
 | Forbidden detection | Warns if requirement mentions dangerous ops |
+
+
+## Release Notes via QQ
+
+```
+User: /notes --compact
+Bot:
+  # Release Notes / Progress Report
+  **Main SHA**: `e4a1ac9...`
+  **Total PRs Merged**: 38
+  ## PR Summary
+  - Feature: 25
+  - Documentation: 12
+  ...
+
+User: /rn --json --limit 3
+Bot: { "current_main_sha": "...", "total_merged_prs": 3, ... }
+```
+
+### QQ Safety
+
+| Command | Read-Only | Auto-Execute |
+|---------|-----------|-------------|
+| /notes | ✅ | No |
+| /rn | ✅ | No |
+| /progress | ✅ | No |

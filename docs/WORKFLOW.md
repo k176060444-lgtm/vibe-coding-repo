@@ -525,8 +525,14 @@ Run: `python scripts/test_toolchain_smoke.py`
 Generate progress reports from git history:
 
 ```
+python scripts/vibe_command_router.py notes
+# or directly:
 python scripts/vibe_release_notes.py --json
+python scripts/vibe_command_router.py notes
+# or directly:
 python scripts/vibe_release_notes.py --compact
+python scripts/vibe_command_router.py notes
+# or directly:
 python scripts/vibe_release_notes.py --limit 10 --since <SHA>
 ```
 
