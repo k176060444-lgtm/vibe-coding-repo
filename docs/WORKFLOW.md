@@ -334,3 +334,22 @@ python3 scripts/vibe_dispatch_planner.py --compact
 | Detached commit | 在审查通过前不影响主分支，保持仓库整洁 |
 | Autonomous merge wrapper | 统一 merge 入口，防止裸 gh pr merge，保证 gate 验证 |
 | Post-merge freeze | 确保 merge 后状态可审计，锁定 job 不被篡改 |
+
+## QQ Command Routing Specification
+
+For detailed command specifications, permission boundaries, and prohibited behaviors, see:
+- **[QQ_COMMAND_ROUTING.md](QQ_COMMAND_ROUTING.md)**: Full command routing specification
+
+### Command Summary
+
+| Command | Intent | Risk Level |
+|---------|--------|------------|
+| /snapshot | Unified status snapshot | Read-only |
+| /queue | Queue analysis & lifecycle | Read-only |
+| /plan | Dispatch planning | Read-only |
+| /next | Next action recommendation | Read-only |
+| /workorder | Work Order management | Medium |
+| /review | Job review status | Read-only |
+| /merge | Wrapper merge execution | High |
+| /freeze | Post-merge freeze | Read-only |
+| /batch | Batch queue planning | Read-only |
