@@ -156,3 +156,19 @@ For detailed command specifications, permission boundaries, and prohibited behav
 - **[QQ_COMMAND_ROUTING.md](QQ_COMMAND_ROUTING.md)**: Full command routing specification
 - **[WORKFLOW.md](WORKFLOW.md)**: Workflow documentation and merge requirements
 - **[AUTONOMOUS_MERGE_GATE.md](AUTONOMOUS_MERGE_GATE.md)**: Merge gate specification
+
+## Batch Queue Plan
+
+Generate batch execution plan for multiple Work Orders:
+
+```bash
+# Generate batch execution plan (JSON)
+python3 scripts/vibe_batch_plan.py --json
+
+# Generate batch plan with limit
+python3 scripts/vibe_batch_plan.py --limit 3 --json
+
+# Generate batch plan (compact text)
+python3 scripts/vibe_batch_plan.py
+```
+
