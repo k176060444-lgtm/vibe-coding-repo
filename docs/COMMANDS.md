@@ -243,3 +243,15 @@ python3 scripts/vibe_batch_plan.py --limit 3 --json
 python3 scripts/vibe_batch_plan.py
 ```
 
+
+
+## Toolchain Freeze
+
+See [TOOLCHAIN_FREEZE.md](TOOLCHAIN_FREEZE.md) for the complete frozen toolchain state, including:
+- Stable commands and scripts
+- CLI flags reference
+- Recommendation consistency rules
+- Batch queue execution method
+- Human stop conditions
+- Known reserved items (wo-code-repo-status-001)
+- Merge policy and scope boundaries

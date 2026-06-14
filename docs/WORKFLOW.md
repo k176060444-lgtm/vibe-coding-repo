@@ -456,3 +456,14 @@ All recommendation tools must produce consistent top-level guidance:
 - Typo correction: close match suggestions for misspelled commands
 - Version info: 
 - Smoke suite:  (11 tests)
+
+
+## Toolchain Freeze (v1)
+
+The toolchain has been frozen as of baseline . See [TOOLCHAIN_FREEZE.md](TOOLCHAIN_FREEZE.md) for the complete freeze document.
+
+Key frozen items:
+- 9 scripts, all standard library, import-safe
+- 11 smoke tests, all passing
+- Recommendation consistency verified (snapshot/dispatch/batch-plan agree)
+-  permanently locked as audit_tainted
