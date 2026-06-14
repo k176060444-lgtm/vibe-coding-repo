@@ -99,7 +99,37 @@ python3 scripts/vibe_autonomous_merge.py \
 
 Queue Advisor 提供任务队列的下一步动作建议。
 
-**重要**: Queue Advisor v3 具备 actionability 规则，自动过滤 smoke/fixture/test/debug/legacy job，避免误报 ready_for_merge。
+**重要**: Queue Advisor v4 具备 result_sha recovery 能力，可从 job records、feature branch、PR merge history 中恢复缺失的 result_sha，避免已合入任务被误报为 missing result_sha。
+
+### Result SHA Recovery
+
+当 review_passed/clean 的 job 缺少 result_sha 时，v4 会按优先级尝试恢复：
+
+1. **本地文件**: manifest.json / state.json / approval-snapshot.json / run-record.json / review-record.json
+2. **Feature branch**: vibedev/{job_id} 或 vibedev/wo-{job_id} 的 HEAD
+3. **PR merge parent**: main 历史中包含 job_id 的 merge commit 的 feature parent
+
+恢复成功后：
+- 若 recovered result_sha 已在 main → 标记为 already_merged（不进入 warnings）
+- 若不在 main → 标记为 ready_for_merge（附带 result_sha_source）
+- 恢复失败 → 输出 warning: review_passed but missing result_sha
+
+### Actionability 规则
+
+Queue Advisor v4 的 ready_for_merge 建议需要同时满足：
+
+1. **真实 Work Order**: job_id 不匹配 smoke/fixture/test/debug/legacy/e2e 模式
+2. **审计清洁**: audit_status=clean
+3. **已通过审查**: job_status=review_passed
+4. **result_sha 存在**: 可验证代码变更（或已恢复）
+5. **未合入 main**: result_sha 不在 main 历史中
+
+不满足上述条件的 job 会被归入：
+- **blocked_jobs**: audit_tainted job（始终计入 blocked_total）
+- **informational_jobs**: smoke/fixture/test/debug/legacy job
+- **warnings**: 缺少 work-order 且恢复失败的 job
+- **recovered_jobs**: result_sha 已恢复的 job
+- **unresolved_jobs**: result_sha 恢复失败的 job
 
 ### Actionability 规则
 
