@@ -73,6 +73,13 @@ git merge-base --is-ancestor <result_sha> origin/main && echo "IN_MAIN" || echo 
 9. Run wrapper merge (see below)
 10. Post-merge freeze (see below)
 
+## Merge Gate (Pre-Merge Verification)
+
+```bash
+# Dry-run gate check
+python3 scripts/vibe_merge_gate.py   --repo k176060444-lgtm/vibe-coding-repo   --pr <N>   --expected-base-sha <MAIN_SHA>   --expected-head-sha <HEAD_SHA>   --allowed-path <path1> --allowed-path <path2>   --job-id <WO_ID>   --json --dry-run
+```
+
 ## Wrapper Merge (Must Use — No Bare gh pr merge!)
 
 ```bash
