@@ -4,6 +4,21 @@
 
 Use the command router for all operations:
 
+### Short Aliases
+
+| Alias | Command | Description |
+|-------|---------|-------------|
+| `s` | snapshot | Operator Snapshot |
+| `a` | advisor | Queue Advisor |
+| `d` | dispatch | Dispatch Planner |
+| `b` | batch-plan | Batch Queue Plan |
+| `h` | health | Health Check |
+| `sm` | smoke | Toolchain Smoke Suite |
+| `?` | help | Show help |
+| `v` | version | Show version |
+
+**Typo correction**: If you type a misspelled command, the router suggests the closest match (e.g., `snapsho` → "Did you mean 'snapshot'?").
+
 ```bash
 # Show help
 python3 scripts/vibe_command_router.py help

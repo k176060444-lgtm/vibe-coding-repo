@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Command Router v1 - Unified CLI entry point for QQ/Hermes orchestrator.
+"""Command Router v2 - Enhanced unified CLI entry point for QQ/Hermes orchestrator.
 
 Usage:
     python scripts/vibe_command_router.py <command> [options]
@@ -10,7 +10,13 @@ Commands:
     dispatch    - Dispatch Planner (next action suggestion)
     batch-plan  - Batch Queue Plan (execution plan)
     health      - Health Check (toolchain verification)
+    smoke       - Toolchain Smoke Suite
     help        - Show this help message
+    version     - Show version
+
+Short aliases:
+    s → snapshot, a → advisor, d → dispatch, b → batch-plan,
+    h → health, sm → smoke, ? → help, v → version
 
 Constraints:
     - Read-only, no IO on import, standard library only.
@@ -18,12 +24,14 @@ Constraints:
 """
 
 import argparse
+import difflib
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+VERSION = "2.0.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -32,6 +40,19 @@ COMMAND_SCRIPTS = {
     "dispatch": "vibe_dispatch_planner.py",
     "batch-plan": "vibe_batch_plan.py",
     "health": "vibe_health_check.py",
+    "smoke": "test_toolchain_smoke.py",
+}
+
+# Short aliases
+ALIASES = {
+    "s": "snapshot",
+    "a": "advisor",
+    "d": "dispatch",
+    "b": "batch-plan",
+    "h": "health",
+    "sm": "smoke",
+    "?": "help",
+    "v": "version",
 }
 
 # Command descriptions
@@ -41,7 +62,19 @@ COMMAND_DESCRIPTIONS = {
     "dispatch": "Dispatch Planner - next Work Order suggestions",
     "batch-plan": "Batch Queue Plan - execution plan for multiple Work Orders",
     "health": "Health Check - toolchain verification",
+    "smoke": "Toolchain Smoke Suite - verify all tools work",
     "help": "Show this help message",
+    "version": "Show version",
+}
+
+# Per-command example flags for error suggestions
+COMMAND_FLAGS = {
+    "snapshot": ["--compact", "--json", "--include-merged", "--include-tainted", "--jobs-dir"],
+    "advisor": ["--json", "--include-tainted", "--include-merged", "--jobs-dir"],
+    "dispatch": ["--json", "--compact", "--jobs-dir"],
+    "batch-plan": ["--json", "--limit", "--jobs-dir"],
+    "health": ["--json", "--jobs-dir"],
+    "smoke": ["--json", "--jobs-dir"],
 }
 
 
@@ -52,62 +85,87 @@ def _run_script(script_path, args):
         result = subprocess.run(cmd, timeout=60)
         return result.returncode
     except subprocess.TimeoutExpired:
-        print(f"ERROR: Script timed out: {script_path}", file=sys.stderr)
+        print("ERROR: Script timed out: %s" % script_path, file=sys.stderr)
         return 1
     except (OSError, FileNotFoundError) as e:
-        print(f"ERROR: Failed to run script: {script_path}: {e}", file=sys.stderr)
+        print("ERROR: Failed to run script: %s: %s" % (script_path, e), file=sys.stderr)
         return 1
+
+
+def _resolve_command(raw):
+    """Resolve a command name, checking aliases and close matches."""
+    # Exact match
+    if raw in COMMAND_SCRIPTS or raw in ("help", "version"):
+        return raw
+
+    # Alias match
+    if raw in ALIASES:
+        return ALIASES[raw]
+
+    # Close match suggestion
+    all_names = list(COMMAND_SCRIPTS.keys()) + list(ALIASES.keys()) + ["help", "version"]
+    matches = difflib.get_close_matches(raw, all_names, n=1, cutoff=0.6)
+    if matches:
+        print("ERROR: Unknown command '%s'. Did you mean '%s'?" % (raw, matches[0]), file=sys.stderr)
+    else:
+        print("ERROR: Unknown command '%s'" % raw, file=sys.stderr)
+        print("Available: %s" % ", ".join(sorted(COMMAND_SCRIPTS.keys())), file=sys.stderr)
+        print("Aliases:   %s" % ", ".join("%s->%s" % (k, v) for k, v in sorted(ALIASES.items())), file=sys.stderr)
+    return None
 
 
 def _show_help():
     """Show help message."""
-    print("vibe_command_router - Unified CLI entry point for QQ/Hermes orchestrator")
-    print()
-    print("Usage:")
-    print("  python scripts/vibe_command_router.py <command> [options]")
-    print()
-    print("Commands:")
+    lines = [
+        "vibe_command_router v%s - Unified CLI entry point" % VERSION,
+        "",
+        "Usage:",
+        "  python scripts/vibe_command_router.py <command> [options]",
+        "",
+        "Commands:",
+    ]
     for cmd, desc in COMMAND_DESCRIPTIONS.items():
-        print(f"  {cmd:12s} - {desc}")
-    print()
-    print("Examples:")
-    print("  python scripts/vibe_command_router.py snapshot --compact")
-    print("  python scripts/vibe_command_router.py advisor --json")
-    print("  python scripts/vibe_command_router.py dispatch --compact")
-    print("  python scripts/vibe_command_router.py batch-plan --json --limit 3")
-    print("  python scripts/vibe_command_router.py health")
-    print()
-    print("For command-specific help, use:")
-    print("  python scripts/vibe_command_router.py <command> --help")
+        lines.append("  %-12s %s" % (cmd, desc))
+    lines.extend([
+        "",
+        "Aliases:",
+        "  s=snapshot  a=advisor  d=dispatch  b=batch-plan",
+        "  h=health    sm=smoke   ?=help      v=version",
+        "",
+        "Examples:",
+        "  vibe_command_router snapshot --compact",
+        "  vibe_command_router s --json              # same as snapshot --json",
+        "  vibe_command_router advisor --json",
+        "  vibe_command_router dispatch --compact",
+        "  vibe_command_router batch-plan --json --limit 3",
+        "  vibe_command_router health",
+        "  vibe_command_router smoke",
+        "",
+        "For command-specific help:",
+        "  vibe_command_router <command> --help",
+    ])
+    print("\n".join(lines))
+
+
+def _show_version():
+    """Show version."""
+    print("vibe_command_router %s" % VERSION)
+    print("Scripts: %d registered" % len(COMMAND_SCRIPTS))
+    print("Aliases: %d defined" % len(ALIASES))
 
 
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="vibe_command_router",
-        description="Command Router v1 - Unified CLI entry point for QQ/Hermes orchestrator.",
+        description="Command Router v2 - Enhanced unified CLI for QQ/Hermes orchestrator.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Commands:
-  snapshot    - Operator Snapshot (compact/full JSON)
-  advisor     - Queue Advisor (lifecycle analysis)
-  dispatch    - Dispatch Planner (next action suggestion)
-  batch-plan  - Batch Queue Plan (execution plan)
-  health      - Health Check (toolchain verification)
-  help        - Show this help message
-
-Examples:
-  vibe_command_router snapshot --compact
-  vibe_command_router advisor --json
-  vibe_command_router dispatch --compact
-  vibe_command_router batch-plan --json --limit 3
-  vibe_command_router health
-        """,
+        epilog="Aliases: s=snapshot a=advisor d=dispatch b=batch-plan h=health sm=smoke ?=help v=version",
     )
     parser.add_argument(
         "command",
         nargs="?",
         default="help",
-        help="Command to execute (default: help)",
+        help="Command to execute (default: help). Supports aliases.",
     )
     parser.add_argument(
         "args",
@@ -121,18 +179,30 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    command = args.command
+    raw_command = args.command
 
-    # Handle help command
-    if command == "help" or command == "--help" or command == "-h":
+    # Handle help
+    if raw_command in ("help", "--help", "-h", "?"):
         _show_help()
         return 0
 
-    # Check if command is valid
-    if command not in COMMAND_SCRIPTS:
-        print(f"ERROR: Unknown command: {command}", file=sys.stderr)
-        print(f"Available commands: {', '.join(COMMAND_SCRIPTS.keys())}", file=sys.stderr)
+    # Handle version
+    if raw_command in ("version", "--version", "-V", "v"):
+        _show_version()
+        return 0
+
+    # Resolve command (alias + close match)
+    command = _resolve_command(raw_command)
+    if command is None:
         return 1
+
+    # Handle help/version after alias resolution
+    if command == "help":
+        _show_help()
+        return 0
+    if command == "version":
+        _show_version()
+        return 0
 
     # Get script path
     script_name = COMMAND_SCRIPTS[command]
@@ -141,7 +211,7 @@ def main(argv=None):
 
     # Check if script exists
     if not script_path.exists():
-        print(f"ERROR: Script not found: {script_path}", file=sys.stderr)
+        print("ERROR: Script not found: %s" % script_path, file=sys.stderr)
         return 1
 
     # Run the script with remaining arguments

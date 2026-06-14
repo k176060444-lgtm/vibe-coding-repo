@@ -2,7 +2,18 @@
 
 ## Unified CLI Entry Point
 
-All commands are accessible via the command router:
+All commands are accessible via the command router. Short aliases are supported for faster typing:
+
+| QQ Alias | Full Command | Example |
+|----------|-------------|---------|
+| `/s` | `/snapshot` | `/s --compact` |
+| `/a` | `/advisor` | `/a --json` |
+| `/d` | `/dispatch` | `/d --compact` |
+| `/b` | `/batch-plan` | `/b --json --limit 3` |
+| `/h` | `/health` | `/h` |
+| `/sm` | `/smoke` | `/sm` |
+
+Typo correction is enabled: misspelled commands get a "Did you mean?" suggestion.
 
 ```bash
 python3 scripts/vibe_command_router.py <command> [options]
