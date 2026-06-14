@@ -4,6 +4,8 @@
 Usage:
     python scripts/vibe_repo_status.py --repo-id <id> --base-sha <sha> [--job-id <id>] [--json]
     python scripts/vibe_repo_status.py --jobs [--jobs-dir <dir>] [--json]
+    python scripts/vibe_repo_status.py --jobs-summary [--jobs-dir <dir>] [--json]
+    python scripts/vibe_repo_status.py --jobs [--status <val>] [--audit-status <val>] [--limit <N>] [--sort <field>] [--json]
 
 Constraints:
     - No network access.
@@ -17,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -246,8 +249,91 @@ def _collect_jobs_summary(jobs_dir):
     return jobs
 
 
-def _format_jobs_text(jobs):
+def _filter_jobs(jobs, status=None, audit_status=None):
+    """Filter jobs by status and/or audit_status."""
+    filtered = jobs
+    if status:
+        filtered = [j for j in filtered if j["job_status"] == status]
+    if audit_status:
+        filtered = [j for j in filtered if j["audit_status"] == audit_status]
+    return filtered
+
+
+def _sort_jobs(jobs, sort_field="job_id"):
+    """Sort jobs by field."""
+    if sort_field == "job_id":
+        return sorted(jobs, key=lambda j: j["job_id"])
+    elif sort_field == "job_status":
+        return sorted(jobs, key=lambda j: (j["job_status"], j["job_id"]))
+    elif sort_field == "audit_status":
+        return sorted(jobs, key=lambda j: (j["audit_status"], j["job_id"]))
+    else:
+        return jobs
+
+
+def _compute_summary(jobs):
+    """Compute summary statistics for jobs."""
+    status_counts = Counter(j["job_status"] for j in jobs)
+    audit_counts = Counter(j["audit_status"] for j in jobs)
+    push_counts = Counter(j["push_allowed"] for j in jobs)
+
+    return {
+        "total": len(jobs),
+        "by_status": dict(status_counts),
+        "by_audit_status": dict(audit_counts),
+        "by_push_allowed": {
+            "true": push_counts.get(True, 0),
+            "false": push_counts.get(False, 0),
+        },
+        "audit_tainted_count": audit_counts.get("audit_tainted", 0),
+    }
+
+
+def _format_jobs_summary_text(summary):
     """Return human-readable jobs summary."""
+    lines = [
+        "========================================",
+        "  Vibe Coding Job Registry Summary",
+        "========================================",
+        f"  Total Jobs: {summary['total']}",
+        "----------------------------------------",
+    ]
+
+    # By status
+    lines.append("  By Job Status:")
+    for status, count in sorted(summary["by_status"].items()):
+        lines.append(f"    {status}: {count}")
+
+    lines.append("----------------------------------------")
+
+    # By audit status
+    lines.append("  By Audit Status:")
+    for audit, count in sorted(summary["by_audit_status"].items()):
+        marker = " ⚠️" if audit == "audit_tainted" else ""
+        lines.append(f"    {audit}: {count}{marker}")
+
+    lines.append("----------------------------------------")
+
+    # By push allowed
+    lines.append("  By Push Allowed:")
+    lines.append(f"    true: {summary['by_push_allowed']['true']}")
+    lines.append(f"    false: {summary['by_push_allowed']['false']}")
+
+    if summary["audit_tainted_count"] > 0:
+        lines.append("----------------------------------------")
+        lines.append(f"  ⚠️  Audit Tainted: {summary['audit_tainted_count']} job(s)")
+
+    lines.append("========================================")
+    return "\n".join(lines)
+
+
+def _format_jobs_summary_json(summary):
+    """Return JSON jobs summary."""
+    return json.dumps({"summary": summary}, indent=2)
+
+
+def _format_jobs_text(jobs):
+    """Return human-readable jobs list."""
     if not jobs:
         return "No jobs found."
 
@@ -292,7 +378,7 @@ def _format_jobs_text(jobs):
 
 
 def _format_jobs_json(jobs):
-    """Return JSON jobs summary."""
+    """Return JSON jobs list."""
     return json.dumps({"jobs": jobs, "total": len(jobs)}, indent=2)
 
 
@@ -395,9 +481,37 @@ def build_parser():
         help="List jobs overview from jobs directory.",
     )
     parser.add_argument(
+        "--jobs-summary",
+        action="store_true",
+        default=False,
+        help="Show jobs summary statistics grouped by status/audit/push.",
+    )
+    parser.add_argument(
         "--jobs-dir",
         default=None,
         help="Jobs directory path (default: VIBEDEV_JOBS_DIR env or ~/vibedev/jobs).",
+    )
+    parser.add_argument(
+        "--status",
+        default=None,
+        help="Filter jobs by job_status value.",
+    )
+    parser.add_argument(
+        "--audit-status",
+        default=None,
+        help="Filter jobs by audit_status value.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Limit number of jobs displayed.",
+    )
+    parser.add_argument(
+        "--sort",
+        default="job_id",
+        choices=["job_id", "job_status", "audit_status"],
+        help="Sort jobs by field (default: job_id).",
     )
     parser.add_argument(
         "--json",
@@ -414,14 +528,39 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # Jobs mode
-    if args.jobs:
-        jobs_dir = (
-            args.jobs_dir
-            or os.environ.get("VIBEDEV_JOBS_DIR")
-            or os.path.expanduser("~/vibedev/jobs")
-        )
+    # Determine jobs directory
+    jobs_dir = (
+        args.jobs_dir
+        or os.environ.get("VIBEDEV_JOBS_DIR")
+        or os.path.expanduser("~/vibedev/jobs")
+    )
+
+    # Jobs summary mode
+    if args.jobs_summary:
         jobs = _collect_jobs_summary(jobs_dir)
+        summary = _compute_summary(jobs)
+
+        if args.output_json:
+            output = _format_jobs_summary_json(summary)
+        else:
+            output = _format_jobs_summary_text(summary)
+
+        print(output)
+        return 0
+
+    # Jobs list mode
+    if args.jobs:
+        jobs = _collect_jobs_summary(jobs_dir)
+
+        # Apply filters
+        jobs = _filter_jobs(jobs, status=args.status, audit_status=args.audit_status)
+
+        # Apply sort
+        jobs = _sort_jobs(jobs, sort_field=args.sort)
+
+        # Apply limit
+        if args.limit is not None:
+            jobs = jobs[: args.limit]
 
         if args.output_json:
             output = _format_jobs_json(jobs)
@@ -434,7 +573,7 @@ def main(argv=None):
     # Repo status mode (requires --repo-id and --base-sha)
     if not args.repo_id or not args.base_sha:
         parser.error(
-            "--repo-id and --base-sha are required for repo status mode (or use --jobs)"
+            "--repo-id and --base-sha are required for repo status mode (or use --jobs/--jobs-summary)"
         )
 
     git_info = _git_status_summary()
