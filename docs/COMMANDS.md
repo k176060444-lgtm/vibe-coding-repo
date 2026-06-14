@@ -149,3 +149,10 @@ git push origin --delete <branch_name>
 - **NEVER** deploy/tag/release without explicit authorization
 - **ALWAYS** verify `origin/main` before starting a Work Order
 - **ALWAYS** run post-merge freeze after wrapper merge
+
+## QQ Command Routing
+
+For detailed command specifications, permission boundaries, and prohibited behaviors, see:
+- **[QQ_COMMAND_ROUTING.md](QQ_COMMAND_ROUTING.md)**: Full command routing specification
+- **[WORKFLOW.md](WORKFLOW.md)**: Workflow documentation and merge requirements
+- **[AUTONOMOUS_MERGE_GATE.md](AUTONOMOUS_MERGE_GATE.md)**: Merge gate specification
