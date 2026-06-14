@@ -365,3 +365,32 @@ python3 scripts/vibe_batch_plan.py --limit 3 --json
 ```
 
 Output: task_order, risk_level, allowed_paths, stop_conditions, requires_human_approval, expected_reports.
+
+### E2E Test
+
+Run the E2E test to verify the full chain:
+
+=== Batch Plan E2E Test ===
+Script dir: /home/vibeworker/vibedev/worktrees/wo-code-batch-plan-e2e-001/scripts
+Jobs dir: /home/vibeworker/vibedev/jobs
+Fixture dir: /tmp/batch-plan-e2e-5xgnnl39
+
+Created 6 fixture jobs
+
+  PASS: real jobs (queue_clean, 0 tasks)
+  PASS: fixture jobs (4 tasks, high risk)
+  PASS: --limit 2 (2 tasks)
+  PASS: import safety (no IO)
+  PASS: stop conditions (7 conditions)
+  PASS: expected reports (6 reports)
+
+=== ALL TESTS PASSED ===
+
+Tests:
+1. Real jobs: queue_clean scenario (0 tasks)
+2. Fixture jobs: mixed scenarios (4 tasks, high risk)
+3. --limit flag: limits task count
+4. Import safety: no IO on import
+5. Risk classification: correct risk levels
+6. Stop conditions: all 7 conditions present
+7. Expected reports: all 6 reports present
