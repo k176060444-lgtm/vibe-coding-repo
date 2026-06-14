@@ -1,5 +1,35 @@
 # Agent Command Cheatsheet
 
+## Unified CLI Entry Point
+
+Use the command router for all operations:
+
+```bash
+# Show help
+python3 scripts/vibe_command_router.py help
+
+# Operator Snapshot
+python3 scripts/vibe_command_router.py snapshot --compact
+python3 scripts/vibe_command_router.py snapshot --json
+
+# Queue Advisor
+python3 scripts/vibe_command_router.py advisor --json
+python3 scripts/vibe_command_router.py advisor --include-tainted --include-merged --json
+
+# Dispatch Planner
+python3 scripts/vibe_command_router.py dispatch --compact
+python3 scripts/vibe_command_router.py dispatch --json
+
+# Batch Queue Plan
+python3 scripts/vibe_command_router.py batch-plan --json
+python3 scripts/vibe_command_router.py batch-plan --limit 3 --json
+
+# Health Check
+python3 scripts/vibe_command_router.py health
+```
+
+# Agent Command Cheatsheet (Legacy)
+
 Quick reference for QQ / Hermes orchestrator commands on Debian vibeworker.
 
 ## Status & Monitoring
