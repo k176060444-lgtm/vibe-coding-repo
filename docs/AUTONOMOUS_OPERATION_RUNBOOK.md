@@ -231,3 +231,14 @@ The current toolchain state is documented in [TOOLCHAIN_FREEZE.md](TOOLCHAIN_FRE
 | `queue_clean` | `/d` | Proceed with next planned Work Order |
 | All PASS | `/h`, `/sm` | Safe to execute |
 | `tasks=0` | `/b` | Queue empty, plan new work |
+
+
+## Operational Readiness
+
+For the full Operational Readiness Report, see [OPERATIONAL_READINESS.md](OPERATIONAL_READINESS.md).
+
+The system is operationally ready for:
+- ✅ Autonomous queue monitoring and lifecycle classification
+- ✅ Autonomous documentation and toolchain maintenance
+- ⚠️ Gated code implementation (wrapper approval required)
+- 🛑 Human required for secrets/CI/deploy/force operations
