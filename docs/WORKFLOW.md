@@ -448,3 +448,11 @@ All recommendation tools must produce consistent top-level guidance:
 **Tools**: `vibe_operator_snapshot.py`, `vibe_dispatch_planner.py`, `vibe_batch_plan.py`
 
 **Consistency check**: `test_toolchain_smoke.py` includes `recommendation_consistency` test that verifies all three tools agree on the top-level recommendation.
+
+
+## Command Router v2 (Enhanced UX)
+
+- Short aliases: s=snapshot, a=advisor, d=dispatch, b=batch-plan, h=health, sm=smoke, ?=help, v=version
+- Typo correction: close match suggestions for misspelled commands
+- Version info: 
+- Smoke suite:  (11 tests)
