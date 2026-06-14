@@ -217,6 +217,46 @@ def _test_batch_plan(script_dir, jobs_dir):
         return {"passed": False, "message": "invalid JSON"}
 
 
+
+def _test_recommendation_consistency(script_dir, jobs_dir):
+    """Test that snapshot, dispatch, and batch-plan recommendations are consistent."""
+    import json as _json
+    
+    # Run snapshot
+    rc1, out1, _ = _run_script(script_dir / "vibe_operator_snapshot.py", ["--json", "--jobs-dir", jobs_dir])
+    # Run dispatch
+    rc2, out2, _ = _run_script(script_dir / "vibe_dispatch_planner.py", ["--json", "--jobs-dir", jobs_dir])
+    # Run batch plan
+    rc3, out3, _ = _run_script(script_dir / "vibe_batch_plan.py", ["--json", "--jobs-dir", jobs_dir])
+    
+    if rc1 != 0 or rc2 != 0 or rc3 != 0:
+        return {"passed": False, "message": "one or more scripts failed to run"}
+    
+    try:
+        snap = _json.loads(out1)
+        disp = _json.loads(out2)
+        batch = _json.loads(out3)
+    except _json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from one or more scripts"}
+    
+    snap_action = snap.get("recommended_next_action", "")
+    disp_action = disp.get("recommended_action", "")
+    batch_tasks = batch.get("task_count", -1)
+    
+    # Consistency rule: if snapshot says queue_clean, dispatch should too
+    if "queue_clean" in snap_action and disp_action != "queue_clean":
+        return {"passed": False, "message": "inconsistent: snapshot=%s dispatch=%s" % (snap_action, disp_action)}
+    
+    # Consistency rule: if batch has 0 tasks and dispatch says queue_clean, all agree
+    if batch_tasks == 0 and disp_action == "queue_clean" and "queue_clean" in snap_action:
+        return {"passed": True, "message": "consistent: all report queue_clean/0-tasks"}
+    
+    # If batch has tasks, dispatch should not be queue_clean
+    if batch_tasks > 0 and disp_action == "queue_clean":
+        return {"passed": False, "message": "inconsistent: batch=%d tasks but dispatch=queue_clean" % batch_tasks}
+    
+    return {"passed": True, "message": "snapshot=%s dispatch=%s batch=%d" % (snap_action, disp_action, batch_tasks)}
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -255,6 +295,9 @@ def run_tests(jobs_dir=None):
     
     # Test 10: Batch Plan
     tests.append(_run_test("batch_plan", lambda: _test_batch_plan(script_dir, jobs_dir)))
+    
+    # Test 11: Recommendation Consistency
+    tests.append(_run_test("recommendation_consistency", lambda: _test_recommendation_consistency(script_dir, jobs_dir)))
     
     return tests
 

@@ -78,12 +78,28 @@ def _generate_plan(snapshot, advisor):
             "work_order_template": "wo-maint-investigate-{id}",
         })
 
-    # Rule 3: If there are superseded jobs (conflict risk)
+    # Rule 7: If queue is clean (no high/medium/locks)
+    # MOVED BEFORE superseded to ensure queue_clean is top when queue is truly clean
+    if not high_priority and not medium_priority and not locks:
+        suggestions.append({
+            "action": "queue_clean",
+            "priority": "info",
+            "description": "Queue is clean. Consider next phase:",
+            "details": [
+                "documentation: solidify workflow docs, runbooks, cheatsheets",
+                "feature_work: start new feature Work Orders",
+                "maintenance: archive old records, clean up jobs directory",
+                "planning: define next cluster capability milestones",
+            ],
+            "work_order_template": "wo-{type}-{name}-001",
+        })
+
+    # Rule 3: Superseded jobs (informational only - already resolved)
     if superseded:
         suggestions.append({
             "action": "resolve_superseded",
-            "priority": "medium",
-            "description": f"{len(superseded)} job(s) superseded by newer versions",
+            "priority": "info",
+            "description": f"{len(superseded)} job(s) superseded by newer versions (no action needed)",
             "details": [s["job_id"] for s in superseded],
             "work_order_template": "wo-maint-resolve-superseded-{id}",
         })
@@ -113,21 +129,6 @@ def _generate_plan(snapshot, advisor):
             "priority": "info",
             "description": f"{len(informational)} non-production job(s) (smoke/fixture/test)",
             "details": [i["job_id"] for i in informational],
-        })
-
-    # Rule 7: If queue is clean (no high/medium/locks)
-    if not high_priority and not medium_priority and not locks:
-        suggestions.append({
-            "action": "queue_clean",
-            "priority": "info",
-            "description": "Queue is clean. Consider next phase:",
-            "details": [
-                "documentation: solidify workflow docs, runbooks, cheatsheets",
-                "feature_work: start new feature Work Orders",
-                "maintenance: archive old records, clean up jobs directory",
-                "planning: define next cluster capability milestones",
-            ],
-            "work_order_template": "wo-{type}-{name}-001",
         })
 
     # Sort by priority
