@@ -374,6 +374,97 @@ def _test_intake_router(script_dir):
     return {"passed": True, "message": "router intake works"}
 
 
+
+def _test_release_notes_basic(script_dir):
+    """Test release notes basic markdown output."""
+    path = script_dir / "vibe_release_notes.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["--compact"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    if "Release Notes" not in stdout:
+        return {"passed": False, "message": "missing title"}
+
+    if "Main SHA" not in stdout:
+        return {"passed": False, "message": "missing main SHA"}
+
+    return {"passed": True, "message": "compact report generated"}
+
+
+def _test_release_notes_json(script_dir):
+    """Test release notes JSON output."""
+    import json as _json
+    path = script_dir / "vibe_release_notes.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["--json", "--limit", "5"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    try:
+        d = _json.loads(stdout)
+    except _json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    required = ["current_main_sha", "total_merged_prs", "merged_prs",
+                 "pr_summary", "capability_changes", "safety_status",
+                 "recommended_next_phase"]
+    missing = [k for k in required if k not in d]
+    if missing:
+        return {"passed": False, "message": "missing: %s" % ", ".join(missing)}
+
+    return {"passed": True, "message": "prs=%d caps=%d" % (d["total_merged_prs"], len(d["capability_changes"]))}
+
+
+def _test_release_notes_safety(script_dir):
+    """Test release notes safety status includes audit lock."""
+    import json as _json
+    path = script_dir / "vibe_release_notes.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    try:
+        d = _json.loads(stdout)
+    except _json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    lock = d.get("safety_status", {}).get("audit_tainted_lock")
+    if not lock:
+        return {"passed": False, "message": "missing audit_tainted_lock"}
+
+    if lock.get("audit_status") != "audit_tainted":
+        return {"passed": False, "message": "wrong audit_status: %s" % lock.get("audit_status")}
+
+    if lock.get("push_allowed") is not False:
+        return {"passed": False, "message": "push_allowed should be false"}
+
+    return {"passed": True, "message": "audit_tainted lock visible"}
+
+
+def _test_release_notes_router(script_dir):
+    """Test release notes via command router."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["notes", "--compact"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    if "Release Notes" not in stdout:
+        return {"passed": False, "message": "missing output"}
+
+    return {"passed": True, "message": "router notes works"}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -430,6 +521,18 @@ def run_tests(jobs_dir=None):
     
     # Test 16: Intake - router integration
     tests.append(_run_test("intake_router", lambda: _test_intake_router(script_dir)))
+    
+    # Test 17: Release Notes - basic
+    tests.append(_run_test("release_notes_basic", lambda: _test_release_notes_basic(script_dir)))
+    
+    # Test 18: Release Notes - JSON
+    tests.append(_run_test("release_notes_json", lambda: _test_release_notes_json(script_dir)))
+    
+    # Test 19: Release Notes - safety
+    tests.append(_run_test("release_notes_safety", lambda: _test_release_notes_safety(script_dir)))
+    
+    # Test 20: Release Notes - router
+    tests.append(_run_test("release_notes_router", lambda: _test_release_notes_router(script_dir)))
     
     return tests
 

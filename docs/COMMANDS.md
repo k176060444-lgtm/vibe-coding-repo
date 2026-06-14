@@ -514,6 +514,10 @@ The smoke suite now covers 16 tests:
 - 14: Intake - risk classification (critical/high/medium/low)
 - 15: Intake - type detection (code/doc/test/fix/maint)
 - 16: Intake - router integration
+- 17: Release Notes - basic compact
+- 18: Release Notes - JSON output
+- 19: Release Notes - safety/audit lock
+- 20: Release Notes - router integration
 
 
 ## Release Notes / Progress Report
