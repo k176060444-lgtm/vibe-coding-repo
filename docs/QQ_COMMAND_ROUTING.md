@@ -1,5 +1,23 @@
 # QQ Command Routing Specification
 
+## Unified CLI Entry Point
+
+All commands are accessible via the command router:
+
+```bash
+python3 scripts/vibe_command_router.py <command> [options]
+```
+
+Commands:
+- `snapshot` - Operator Snapshot
+- `advisor` - Queue Advisor
+- `dispatch` - Dispatch Planner
+- `batch-plan` - Batch Queue Plan
+- `health` - Health Check
+- `help` - Show help
+
+# QQ Command Routing Specification (Legacy)
+
 Defines command entry points for QQ / Hermes orchestrator. Each command maps to a specific script or workflow step.
 
 ## Command Overview
