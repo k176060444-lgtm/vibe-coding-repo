@@ -25,6 +25,16 @@ python3 scripts/vibe_command_router.py batch-plan --json
 python3 scripts/vibe_command_router.py batch-plan --limit 3 --json
 
 # Health Check
+
+```bash
+# Run health check (compact)
+python3 scripts/vibe_health_check.py
+
+# Run health check (JSON)
+python3 scripts/vibe_health_check.py --json
+```
+
+# Health Check
 python3 scripts/vibe_command_router.py health
 ```
 
