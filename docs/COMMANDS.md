@@ -384,3 +384,28 @@ $ python scripts/vibe_command_router.py b --json --limit 3
 | `merge` | ❌ | Executes merge | Wrapper gate |
 
 **All commands except `merge` are read-only.** The `merge` command is the only one with side effects and requires wrapper gate approval.
+
+
+## Feature Work Order Template
+
+See [WORK_ORDER_TEMPLATE.md](WORK_ORDER_TEMPLATE.md) for the template used to convert user requirements into executable Work Orders.
+
+### Quick Reference
+
+| Field | Description |
+|-------|-------------|
+| `work_order_id` | `wo-{type}-{name}-{seq}` |
+| `scope.allowed_paths` | Files that can be modified |
+| `acceptance_criteria` | Testable requirements |
+| `review_criteria` | Quality gates |
+| `stop_conditions` | When to halt execution |
+
+### Type Prefixes
+
+| Prefix | Use Case |
+|--------|----------|
+| `wo-code-` | Code changes |
+| `wo-doc-` | Documentation |
+| `wo-maint-` | Maintenance |
+| `wo-test-` | Tests only |
+| `wo-fix-` | Bug fixes |
