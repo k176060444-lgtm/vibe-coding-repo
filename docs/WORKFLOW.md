@@ -486,6 +486,8 @@ Key features:
 Natural language requirements can be converted to structured Work Order drafts:
 
 ```
+python scripts/vibe_command_router.py intake
+# or directly:
 python scripts/vibe_workorder_intake.py 'your requirement here'
 ```
 
