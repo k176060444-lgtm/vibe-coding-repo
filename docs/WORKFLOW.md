@@ -316,6 +316,10 @@ python3 scripts/vibe_dispatch_planner.py --compact
 - `vibe_queue_advisor.py`: 队列建议详情
 - `vibe_dispatch_planner.py`: 下一步 Work Order 建议
 
+## 命令速查
+
+详见 [COMMANDS.md](COMMANDS.md)，覆盖 snapshot、queue advisor、failed triage、创建 Work Order、wrapper merge、freeze、只读核验、维护清理。
+
 ## 关键设计决策
 
 | 决策 | 原因 |
