@@ -409,3 +409,69 @@ See [WORK_ORDER_TEMPLATE.md](WORK_ORDER_TEMPLATE.md) for the template used to co
 | `wo-maint-` | Maintenance |
 | `wo-test-` | Tests only |
 | `wo-fix-` | Bug fixes |
+
+
+## Work Order Intake
+
+Convert natural language requirements into structured Work Order drafts.
+
+```
+$ python scripts/vibe_workorder_intake.py 'Add --summary flag to snapshot'
+# Work Order Draft
+
+**ID**: `wo-code-add-summary-001`
+**Title**: Add --summary flag to snapshot
+**Type**: code
+**Risk**: medium
+**Human Approval**: Not required
+
+## Goal
+Add --summary flag to snapshot
+
+## Allowed Paths
+- `scripts/`
+
+## Acceptance Tests
+1. python -m py_compile passes on all modified Python files
+2. --help flag works and shows expected options
+3. Smoke suite passes (all existing tests)
+...
+
+**⚠️ DRAFT ONLY — This is a proposal, not an executed task.**
+```
+
+### JSON Output
+
+```
+$ python scripts/vibe_workorder_intake.py 'Update workflow docs' --type doc --json
+{
+  "work_order_id": "wo-doc-update-workflow-001",
+  "title": "Update workflow docs",
+  "type": "doc",
+  "risk_level": "low",
+  "requires_human_approval": false,
+  "allowed_paths": ["docs/"],
+  "acceptance_tests": [...],
+  "draft_only": true,
+  "execution_requires_explicit_approval": true
+}
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output in JSON format |
+| `--type TYPE` | Override auto-detected type (code/doc/test/fix/maint) |
+| `--priority PRIORITY` | Override risk level (low/medium/high/critical) |
+| `--file PATH` | Read requirement from file |
+| `--output PATH` | Write draft to file |
+
+### Risk Classification
+
+| Level | Keywords | Human Approval |
+|-------|----------|----------------|
+| critical | security, credential, secret, deploy | Required |
+| high | refactor, breaking change, api change | Required |
+| medium | new script, new feature, modify | Not required |
+| low | documentation, typo, rename | Not required |
