@@ -431,3 +431,20 @@ Tests:
 5. Risk classification: correct risk levels
 6. Stop conditions: all 7 conditions present
 7. Expected reports: all 6 reports present
+## Recommendation Consistency Rule (v2)
+
+All recommendation tools must produce consistent top-level guidance:
+
+| Scenario | Operator Snapshot | Dispatch Planner | Batch Plan |
+|----------|------------------|------------------|------------|
+| Queue clean | queue_clean | queue_clean | tasks=0, risk=low |
+| Tainted lock | resolve_blocked | hold_due_to_blocker | risk=critical |
+| Failed jobs | investigate_failures | investigate_failures | risk=high |
+| Ready for merge | process_merge_queue | process_merge_queue | risk=low |
+| Superseded only | queue_clean | queue_clean + info | tasks=0 |
+
+**Key invariant**: Superseded jobs are informational (already resolved by later success). They must NOT cause Dispatch Planner to recommend `resolve_superseded` when the queue is otherwise clean.
+
+**Tools**: `vibe_operator_snapshot.py`, `vibe_dispatch_planner.py`, `vibe_batch_plan.py`
+
+**Consistency check**: `test_toolchain_smoke.py` includes `recommendation_consistency` test that verifies all three tools agree on the top-level recommendation.
