@@ -1,24 +1,15 @@
 #!/usr/bin/env python3
-"""Queue Advisor v5 - Summary consistency and recovered/merged relationship clarity.
+"""Queue Advisor v6 - Superseded job detection and non-production priority fix.
 
-Usage:
-    python scripts/vibe_queue_advisor.py [--jobs-dir <dir>] [--json] [--limit <N>]
-                                          [--include-tainted] [--include-merged]
-
-Changes from v4:
-    - summary.merged_total always equals len(merged_jobs)
-    - Default (merged hidden): summary.hidden_merged = merged_total
-    - --include-merged: summary.hidden_merged = 0, merged_jobs visible
-    - recovered_jobs with outcome=already_merged are a SUBSET of merged_jobs
-    - No double-counting between recovered and merged
-    - Text: Merged/Recovered/Unresolved counts match JSON exactly
+Changes from v5:
+    - non_production check BEFORE failed check (smoke/fixture/test never HIGH PRIORITY)
+    - Superseded detection: failed job with later successful job in same series → superseded
+    - JSON: superseded_jobs list, summary.superseded_jobs_count
+    - Text: SUPERSEDED section
+    - recommended_next_action no longer misled by obsolete failed jobs
 
 Constraints:
-    - Read-only operations only.
-    - No file modifications.
-    - No secrets/keys read.
-    - Standard library only, no new dependencies.
-    - No IO on import.
+    - Read-only, no IO on import, standard library only.
 """
 
 import argparse
@@ -46,6 +37,36 @@ def _is_non_production(job_id):
         if pat.search(job_id):
             return True
     return False
+
+
+def _find_superseding_job(job_id, all_jobs):
+    """Check if a failed job has a later successful job in the same series.
+
+    Pattern: wo-xxx-001 → look for wo-xxx-002, wo-xxx-003, etc.
+    """
+    # Extract base pattern: remove trailing -NNN
+    m = re.match(r"^(.+)-(\d{3})$", job_id)
+    if not m:
+        return None
+    base = m.group(1)
+    num = int(m.group(2))
+
+    # Look for higher-numbered jobs with same base
+    candidates = []
+    for j in all_jobs:
+        jid = j["job_id"]
+        jm = re.match(r"^(.+)-(\d{3})$", jid)
+        if jm and jm.group(1) == base and int(jm.group(2)) > num:
+            candidates.append(j)
+
+    # Check if any candidate is review_passed/merged
+    for c in candidates:
+        if c["job_status"] in ("review_passed",) and c["audit_status"] == "clean":
+            return c["job_id"]
+        if c.get("merged"):
+            return c["job_id"]
+
+    return None
 
 
 def _read_json_file(path):
@@ -99,8 +120,6 @@ def _is_sha_merged(result_sha, main_shas):
 
 
 def _recover_result_sha(job_id, job_path, main_shas, repo_root=None):
-    """Recover result_sha from multiple sources. Returns (sha, source) or (None, None)."""
-    # Source 1: Local files
     for fname in ["manifest.json", "state.json", "approval-snapshot.json",
                    "run-record.json", "review-record.json"]:
         data = _read_json_file(job_path / fname)
@@ -110,7 +129,6 @@ def _recover_result_sha(job_id, job_path, main_shas, repo_root=None):
                 if val and isinstance(val, str) and len(val) >= 7:
                     return val, fname
 
-    # Source 2: Feature branch head
     cwd = repo_root or os.getcwd()
     for branch_pattern in [f"vibedev/{job_id}", f"vibedev/wo-{job_id}"]:
         sha = _run_git("rev-parse", branch_pattern, cwd=cwd)
@@ -120,7 +138,6 @@ def _recover_result_sha(job_id, job_path, main_shas, repo_root=None):
         if sha and len(sha) >= 7:
             return sha, "branch"
 
-    # Source 3: PR merge parent from main history
     log_output = _run_git(
         "log", "--oneline", "--merges", "--all",
         "--grep", job_id, "--format=%H %P %s",
@@ -130,7 +147,6 @@ def _recover_result_sha(job_id, job_path, main_shas, repo_root=None):
         for line in log_output.splitlines():
             parts = line.split()
             if len(parts) >= 2:
-                merge_sha = parts[0]
                 feature_sha = parts[1]
                 if len(feature_sha) >= 7 and feature_sha in main_shas:
                     if len(parts) >= 3 and len(parts[2]) >= 7:
@@ -195,7 +211,6 @@ def _collect_job_info(job_dir, main_shas=None, repo_root=None):
         result_sha = wo["result_sha"]
         result_sha_source = "work-order"
 
-    # Recovery for review_passed/clean with missing result_sha
     if not result_sha and job_status == "review_passed" and audit_status == "clean":
         if main_shas is not None:
             result_sha, result_sha_source = _recover_result_sha(
@@ -292,14 +307,32 @@ def _mark_merged_jobs(jobs, main_shas):
 
 
 def _generate_action_items(jobs):
-    """Generate action items. recovered_jobs are a SUBSET of merged_jobs when outcome=already_merged."""
+    """Generate action items with v6 priority order.
+
+    Key change: non_production check BEFORE failed check.
+    Key change: superseded detection for failed jobs.
+
+    Priority order:
+    1. audit_tainted → blocked_jobs
+    2. merged → merged_jobs
+    3. non_production → informational_jobs (BEFORE failed!)
+    4. failed + superseded → superseded_jobs
+    5. failed + not superseded → high priority
+    6. unknown → warning
+    7. review_passed + clean → ready_for_merge
+    8. pending/in_progress → continue_processing
+    """
     action_items = []
     warnings = []
     blocked_jobs = []
-    merged_jobs = []          # All jobs whose result_sha is in main
+    merged_jobs = []
     informational_jobs = []
-    recovered_jobs = []       # Jobs where result_sha was recovered (subset of merged if already_merged)
+    recovered_jobs = []
     unresolved_jobs = []
+    superseded_jobs = []
+
+    # Build a lookup for superseded detection
+    all_jobs_lookup = {j["job_id"]: j for j in jobs}
 
     for job in jobs:
         job_id = job["job_id"]
@@ -309,8 +342,6 @@ def _generate_action_items(jobs):
         is_non_prod = job.get("non_production", False)
         result_sha = job.get("result_sha")
         result_sha_source = job.get("result_sha_source")
-
-        # Determine if this result_sha was recovered (not from manifest/work-order)
         is_recovered = result_sha_source and result_sha_source not in ("manifest", "work-order")
 
         # Priority 1: audit_tainted
@@ -329,16 +360,14 @@ def _generate_action_items(jobs):
             })
             continue
 
-        # Priority 2: already merged into main
+        # Priority 2: already merged
         if is_merged:
-            merged_entry = {
+            merged_jobs.append({
                 "job_id": job_id,
                 "status": status,
                 "result_sha": result_sha,
                 "result_sha_source": result_sha_source,
-            }
-            merged_jobs.append(merged_entry)
-            # If recovered, also track in recovered_jobs (SUBSET relationship)
+            })
             if is_recovered:
                 recovered_jobs.append({
                     "job_id": job_id,
@@ -348,25 +377,7 @@ def _generate_action_items(jobs):
                 })
             continue
 
-        # Priority 3: failed
-        if status == "failed":
-            action_items.append({
-                "priority": "high",
-                "action": "investigate_failure",
-                "job_id": job_id,
-                "description": f"Job {job_id} failed - investigate and retry if needed",
-            })
-            continue
-
-        # Priority 4: unknown
-        if status == "unknown":
-            warnings.append({
-                "job_id": job_id,
-                "warning": "missing or invalid work-order.json",
-            })
-            continue
-
-        # Priority 5: non-production
+        # Priority 3: non-production (BEFORE failed!)
         if is_non_prod:
             informational_jobs.append({
                 "job_id": job_id,
@@ -375,10 +386,36 @@ def _generate_action_items(jobs):
             })
             continue
 
+        # Priority 4: failed
+        if status == "failed":
+            # Check if superseded by a later successful job
+            superseded_by = _find_superseding_job(job_id, jobs)
+            if superseded_by:
+                superseded_jobs.append({
+                    "job_id": job_id,
+                    "superseded_by": superseded_by,
+                    "reason": f"superseded by {superseded_by}",
+                })
+            else:
+                action_items.append({
+                    "priority": "high",
+                    "action": "investigate_failure",
+                    "job_id": job_id,
+                    "description": f"Job {job_id} failed - investigate and retry if needed",
+                })
+            continue
+
+        # Priority 5: unknown
+        if status == "unknown":
+            warnings.append({
+                "job_id": job_id,
+                "warning": "missing or invalid work-order.json",
+            })
+            continue
+
         # Priority 6: review_passed + clean
         if status == "review_passed" and audit == "clean":
             if result_sha:
-                # If recovered and result_sha not in main, track as recovered
                 if is_recovered:
                     recovered_jobs.append({
                         "job_id": job_id,
@@ -414,17 +451,13 @@ def _generate_action_items(jobs):
             continue
 
     return (action_items, warnings, blocked_jobs, merged_jobs,
-            informational_jobs, recovered_jobs, unresolved_jobs)
+            informational_jobs, recovered_jobs, unresolved_jobs, superseded_jobs)
 
 
 def _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs,
                      informational_jobs, recovered_jobs, unresolved_jobs,
-                     total_tainted_in_dir, tainted_in_visible, include_merged):
-    """Compute summary with consistent counts.
-
-    merged_total = len(merged_jobs)  (always, regardless of include_merged)
-    hidden_merged = merged_total if not include_merged, else 0
-    """
+                     superseded_jobs, total_tainted_in_dir, tainted_in_visible,
+                     include_merged):
     from collections import Counter
 
     status_counts = Counter(j["job_status"] for j in jobs)
@@ -438,6 +471,7 @@ def _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs,
         "informational_jobs_count": len(informational_jobs),
         "recovered_jobs_count": len(recovered_jobs),
         "unresolved_jobs_count": len(unresolved_jobs),
+        "superseded_jobs_count": len(superseded_jobs),
         "by_status": dict(status_counts),
         "by_audit_status": dict(audit_counts),
         "action_items_count": len(action_items),
@@ -450,13 +484,8 @@ def _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs,
 
 
 def _format_json(total_jobs, action_items, warnings, blocked_jobs, merged_jobs,
-                 informational_jobs, recovered_jobs, unresolved_jobs, summary,
-                 include_merged):
-    """Format result as JSON.
-
-    When include_merged=False: merged_jobs list is empty (hidden), summary.merged_total still present.
-    When include_merged=True: merged_jobs list is full, summary.hidden_merged=0.
-    """
+                 informational_jobs, recovered_jobs, unresolved_jobs,
+                 superseded_jobs, summary, include_merged):
     return json.dumps({
         "total_jobs": total_jobs,
         "action_items": action_items,
@@ -466,96 +495,104 @@ def _format_json(total_jobs, action_items, warnings, blocked_jobs, merged_jobs,
         "informational_jobs": informational_jobs,
         "recovered_jobs": recovered_jobs,
         "unresolved_jobs": unresolved_jobs,
+        "superseded_jobs": superseded_jobs,
         "summary": summary,
     }, indent=2)
 
 
 def _format_text(action_items, warnings, blocked_jobs, merged_jobs,
-                 informational_jobs, recovered_jobs, unresolved_jobs, summary,
-                 include_merged):
+                 informational_jobs, recovered_jobs, unresolved_jobs,
+                 superseded_jobs, summary, include_merged):
     lines = [
-        "========================================",
+        "\u2550" * 40,
         "  Vibe Coding Queue Advisor",
-        "========================================",
+        "\u2550" * 40,
         f"  Total Jobs: {summary['total_jobs']}",
         f"  Merged: {summary['merged_total']}"
         + ("" if include_merged else f" ({summary['hidden_merged']} hidden)"),
         f"  Blocked: {summary['blocked_total']}"
         + (f" ({summary['hidden_blocked']} hidden)" if summary.get("hidden_blocked") else ""),
+        f"  Superseded: {summary['superseded_jobs_count']}",
         f"  Recovered: {summary['recovered_jobs_count']}",
         f"  Unresolved: {summary['unresolved_jobs_count']}",
         f"  Action Items: {summary['action_items_count']}",
         f"  Warnings: {summary['warnings_count']}",
         f"  Info: {summary['informational_jobs_count']}",
-        "----------------------------------------",
+        "\u2500" * 40,
     ]
 
     if blocked_jobs:
         lines.append("  \u26d4 BLOCKED JOBS:")
         for bj in blocked_jobs:
             lines.append(f"    - {bj['job_id']}: {bj['reason']}")
-        lines.append("----------------------------------------")
+        lines.append("\u2500" * 40)
 
     high_priority = [a for a in action_items if a.get("priority") == "high"]
     if high_priority:
         lines.append("  \U0001f534 HIGH PRIORITY:")
         for a in high_priority:
             lines.append(f"    - [{a['action']}] {a['description']}")
-        lines.append("----------------------------------------")
+        lines.append("\u2500" * 40)
 
     medium_priority = [a for a in action_items if a.get("priority") == "medium"]
     if medium_priority:
         lines.append("  \U0001f7e1 MEDIUM PRIORITY:")
         for a in medium_priority:
             lines.append(f"    - [{a['action']}] {a['description']}")
-        lines.append("----------------------------------------")
+        lines.append("\u2500" * 40)
 
     low_priority = [a for a in action_items if a.get("priority") == "low"]
     if low_priority:
         lines.append("  \U0001f7e2 LOW PRIORITY:")
         for a in low_priority:
             lines.append(f"    - [{a['action']}] {a['description']}")
-        lines.append("----------------------------------------")
+        lines.append("\u2500" * 40)
+
+    if superseded_jobs:
+        lines.append("  \U0001f504 SUPERSEDED:")
+        for sj in superseded_jobs:
+            lines.append(f"    - {sj['job_id']}: {sj['reason']}")
+        lines.append("\u2500" * 40)
 
     if warnings:
         lines.append("  \u26a0\ufe0f  WARNINGS:")
         for w in warnings:
             lines.append(f"    - {w['job_id']}: {w['warning']}")
-        lines.append("----------------------------------------")
+        lines.append("\u2500" * 40)
 
     if informational_jobs:
         lines.append("  \U0001f4cb INFO (non-production):")
         for ij in informational_jobs:
             lines.append(f"    - {ij['job_id']}: {ij['reason']}")
-        lines.append("----------------------------------------")
+        lines.append("\u2500" * 40)
 
     if include_merged and merged_jobs:
         lines.append("  \U0001f504 MERGED JOBS:")
         for mj in merged_jobs:
             src = f" ({mj.get('result_sha_source', '?')})" if mj.get("result_sha_source") else ""
             lines.append(f"    - {mj['job_id']}: {str(mj.get('result_sha', ''))[:12]}{src}")
-        lines.append("----------------------------------------")
+        lines.append("\u2500" * 40)
 
     if recovered_jobs:
         lines.append("  \U0001f50d RECOVERED:")
         for rj in recovered_jobs:
             lines.append(f"    - {rj['job_id']}: {rj['result_sha_source']} -> {str(rj['result_sha'])[:12]} ({rj['outcome']})")
-        lines.append("----------------------------------------")
+        lines.append("\u2500" * 40)
 
     if unresolved_jobs:
         lines.append("  \u2753 UNRESOLVED:")
         for uj in unresolved_jobs:
             lines.append(f"    - {uj['job_id']}: {uj['reason']}")
-        lines.append("----------------------------------------")
+        lines.append("\u2500" * 40)
 
-    lines.append("========================================")
+    lines.append("\u2550" * 40)
     return "\n".join(lines)
 
 
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="vibe_queue_advisor",
-        description="Queue Advisor v5 - Summary consistency and recovered/merged clarity.",
+        description="Queue Advisor v6 - Superseded detection, non-production priority fix.",
     )
     parser.add_argument("--jobs-dir", default=None)
     parser.add_argument("--json", dest="output_json", action="store_true", default=False)
@@ -595,12 +632,14 @@ def main(argv=None):
     tainted_in_visible = sum(1 for j in jobs if j.get("audit_status") == "audit_tainted")
 
     (action_items, warnings, blocked_jobs, merged_jobs,
-     informational_jobs, recovered_jobs, unresolved_jobs) = _generate_action_items(jobs)
+     informational_jobs, recovered_jobs, unresolved_jobs,
+     superseded_jobs) = _generate_action_items(jobs)
 
     summary = _compute_summary(
         jobs, action_items, warnings, blocked_jobs, merged_jobs,
         informational_jobs, recovered_jobs, unresolved_jobs,
-        total_tainted_in_dir, tainted_in_visible, args.include_merged,
+        superseded_jobs, total_tainted_in_dir, tainted_in_visible,
+        args.include_merged,
     )
 
     if args.limit is not None:
@@ -618,11 +657,12 @@ def main(argv=None):
     if args.output_json:
         output = _format_json(len(jobs), action_items, warnings, blocked_jobs,
                               merged_jobs, informational_jobs, recovered_jobs,
-                              unresolved_jobs, summary, args.include_merged)
+                              unresolved_jobs, superseded_jobs, summary,
+                              args.include_merged)
     else:
         output = _format_text(action_items, warnings, blocked_jobs, merged_jobs,
                               informational_jobs, recovered_jobs, unresolved_jobs,
-                              summary, args.include_merged)
+                              superseded_jobs, summary, args.include_merged)
 
     print(output)
     return 0
