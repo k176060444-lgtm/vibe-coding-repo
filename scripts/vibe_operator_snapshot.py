@@ -196,6 +196,7 @@ def main(argv=None):
             "action_items_count": s.get("action_items_count", 0),
             "warnings_count": s.get("warnings_count", 0),
             "informational_jobs_count": s.get("informational_jobs_count", 0),
+            "lifecycle": s.get("lifecycle", {}),
         }
 
     # Top action items (for compact display)
@@ -254,6 +255,7 @@ def _print_text(snapshot, compact, locks, advisor_data):
         f"  Warnings: {js.get('warnings_count', '?')}",
         f"  Recovered: {js.get('recovered_jobs_count', '?')}",
         f"  Unresolved: {js.get('unresolved_jobs_count', '?')}",
+        "  Lifecycle: " + ", ".join(f"{k}={v}" for k, v in js.get("lifecycle", {}).items()),
     ]
 
     if locks:

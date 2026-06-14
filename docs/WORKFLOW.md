@@ -101,6 +101,25 @@ Queue Advisor 提供任务队列的下一步动作建议。
 
 **重要**: Queue Advisor v6 具备 superseded job 检测、non-production 优先级修正和 summary 统计一致性。
 
+### Job Lifecycle Policy
+
+Queue Advisor v6+ classifies each job into a lifecycle state:
+
+| Lifecycle | 说明 | 可清理 |
+|-----------|------|--------|
+| `tainted_lock` | audit_tainted，必须永久保留 | ❌ |
+| `merged` | result_sha 已入 main，已完成 | ✅ (records 可归档) |
+| `superseded` | failed 但被后续成功 job 替代 | ✅ |
+| `non_production` | smoke/fixture/test/debug/legacy | ✅ |
+| `active` | pending/in_progress/review_passed | ❌ |
+| `failed` | failed 且未被替代 | ⚠️ 需调查 |
+| `unknown` | 缺少 work-order | ⚠️ 需检查 |
+
+**关键规则**：
+- `wo-code-repo-status-001` 永久保留为 `tainted_lock`，不得删除 records，不得解除 lock
+- `merged`/`superseded`/`non_production` 的 records 可在后续维护任务中归档（需单独授权）
+- `failed` 的 job 需调查是否仍有真实阻塞
+
 ### Superseded Job Detection
 
 v6 会检测已被后续成功任务替代的 failed job：

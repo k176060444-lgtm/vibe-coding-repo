@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Queue Advisor v6 - Superseded job detection and non-production priority fix.
 
+Changes from v6 (lifecycle):
+    - Job lifecycle classification: tainted_lock, merged, superseded, non_production, active, failed, unknown
+    - lifecycle_summary in JSON and text output
+
 Changes from v5:
     - non_production check BEFORE failed check (smoke/fixture/test never HIGH PRIORITY)
     - Superseded detection: failed job with later successful job in same series → superseded
@@ -67,6 +71,48 @@ def _find_superseding_job(job_id, all_jobs):
             return c["job_id"]
 
     return None
+
+
+
+# --- Job Lifecycle Policy v1 ---
+# Lifecycle states:
+#   tainted_lock  : audit_tainted (must preserve, never suggest push/merge)
+#   merged        : result_sha in main (completed, no action needed)
+#   superseded    : failed with later success in same series
+#   non_production: smoke/fixture/test/debug/legacy
+#   active        : pending/in_progress/review_passed (not yet merged)
+#   failed        : failed without superseding job
+#   unknown       : missing work-order
+
+_LIFECYCLE_ORDER = [
+    "tainted_lock", "merged", "superseded", "non_production",
+    "active", "failed", "unknown",
+]
+
+
+def _classify_lifecycle(job, all_jobs):
+    """Classify a job into its lifecycle state."""
+    audit = job.get("audit_status", "unknown")
+    status = job.get("job_status", "unknown")
+    is_merged = job.get("merged", False)
+    is_non_prod = job.get("non_production", False)
+
+    if audit == "audit_tainted":
+        return "tainted_lock"
+    if is_merged:
+        return "merged"
+    if status == "failed":
+        superseded_by = _find_superseding_job(job["job_id"], all_jobs)
+        if superseded_by:
+            return "superseded"
+        if is_non_prod:
+            return "non_production"
+        return "failed"
+    if is_non_prod:
+        return "non_production"
+    if status in ("review_passed", "pending", "pending_approval", "prepared", "in_progress"):
+        return "active"
+    return "unknown"
 
 
 def _read_json_file(path):
@@ -457,7 +503,7 @@ def _generate_action_items(jobs):
 def _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs,
                      informational_jobs, recovered_jobs, unresolved_jobs,
                      superseded_jobs, total_tainted_in_dir, tainted_in_visible,
-                     include_merged):
+                     include_merged, lifecycle_summary=None):
     from collections import Counter
 
     status_counts = Counter(j["job_status"] for j in jobs)
@@ -480,14 +526,16 @@ def _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs,
         "blocked_total": total_tainted_in_dir,
         "hidden_blocked": max(0, total_tainted_in_dir - tainted_in_visible),
         "high_priority_count": len([a for a in action_items if a.get("priority") == "high"]),
+        "lifecycle": lifecycle_summary or {},
     }
 
 
 def _format_json(total_jobs, action_items, warnings, blocked_jobs, merged_jobs,
                  informational_jobs, recovered_jobs, unresolved_jobs,
-                 superseded_jobs, summary, include_merged):
+                 superseded_jobs, summary, include_merged, lifecycle_summary=None):
     return json.dumps({
         "total_jobs": total_jobs,
+        "lifecycle_summary": lifecycle_summary or {},
         "action_items": action_items,
         "warnings": warnings,
         "blocked_jobs": blocked_jobs,
@@ -518,6 +566,7 @@ def _format_text(action_items, warnings, blocked_jobs, merged_jobs,
         f"  Action Items: {summary['action_items_count']}",
         f"  Warnings: {summary['warnings_count']}",
         f"  Info: {summary['informational_jobs_count']}",
+        f"  Lifecycle: " + ", ".join(f"{k}={v}" for k, v in summary.get("lifecycle", {}).items()),
         "\u2500" * 40,
     ]
 
@@ -629,17 +678,23 @@ def main(argv=None):
                          main_shas=main_shas, repo_root=repo_root)
     _mark_merged_jobs(jobs, main_shas)
 
+    # Classify lifecycle for each job
+    for job in jobs:
+        job["lifecycle"] = _classify_lifecycle(job, jobs)
+
     tainted_in_visible = sum(1 for j in jobs if j.get("audit_status") == "audit_tainted")
 
     (action_items, warnings, blocked_jobs, merged_jobs,
      informational_jobs, recovered_jobs, unresolved_jobs,
      superseded_jobs) = _generate_action_items(jobs)
 
+    lifecycle_summary = {lc: sum(1 for j in jobs if j.get("lifecycle") == lc) for lc in _LIFECYCLE_ORDER if sum(1 for j in jobs if j.get("lifecycle") == lc) > 0}
+
     summary = _compute_summary(
         jobs, action_items, warnings, blocked_jobs, merged_jobs,
         informational_jobs, recovered_jobs, unresolved_jobs,
         superseded_jobs, total_tainted_in_dir, tainted_in_visible,
-        args.include_merged,
+        args.include_merged, lifecycle_summary,
     )
 
     if args.limit is not None:
@@ -658,7 +713,7 @@ def main(argv=None):
         output = _format_json(len(jobs), action_items, warnings, blocked_jobs,
                               merged_jobs, informational_jobs, recovered_jobs,
                               unresolved_jobs, superseded_jobs, summary,
-                              args.include_merged)
+                              args.include_merged, lifecycle_summary)
     else:
         output = _format_text(action_items, warnings, blocked_jobs, merged_jobs,
                               informational_jobs, recovered_jobs, unresolved_jobs,
