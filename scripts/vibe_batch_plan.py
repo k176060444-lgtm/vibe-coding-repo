@@ -33,42 +33,35 @@ def _run_script(script, *args):
     return None
 
 
-def _classify_risk(job):
-    """Classify risk level for a Work Order.
+def _classify_risk(item):
+    """Classify risk level for a Work Order action item.
     
-    Returns: 'low', 'medium', 'high', 'critical'
+    Returns: "low", "medium", "high", "critical"
     
-    Risk factors:
-    - audit_status: tainted -> critical
-    - changed_paths: scripts/ -> medium, docs/ -> low
-    - job_status: failed -> high, review_passed -> low
-    - push_allowed: false -> medium (needs approval)
+    Risk factors based on action_items fields:
+    - action: review_blocked -> critical
+    - action: investigate_failure -> high
+    - action: continue_processing -> medium
+    - action: ready_for_merge -> low
+    - priority: high -> high, medium -> medium, low -> low
     """
-    audit_status = job.get("audit_status", "unknown")
-    job_status = job.get("status", "unknown")
-    changed_paths = job.get("changed_paths", [])
-    push_allowed = job.get("push_allowed", True)
+    action = item.get("action", "")
+    priority = item.get("priority", "info")
     
-    # Critical: tainted locks
-    if audit_status == "audit_tainted":
+    # Critical: blocked/tainted
+    if action == "review_blocked":
         return "critical"
     
-    # High: failed jobs
-    if job_status == "failed":
+    # High: failures
+    if action == "investigate_failure" or priority == "high":
         return "high"
     
-    # Medium: code changes or push not allowed
-    has_code_changes = any(
-        p.startswith("scripts/") or p.endswith(".py")
-        for p in changed_paths
-    )
-    if has_code_changes or not push_allowed:
+    # Medium: in-progress
+    if action == "continue_processing" or priority == "medium":
         return "medium"
     
-    # Low: documentation only
+    # Low: ready for merge
     return "low"
-
-
 def _generate_plan(snapshot, advisor, limit=None):
     """Generate batch execution plan.
     
