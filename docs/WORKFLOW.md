@@ -99,7 +99,26 @@ python3 scripts/vibe_autonomous_merge.py \
 
 Queue Advisor 提供任务队列的下一步动作建议。
 
-**重要**: Queue Advisor v5 具备 summary 统计一致性保证和 result_sha recovery 能力。
+**重要**: Queue Advisor v6 具备 superseded job 检测、non-production 优先级修正和 summary 统计一致性。
+
+### Superseded Job Detection
+
+v6 会检测已被后续成功任务替代的 failed job：
+
+- `wo-doc-workflow-001`（failed）→ 被 `wo-doc-workflow-002`（review_passed，已入 main）supersede
+- `wo-smoke-001`（failed）→ 被 `wo-smoke-002`（review_passed）supersede
+
+Superseded job 不再列为 HIGH PRIORITY，而是归入 `superseded_jobs` 列表。
+
+### Non-Production Priority Fix
+
+v5 的优先级顺序中 `failed`（Priority 3）先于 `non_production`（Priority 5），导致 smoke/fixture/test job 的 failed 状态被当作 HIGH PRIORITY。
+
+v6 修正：`non_production` 检查在 `failed` 之前（Priority 3），smoke/fixture/test/debug/legacy job 即使 failed 也归入 informational_jobs，不会触发 HIGH PRIORITY。
+
+### Summary 统计一致性
+
+v6 继承 v5 的一致性保证...
 
 ### Summary 统计一致性
 
