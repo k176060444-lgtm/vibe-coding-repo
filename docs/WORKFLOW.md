@@ -286,6 +286,36 @@ python3 scripts/vibe_operator_snapshot.py --include-tainted --include-merged --j
 - `vibe_autonomous_merge.py`: 受控 merge wrapper
 - `vibe_operator_snapshot.py`: 统一状态快照
 
+## Dispatch Planner
+
+Dispatch Planner 把 Operator Snapshot / Queue Advisor 输出转成下一步 Work Order 建议。
+
+### 使用方法
+
+```bash
+# JSON 输出
+python3 scripts/vibe_dispatch_planner.py --json
+
+# 紧凑模式
+python3 scripts/vibe_dispatch_planner.py --compact
+```
+
+### 建议动作
+
+| 动作 | 说明 |
+|------|------|
+| `hold_due_to_blocker` | 存在 tainted lock，需人工解决 |
+| `investigate_failures` | 存在 high priority 失败项 |
+| `continue_processing` | 存在 in-progress 任务 |
+| `process_merge_queue` | 存在 ready_for_merge 任务 |
+| `queue_clean` | 队列清洁，建议下一阶段规划 |
+
+### 与其他工具的关系
+
+- `vibe_operator_snapshot.py`: 状态快照
+- `vibe_queue_advisor.py`: 队列建议详情
+- `vibe_dispatch_planner.py`: 下一步 Work Order 建议
+
 ## 关键设计决策
 
 | 决策 | 原因 |
