@@ -353,3 +353,15 @@ For detailed command specifications, permission boundaries, and prohibited behav
 | /merge | Wrapper merge execution | High |
 | /freeze | Post-merge freeze | Read-only |
 | /batch | Batch queue planning | Read-only |
+
+
+## Batch Queue Plan
+
+Generate batch execution plan for multiple Work Orders:
+
+```bash
+python3 scripts/vibe_batch_plan.py --json
+python3 scripts/vibe_batch_plan.py --limit 3 --json
+```
+
+Output: task_order, risk_level, allowed_paths, stop_conditions, requires_human_approval, expected_reports.
