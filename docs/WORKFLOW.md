@@ -335,6 +335,17 @@ python3 scripts/vibe_dispatch_planner.py --compact
 | Autonomous merge wrapper | 统一 merge 入口，防止裸 gh pr merge，保证 gate 验证 |
 | Post-merge freeze | 确保 merge 后状态可审计，锁定 job 不被篡改 |
 
+## Toolchain Smoke Suite
+
+Run all smoke tests before starting Work Orders:
+
+```bash
+python3 scripts/test_toolchain_smoke.py
+python3 scripts/test_toolchain_smoke.py --json
+```
+
+Tests: command router (help, snapshot, advisor, dispatch, batch-plan), health check, operator snapshot, queue advisor, dispatch planner, batch plan.
+
 ## Health Check
 
 Verify toolchain health before starting Work Orders:

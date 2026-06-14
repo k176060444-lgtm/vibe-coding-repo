@@ -24,6 +24,10 @@ python3 scripts/vibe_command_router.py dispatch --json
 python3 scripts/vibe_command_router.py batch-plan --json
 python3 scripts/vibe_command_router.py batch-plan --limit 3 --json
 
+# Toolchain Smoke Suite
+python3 scripts/test_toolchain_smoke.py
+python3 scripts/test_toolchain_smoke.py --json
+
 # Health Check
 
 ```bash
