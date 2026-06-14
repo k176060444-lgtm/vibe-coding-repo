@@ -518,3 +518,16 @@ The smoke suite now includes intake verification:
 - Intake router: intake command accessible via router
 
 Run: `python scripts/test_toolchain_smoke.py`
+
+
+## Release Notes (v1)
+
+Generate progress reports from git history:
+
+```
+python scripts/vibe_release_notes.py --json
+python scripts/vibe_release_notes.py --compact
+python scripts/vibe_release_notes.py --limit 10 --since <SHA>
+```
+
+Reports include: merged PRs, capability changes, toolchain status, safety status, and recommended next phase.
