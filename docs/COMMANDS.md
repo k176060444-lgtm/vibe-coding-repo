@@ -15,6 +15,7 @@ Use the command router for all operations:
 | `h` | health | Health Check |
 | `sm` | smoke | Toolchain Smoke Suite |
 | `i` / `wo` | intake | Work Order Intake |
+| `notes` / `rn` / `progress` | release-notes | Release Notes |
 | `?` | help | Show help |
 | `v` | version | Show version |
 
@@ -554,3 +555,17 @@ $ python scripts/vibe_release_notes.py --compact
 | `--compact` | Shorter text output |
 | `--limit N` | Max PRs to include |
 | `--since SHA` | Only PRs after this commit |
+
+
+### Release Notes via Router
+
+```
+$ python scripts/vibe_command_router.py notes --compact
+# Release Notes / Progress Report
+**Main SHA**: `e4a1ac9...`
+**Total PRs Merged**: 38
+...
+
+$ python scripts/vibe_command_router.py rn --json --limit 5
+{ "current_main_sha": "e4a1ac9...", "total_merged_prs": 5, ... }
+```
