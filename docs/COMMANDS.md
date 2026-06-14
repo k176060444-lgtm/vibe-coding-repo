@@ -513,3 +513,44 @@ The smoke suite now covers 16 tests:
 - 14: Intake - risk classification (critical/high/medium/low)
 - 15: Intake - type detection (code/doc/test/fix/maint)
 - 16: Intake - router integration
+
+
+## Release Notes / Progress Report
+
+Generate stage reports from git history, merge commits, and toolchain state.
+
+```
+$ python scripts/vibe_release_notes.py --compact
+# Release Notes / Progress Report
+
+**Generated**: 2026-06-15T...
+**Main SHA**: `5d421c04226d...`
+**Total PRs Merged**: 37
+
+---
+
+## PR Summary
+- **Feature**: 15
+- **Documentation**: 12
+- **Testing**: 5
+- **Maintenance**: 3
+
+## Capability Changes
+- **Work Order Intake** (feature) — PR #35
+- **Command Router V2** (feature) — PR #30
+- **Operational Readiness** (documentation) — PR #34
+...
+
+## Safety Status
+- **audit_tainted lock**: `wo-code-repo-status-001` — push_allowed=False (PERMANENT)
+- **Secrets modified**: False
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Full JSON report |
+| `--compact` | Shorter text output |
+| `--limit N` | Max PRs to include |
+| `--since SHA` | Only PRs after this commit |
