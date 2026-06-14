@@ -506,3 +506,15 @@ The intake script:
 3. Human reviews and approves draft
 4. Executor creates Work Order from approved draft
 5. Pipeline executes: prepare → implement → test → commit → review → merge
+
+
+## Smoke Suite v2 (16 tests)
+
+The smoke suite now includes intake verification:
+- Intake basic: markdown draft generation
+- Intake JSON: valid JSON with all required fields
+- Intake risk: critical requirements require human approval
+- Intake type: auto-detects code/doc/test/fix/maint
+- Intake router: intake command accessible via router
+
+Run: `python scripts/test_toolchain_smoke.py`

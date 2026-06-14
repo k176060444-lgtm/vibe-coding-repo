@@ -257,6 +257,123 @@ def _test_recommendation_consistency(script_dir, jobs_dir):
     
     return {"passed": True, "message": "snapshot=%s dispatch=%s batch=%d" % (snap_action, disp_action, batch_tasks)}
 
+
+def _test_intake_basic(script_dir):
+    """Test intake basic markdown output."""
+    path = script_dir / "vibe_workorder_intake.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["Add --summary flag to snapshot"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    if "Work Order Draft" not in stdout:
+        return {"passed": False, "message": "missing draft header"}
+
+    if "wo-code-" not in stdout:
+        return {"passed": False, "message": "missing work_order_id"}
+
+    return {"passed": True, "message": "markdown draft generated"}
+
+
+def _test_intake_json(script_dir):
+    """Test intake JSON output is valid and complete."""
+    import json as _json
+    path = script_dir / "vibe_workorder_intake.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["Update workflow docs", "--type", "doc", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    try:
+        d = _json.loads(stdout)
+    except _json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    required = ["work_order_id", "title", "type", "goal", "risk_level",
+                 "requires_human_approval", "allowed_paths", "forbidden_actions",
+                 "acceptance_tests", "stop_conditions", "expected_report_fields", "draft_only"]
+    missing = [k for k in required if k not in d]
+    if missing:
+        return {"passed": False, "message": "missing fields: %s" % ", ".join(missing)}
+
+    if not d.get("draft_only"):
+        return {"passed": False, "message": "draft_only must be true"}
+
+    return {"passed": True, "message": "type=%s risk=%s" % (d["type"], d["risk_level"])}
+
+
+def _test_intake_risk_classification(script_dir):
+    """Test intake risk classification for dangerous requirements."""
+    import json as _json
+    path = script_dir / "vibe_workorder_intake.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    # Critical: credentials + production
+    rc, stdout, stderr = _run_script(path, ["Change auth credentials for production deploy", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    try:
+        d = _json.loads(stdout)
+    except _json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    if d["risk_level"] not in ("critical", "high"):
+        return {"passed": False, "message": "expected high/critical, got %s" % d["risk_level"]}
+
+    if not d["requires_human_approval"]:
+        return {"passed": False, "message": "should require human approval"}
+
+    return {"passed": True, "message": "risk=%s human=%s" % (d["risk_level"], d["requires_human_approval"])}
+
+
+def _test_intake_type_detection(script_dir):
+    """Test intake type detection for different requirements."""
+    import json as _json
+    path = script_dir / "vibe_workorder_intake.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    cases = [
+        ("Update the README documentation", "doc"),
+        ("Add new unit tests for advisor", "test"),
+        ("Fix the crash in dispatch planner", "fix"),
+    ]
+    for req, expected_type in cases:
+        rc, stdout, stderr = _run_script(path, [req, "--json"])
+        if rc != 0:
+            return {"passed": False, "message": "exit code %d for: %s" % (rc, req)}
+        try:
+            d = _json.loads(stdout)
+        except _json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON for: %s" % req}
+        if d["type"] != expected_type:
+            return {"passed": False, "message": "expected type=%s got=%s for: %s" % (expected_type, d["type"], req)}
+
+    return {"passed": True, "message": "3 type cases pass"}
+
+
+def _test_intake_router(script_dir):
+    """Test intake via command router."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["intake", "Add --summary flag to snapshot"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    if "Work Order Draft" not in stdout:
+        return {"passed": False, "message": "missing draft output"}
+
+    return {"passed": True, "message": "router intake works"}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -298,6 +415,21 @@ def run_tests(jobs_dir=None):
     
     # Test 11: Recommendation Consistency
     tests.append(_run_test("recommendation_consistency", lambda: _test_recommendation_consistency(script_dir, jobs_dir)))
+    
+    # Test 12: Intake - basic markdown
+    tests.append(_run_test("intake_basic", lambda: _test_intake_basic(script_dir)))
+    
+    # Test 13: Intake - JSON output
+    tests.append(_run_test("intake_json", lambda: _test_intake_json(script_dir)))
+    
+    # Test 14: Intake - risk classification
+    tests.append(_run_test("intake_risk_classification", lambda: _test_intake_risk_classification(script_dir)))
+    
+    # Test 15: Intake - type detection
+    tests.append(_run_test("intake_type_detection", lambda: _test_intake_type_detection(script_dir)))
+    
+    # Test 16: Intake - router integration
+    tests.append(_run_test("intake_router", lambda: _test_intake_router(script_dir)))
     
     return tests
 

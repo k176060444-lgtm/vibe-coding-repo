@@ -499,3 +499,17 @@ $ python scripts/vibe_command_router.py i 'Fix advisor crash' --type fix --prior
   ...
 }
 ```
+
+
+### Smoke Suite Coverage
+
+The smoke suite now covers 16 tests:
+- 1-5: Command Router (help, snapshot, advisor, dispatch, batch-plan)
+- 6: Health Check
+- 7-10: Core tools (snapshot, advisor, dispatch, batch-plan)
+- 11: Recommendation Consistency
+- 12: Intake - basic markdown draft
+- 13: Intake - JSON output validation
+- 14: Intake - risk classification (critical/high/medium/low)
+- 15: Intake - type detection (code/doc/test/fix/maint)
+- 16: Intake - router integration
