@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Queue Advisor v4 - Result SHA recovery and warning denoising.
+"""Queue Advisor v5 - Summary consistency and recovered/merged relationship clarity.
 
 Usage:
     python scripts/vibe_queue_advisor.py [--jobs-dir <dir>] [--json] [--limit <N>]
                                           [--include-tainted] [--include-merged]
 
-Changes from v3:
-    - Result SHA recovery for review_passed jobs with missing result_sha
-    - Recovery sources: state/record files, feature branch, PR merge parent
-    - Recovered result_sha in main → already_merged (no warning)
-    - Only warn when recovery fails
-    - JSON: recovered_jobs, unresolved_jobs
-    - Text: Recovered/Unresolved counts
+Changes from v4:
+    - summary.merged_total always equals len(merged_jobs)
+    - Default (merged hidden): summary.hidden_merged = merged_total
+    - --include-merged: summary.hidden_merged = 0, merged_jobs visible
+    - recovered_jobs with outcome=already_merged are a SUBSET of merged_jobs
+    - No double-counting between recovered and merged
+    - Text: Merged/Recovered/Unresolved counts match JSON exactly
 
 Constraints:
     - Read-only operations only.
@@ -29,7 +29,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Patterns that identify non-production jobs
 _NON_PRODUCTION_PATTERNS = [
     re.compile(r"^_"),
     re.compile(r"smoke", re.IGNORECASE),
@@ -43,7 +42,6 @@ _NON_PRODUCTION_PATTERNS = [
 
 
 def _is_non_production(job_id):
-    """Check if a job_id looks like a non-production job."""
     for pat in _NON_PRODUCTION_PATTERNS:
         if pat.search(job_id):
             return True
@@ -51,7 +49,6 @@ def _is_non_production(job_id):
 
 
 def _read_json_file(path):
-    """Read a JSON file safely, return dict or None."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -60,7 +57,6 @@ def _read_json_file(path):
 
 
 def _run_git(*args, cwd=None):
-    """Run a git command and return stdout, or empty string on failure."""
     try:
         result = subprocess.run(
             ["git"] + list(args),
@@ -72,7 +68,6 @@ def _run_git(*args, cwd=None):
 
 
 def _get_main_ancestors(repo_root=None):
-    """Return a set of all commit SHAs reachable from main (full + short)."""
     try:
         cwd = repo_root or os.getcwd()
         result = subprocess.run(
@@ -93,7 +88,6 @@ def _get_main_ancestors(repo_root=None):
 
 
 def _is_sha_merged(result_sha, main_shas):
-    """Check if result_sha is in the main branch history."""
     if not result_sha:
         return False
     if result_sha in main_shas:
@@ -105,15 +99,7 @@ def _is_sha_merged(result_sha, main_shas):
 
 
 def _recover_result_sha(job_id, job_path, main_shas, repo_root=None):
-    """Attempt to recover result_sha from multiple sources.
-
-    Returns (result_sha, source) or (None, None) if recovery fails.
-
-    Recovery priority:
-    1. manifest.json / state.json / approval-snapshot.json / run-record.json / review-record.json
-    2. Feature branch head (vibedev/{job_id} or vibedev/wo-{job_id})
-    3. PR merge parent from main history (search for merge commit with job_id in message)
-    """
+    """Recover result_sha from multiple sources. Returns (sha, source) or (None, None)."""
     # Source 1: Local files
     for fname in ["manifest.json", "state.json", "approval-snapshot.json",
                    "run-record.json", "review-record.json"]:
@@ -127,7 +113,6 @@ def _recover_result_sha(job_id, job_path, main_shas, repo_root=None):
     # Source 2: Feature branch head
     cwd = repo_root or os.getcwd()
     for branch_pattern in [f"vibedev/{job_id}", f"vibedev/wo-{job_id}"]:
-        # Try local branch first, then remote
         sha = _run_git("rev-parse", branch_pattern, cwd=cwd)
         if sha and len(sha) >= 7:
             return sha, "branch"
@@ -136,8 +121,6 @@ def _recover_result_sha(job_id, job_path, main_shas, repo_root=None):
             return sha, "branch"
 
     # Source 3: PR merge parent from main history
-    # Search for merge commits whose message contains the job_id
-    # Format: "Merge pull request #N from owner/vibedev/{job_id}"
     log_output = _run_git(
         "log", "--oneline", "--merges", "--all",
         "--grep", job_id, "--format=%H %P %s",
@@ -147,11 +130,9 @@ def _recover_result_sha(job_id, job_path, main_shas, repo_root=None):
         for line in log_output.splitlines():
             parts = line.split()
             if len(parts) >= 2:
-                # First SHA is merge commit, second is feature parent
                 merge_sha = parts[0]
                 feature_sha = parts[1]
                 if len(feature_sha) >= 7 and feature_sha in main_shas:
-                    # The feature_sha might be the old main; check third part
                     if len(parts) >= 3 and len(parts[2]) >= 7:
                         candidate = parts[2]
                         if candidate not in main_shas or _is_sha_merged(candidate, main_shas):
@@ -164,7 +145,6 @@ def _recover_result_sha(job_id, job_path, main_shas, repo_root=None):
 
 
 def _collect_job_info(job_dir, main_shas=None, repo_root=None):
-    """Collect read-only info for a single job directory."""
     job_path = Path(job_dir)
     job_id = job_path.name
 
@@ -206,7 +186,6 @@ def _collect_job_info(job_dir, main_shas=None, repo_root=None):
 
     base_sha = wo.get("base_sha")
 
-    # Try to get result_sha from standard sources first
     result_sha = None
     result_sha_source = None
     if manifest and "result_sha" in manifest:
@@ -216,7 +195,7 @@ def _collect_job_info(job_dir, main_shas=None, repo_root=None):
         result_sha = wo["result_sha"]
         result_sha_source = "work-order"
 
-    # If missing and job is review_passed/clean, attempt recovery
+    # Recovery for review_passed/clean with missing result_sha
     if not result_sha and job_status == "review_passed" and audit_status == "clean":
         if main_shas is not None:
             result_sha, result_sha_source = _recover_result_sha(
@@ -272,7 +251,6 @@ def _collect_job_info(job_dir, main_shas=None, repo_root=None):
 
 
 def _count_tainted_in_dir(jobs_dir):
-    """Count audit_tainted jobs in directory."""
     jobs_path = Path(jobs_dir)
     if not jobs_path.exists() or not jobs_path.is_dir():
         return 0
@@ -289,29 +267,24 @@ def _count_tainted_in_dir(jobs_dir):
 
 
 def _collect_jobs(jobs_dir, include_tainted=False, main_shas=None, repo_root=None):
-    """Collect all jobs from directory."""
     jobs_path = Path(jobs_dir)
     if not jobs_path.exists() or not jobs_path.is_dir():
         return []
-
     jobs = []
     try:
         entries = sorted(jobs_path.iterdir())
     except OSError:
         return []
-
     for entry in entries:
         if entry.is_dir() and not entry.name.startswith("."):
             job_info = _collect_job_info(entry, main_shas=main_shas, repo_root=repo_root)
             if not include_tainted and job_info.get("audit_status") == "audit_tainted":
                 continue
             jobs.append(job_info)
-
     return jobs
 
 
 def _mark_merged_jobs(jobs, main_shas):
-    """Mark jobs whose result_sha is already in main."""
     for job in jobs:
         result_sha = job.get("result_sha")
         if result_sha and _is_sha_merged(result_sha, main_shas):
@@ -319,24 +292,13 @@ def _mark_merged_jobs(jobs, main_shas):
 
 
 def _generate_action_items(jobs):
-    """Generate action items with recovery-aware logic.
-
-    Priority order:
-    1. audit_tainted → blocked_jobs
-    2. merged → merged_jobs
-    3. failed → high priority
-    4. unknown → warning
-    5. non_production → informational_jobs
-    6. review_passed + clean + result_sha recovered → ready_for_merge or already_merged
-    7. review_passed + clean + result_sha missing → warning (recovery failed)
-    8. pending/in_progress → continue_processing
-    """
+    """Generate action items. recovered_jobs are a SUBSET of merged_jobs when outcome=already_merged."""
     action_items = []
     warnings = []
     blocked_jobs = []
-    merged_jobs = []
+    merged_jobs = []          # All jobs whose result_sha is in main
     informational_jobs = []
-    recovered_jobs = []
+    recovered_jobs = []       # Jobs where result_sha was recovered (subset of merged if already_merged)
     unresolved_jobs = []
 
     for job in jobs:
@@ -347,6 +309,9 @@ def _generate_action_items(jobs):
         is_non_prod = job.get("non_production", False)
         result_sha = job.get("result_sha")
         result_sha_source = job.get("result_sha_source")
+
+        # Determine if this result_sha was recovered (not from manifest/work-order)
+        is_recovered = result_sha_source and result_sha_source not in ("manifest", "work-order")
 
         # Priority 1: audit_tainted
         if audit == "audit_tainted":
@@ -364,16 +329,17 @@ def _generate_action_items(jobs):
             })
             continue
 
-        # Priority 2: already merged
+        # Priority 2: already merged into main
         if is_merged:
-            merged_jobs.append({
+            merged_entry = {
                 "job_id": job_id,
                 "status": status,
                 "result_sha": result_sha,
                 "result_sha_source": result_sha_source,
-            })
-            # Track recovery if result_sha was recovered
-            if result_sha_source and result_sha_source not in ("manifest", "work-order"):
+            }
+            merged_jobs.append(merged_entry)
+            # If recovered, also track in recovered_jobs (SUBSET relationship)
+            if is_recovered:
                 recovered_jobs.append({
                     "job_id": job_id,
                     "result_sha": result_sha,
@@ -412,8 +378,8 @@ def _generate_action_items(jobs):
         # Priority 6: review_passed + clean
         if status == "review_passed" and audit == "clean":
             if result_sha:
-                # Check if recovered
-                if result_sha_source and result_sha_source not in ("manifest", "work-order"):
+                # If recovered and result_sha not in main, track as recovered
+                if is_recovered:
                     recovered_jobs.append({
                         "job_id": job_id,
                         "result_sha": result_sha,
@@ -427,7 +393,6 @@ def _generate_action_items(jobs):
                     "description": f"Job {job_id} is ready for merge (result_sha: {str(result_sha)[:12]})",
                 })
             else:
-                # Recovery failed
                 warnings.append({
                     "job_id": job_id,
                     "warning": "review_passed but missing result_sha - recovery failed",
@@ -454,16 +419,22 @@ def _generate_action_items(jobs):
 
 def _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs,
                      informational_jobs, recovered_jobs, unresolved_jobs,
-                     total_tainted_in_dir, tainted_in_visible):
-    """Compute summary statistics."""
+                     total_tainted_in_dir, tainted_in_visible, include_merged):
+    """Compute summary with consistent counts.
+
+    merged_total = len(merged_jobs)  (always, regardless of include_merged)
+    hidden_merged = merged_total if not include_merged, else 0
+    """
     from collections import Counter
 
     status_counts = Counter(j["job_status"] for j in jobs)
     audit_counts = Counter(j["audit_status"] for j in jobs)
+    merged_total = len(merged_jobs)
 
     return {
         "total_jobs": len(jobs),
-        "merged_jobs_count": len(merged_jobs),
+        "merged_total": merged_total,
+        "hidden_merged": merged_total if not include_merged else 0,
         "informational_jobs_count": len(informational_jobs),
         "recovered_jobs_count": len(recovered_jobs),
         "unresolved_jobs_count": len(unresolved_jobs),
@@ -479,14 +450,19 @@ def _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs,
 
 
 def _format_json(total_jobs, action_items, warnings, blocked_jobs, merged_jobs,
-                 informational_jobs, recovered_jobs, unresolved_jobs, summary):
-    """Format result as JSON."""
+                 informational_jobs, recovered_jobs, unresolved_jobs, summary,
+                 include_merged):
+    """Format result as JSON.
+
+    When include_merged=False: merged_jobs list is empty (hidden), summary.merged_total still present.
+    When include_merged=True: merged_jobs list is full, summary.hidden_merged=0.
+    """
     return json.dumps({
         "total_jobs": total_jobs,
         "action_items": action_items,
         "warnings": warnings,
         "blocked_jobs": blocked_jobs,
-        "merged_jobs": merged_jobs,
+        "merged_jobs": merged_jobs if include_merged else [],
         "informational_jobs": informational_jobs,
         "recovered_jobs": recovered_jobs,
         "unresolved_jobs": unresolved_jobs,
@@ -495,14 +471,15 @@ def _format_json(total_jobs, action_items, warnings, blocked_jobs, merged_jobs,
 
 
 def _format_text(action_items, warnings, blocked_jobs, merged_jobs,
-                 informational_jobs, recovered_jobs, unresolved_jobs, summary):
-    """Format result as human-readable text."""
+                 informational_jobs, recovered_jobs, unresolved_jobs, summary,
+                 include_merged):
     lines = [
         "========================================",
         "  Vibe Coding Queue Advisor",
         "========================================",
         f"  Total Jobs: {summary['total_jobs']}",
-        f"  Merged: {summary['merged_jobs_count']}",
+        f"  Merged: {summary['merged_total']}"
+        + ("" if include_merged else f" ({summary['hidden_merged']} hidden)"),
         f"  Blocked: {summary['blocked_total']}"
         + (f" ({summary['hidden_blocked']} hidden)" if summary.get("hidden_blocked") else ""),
         f"  Recovered: {summary['recovered_jobs_count']}",
@@ -552,6 +529,13 @@ def _format_text(action_items, warnings, blocked_jobs, merged_jobs,
             lines.append(f"    - {ij['job_id']}: {ij['reason']}")
         lines.append("----------------------------------------")
 
+    if include_merged and merged_jobs:
+        lines.append("  \U0001f504 MERGED JOBS:")
+        for mj in merged_jobs:
+            src = f" ({mj.get('result_sha_source', '?')})" if mj.get("result_sha_source") else ""
+            lines.append(f"    - {mj['job_id']}: {str(mj.get('result_sha', ''))[:12]}{src}")
+        lines.append("----------------------------------------")
+
     if recovered_jobs:
         lines.append("  \U0001f50d RECOVERED:")
         for rj in recovered_jobs:
@@ -569,46 +553,19 @@ def _format_text(action_items, warnings, blocked_jobs, merged_jobs,
 
 
 def build_parser():
-    """Build and return the argument parser."""
     parser = argparse.ArgumentParser(
         prog="vibe_queue_advisor",
-        description="Queue Advisor v4 - Result SHA recovery and warning denoising.",
+        description="Queue Advisor v5 - Summary consistency and recovered/merged clarity.",
     )
-    parser.add_argument(
-        "--jobs-dir",
-        default=None,
-        help="Jobs directory path (default: VIBEDEV_JOBS_DIR env or ~/vibedev/jobs).",
-    )
-    parser.add_argument(
-        "--json",
-        dest="output_json",
-        action="store_true",
-        default=False,
-        help="Output in JSON format.",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Limit number of action items displayed.",
-    )
-    parser.add_argument(
-        "--include-tainted",
-        action="store_true",
-        default=False,
-        help="Include audit_tainted jobs in analysis.",
-    )
-    parser.add_argument(
-        "--include-merged",
-        action="store_true",
-        default=False,
-        help="Include merged jobs in action items output.",
-    )
+    parser.add_argument("--jobs-dir", default=None)
+    parser.add_argument("--json", dest="output_json", action="store_true", default=False)
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--include-tainted", action="store_true", default=False)
+    parser.add_argument("--include-merged", action="store_true", default=False)
     return parser
 
 
 def main(argv=None):
-    """Entry point."""
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -620,7 +577,6 @@ def main(argv=None):
 
     total_tainted_in_dir = _count_tainted_in_dir(jobs_dir)
 
-    # Determine repo root for git operations
     repo_root = None
     for candidate in [os.getcwd(), str(Path(jobs_dir).parent)]:
         test = _run_git("rev-parse", "--git-dir", cwd=candidate)
@@ -644,7 +600,7 @@ def main(argv=None):
     summary = _compute_summary(
         jobs, action_items, warnings, blocked_jobs, merged_jobs,
         informational_jobs, recovered_jobs, unresolved_jobs,
-        total_tainted_in_dir, tainted_in_visible,
+        total_tainted_in_dir, tainted_in_visible, args.include_merged,
     )
 
     if args.limit is not None:
@@ -662,11 +618,11 @@ def main(argv=None):
     if args.output_json:
         output = _format_json(len(jobs), action_items, warnings, blocked_jobs,
                               merged_jobs, informational_jobs, recovered_jobs,
-                              unresolved_jobs, summary)
+                              unresolved_jobs, summary, args.include_merged)
     else:
         output = _format_text(action_items, warnings, blocked_jobs, merged_jobs,
                               informational_jobs, recovered_jobs, unresolved_jobs,
-                              summary)
+                              summary, args.include_merged)
 
     print(output)
     return 0
