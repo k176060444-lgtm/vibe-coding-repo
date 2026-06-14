@@ -335,6 +335,11 @@ python3 scripts/vibe_dispatch_planner.py --compact
 | Autonomous merge wrapper | 统一 merge 入口，防止裸 gh pr merge，保证 gate 验证 |
 | Post-merge freeze | 确保 merge 后状态可审计，锁定 job 不被篡改 |
 
+## Autonomous Operation Runbook
+
+For detailed autonomous operation boundaries, stop conditions, and human approval points, see:
+- **[AUTONOMOUS_OPERATION_RUNBOOK.md](AUTONOMOUS_OPERATION_RUNBOOK.md)**: Full autonomous operation runbook
+
 ## QQ Command Routing Specification
 
 For detailed command specifications, permission boundaries, and prohibited behaviors, see:
