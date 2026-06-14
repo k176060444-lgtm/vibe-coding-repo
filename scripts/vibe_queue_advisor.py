@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Queue Advisor v2 - Next action suggestions with merged-state detection.
+"""Queue Advisor v3 - Actionable next suggestions with smoke/fixture filtering.
 
 Usage:
     python scripts/vibe_queue_advisor.py [--jobs-dir <dir>] [--json] [--limit <N>]
                                           [--include-tainted] [--include-merged]
 
-Changes from v1:
-    - Detects jobs already merged into main (result_sha in main history)
-    - Adds --include-merged flag (default: merged jobs hidden)
-    - JSON output includes merged_jobs
-    - Text output shows merged count
-    - Prevents duplicate merge suggestions for completed jobs
-    - audit_tainted takes precedence over merged state
+Changes from v2:
+    - Actionability rules: only real work orders with clean audit, review_passed,
+      result_sha present, not in main, and verifiable PR/branch → ready_for_merge
+    - smoke/fixture/test/debug/legacy jobs → informational_jobs (never ready_for_merge)
+    - audit_tainted always counted in blocked_total (even when hidden)
+    - JSON: summary.blocked_total, summary.hidden_blocked, informational_jobs
+    - Text: BLOCKED, WARNINGS, INFO sections; blocked_total in header
 
 Constraints:
     - Read-only operations only.
@@ -24,9 +24,30 @@ Constraints:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+
+# Patterns that identify non-production jobs (smoke/fixture/test/debug/legacy)
+_NON_PRODUCTION_PATTERNS = [
+    re.compile(r"^_"),                      # leading underscore
+    re.compile(r"smoke", re.IGNORECASE),
+    re.compile(r"fixture", re.IGNORECASE),
+    re.compile(r"test", re.IGNORECASE),
+    re.compile(r"debug", re.IGNORECASE),
+    re.compile(r"legacy", re.IGNORECASE),
+    re.compile(r"e2e", re.IGNORECASE),
+    re.compile(r"_pipeline", re.IGNORECASE),
+]
+
+
+def _is_non_production(job_id):
+    """Check if a job_id looks like a non-production (smoke/fixture/test/debug/legacy) job."""
+    for pat in _NON_PRODUCTION_PATTERNS:
+        if pat.search(job_id):
+            return True
+    return False
 
 
 def _read_json_file(path):
@@ -39,11 +60,7 @@ def _read_json_file(path):
 
 
 def _get_main_ancestors(repo_root=None):
-    """Return a set of all commit SHAs reachable from main (full + short).
-
-    Uses git rev-list --all to collect all ancestors.
-    Returns empty set on failure (no git, not a repo, etc).
-    """
+    """Return a set of all commit SHAs reachable from main (full + short)."""
     try:
         cwd = repo_root or os.getcwd()
         result = subprocess.run(
@@ -57,7 +74,7 @@ def _get_main_ancestors(repo_root=None):
             line = line.strip()
             if line:
                 shas.add(line)
-                shas.add(line[:12])  # short SHA for prefix matching
+                shas.add(line[:12])
         return shas
     except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
         return set()
@@ -67,10 +84,8 @@ def _is_sha_merged(result_sha, main_shas):
     """Check if result_sha is in the main branch history."""
     if not result_sha:
         return False
-    # Full match
     if result_sha in main_shas:
         return True
-    # Prefix match: result_sha might be short
     for sha in main_shas:
         if sha.startswith(result_sha) or result_sha.startswith(sha):
             return True
@@ -97,6 +112,7 @@ def _collect_job_info(job_dir):
             "records_count": 0,
             "worktree_present": False,
             "merged": False,
+            "non_production": _is_non_production(job_id),
             "error": "missing_work_order",
         }
 
@@ -165,8 +181,30 @@ def _collect_job_info(job_dir):
         "actual_model_used": actual_model_used,
         "records_count": records_count,
         "worktree_present": worktree_present,
-        "merged": False,  # filled in by _mark_merged_jobs
+        "merged": False,
+        "non_production": _is_non_production(job_id),
     }
+
+
+def _count_tainted_in_dir(jobs_dir):
+    """Count audit_tainted jobs in directory (read-only, for hidden_blocked count).
+
+    This runs BEFORE filtering, so even when include_tainted=False,
+    we can report how many tainted jobs exist.
+    """
+    jobs_path = Path(jobs_dir)
+    if not jobs_path.exists() or not jobs_path.is_dir():
+        return 0
+    count = 0
+    try:
+        for entry in jobs_path.iterdir():
+            if entry.is_dir() and not entry.name.startswith("."):
+                wo = _read_json_file(entry / "work-order.json")
+                if wo and wo.get("audit_status") == "audit_tainted":
+                    count += 1
+    except OSError:
+        pass
+    return count
 
 
 def _collect_jobs(jobs_dir, include_tainted=False):
@@ -200,28 +238,32 @@ def _mark_merged_jobs(jobs, main_shas):
 
 
 def _generate_action_items(jobs):
-    """Generate action items based on job status, respecting merged state.
+    """Generate action items with actionability rules.
 
     Priority order:
     1. audit_tainted → blocked_jobs (ALWAYS, regardless of merged state)
     2. merged → merged_jobs (skip action items)
     3. failed → high priority
-    4. unknown → warning
-    5. review_passed + clean → ready_for_merge
-    6. pending/in_progress → continue_processing
+    4. unknown (no work-order) → warning
+    5. non_production (smoke/fixture/test/debug/legacy) → informational_jobs
+    6. review_passed + clean + result_sha not in main → ready_for_merge
+    7. pending/in_progress → continue_processing
+    8. review_passed but missing result_sha → warning
     """
     action_items = []
     warnings = []
     blocked_jobs = []
     merged_jobs = []
+    informational_jobs = []
 
     for job in jobs:
         job_id = job["job_id"]
         status = job["job_status"]
         audit = job["audit_status"]
         is_merged = job.get("merged", False)
+        is_non_prod = job.get("non_production", False)
 
-        # Priority 1: audit_tainted ALWAYS goes to blocked, even if merged
+        # Priority 1: audit_tainted ALWAYS goes to blocked
         if audit == "audit_tainted":
             blocked_jobs.append({
                 "job_id": job_id,
@@ -233,11 +275,11 @@ def _generate_action_items(jobs):
                 "priority": "high",
                 "action": "review_blocked",
                 "job_id": job_id,
-                "description": f"Job {job_id} is audit_tainted - requires manual review and resolution",
+                "description": f"Job {job_id} is audit_tainted - requires manual review",
             })
             continue
 
-        # Priority 2: already merged — track separately, no action items
+        # Priority 2: already merged
         if is_merged:
             merged_jobs.append({
                 "job_id": job_id,
@@ -264,7 +306,16 @@ def _generate_action_items(jobs):
             })
             continue
 
-        # Priority 5: review passed but not merged — candidate for merge
+        # Priority 5: non-production jobs → informational (never ready_for_merge)
+        if is_non_prod:
+            informational_jobs.append({
+                "job_id": job_id,
+                "status": status,
+                "reason": "non-production job (smoke/fixture/test/debug/legacy)",
+            })
+            continue
+
+        # Priority 6: review_passed + clean + result_sha not in main → ready_for_merge
         if status == "review_passed" and audit == "clean":
             if not job.get("result_sha"):
                 warnings.append({
@@ -280,7 +331,7 @@ def _generate_action_items(jobs):
                 })
             continue
 
-        # Priority 6: pending / in-progress
+        # Priority 7: pending / in-progress
         if status in ("pending", "pending_approval", "prepared", "in_progress"):
             action_items.append({
                 "priority": "medium",
@@ -290,11 +341,16 @@ def _generate_action_items(jobs):
             })
             continue
 
-    return action_items, warnings, blocked_jobs, merged_jobs
+    return action_items, warnings, blocked_jobs, merged_jobs, informational_jobs
 
 
-def _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs):
-    """Compute summary statistics."""
+def _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs,
+                     informational_jobs, total_tainted_in_dir, tainted_in_visible):
+    """Compute summary statistics.
+
+    blocked_total = tainted_in_visible (visible blocked jobs in this run)
+    hidden_blocked = total_tainted_in_dir - tainted_in_visible (tainted jobs hidden by default)
+    """
     from collections import Counter
 
     status_counts = Counter(j["job_status"] for j in jobs)
@@ -303,16 +359,20 @@ def _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs):
     return {
         "total_jobs": len(jobs),
         "merged_jobs_count": len(merged_jobs),
+        "informational_jobs_count": len(informational_jobs),
         "by_status": dict(status_counts),
         "by_audit_status": dict(audit_counts),
         "action_items_count": len(action_items),
         "warnings_count": len(warnings),
         "blocked_jobs_count": len(blocked_jobs),
+        "blocked_total": total_tainted_in_dir,
+        "hidden_blocked": max(0, total_tainted_in_dir - tainted_in_visible),
         "high_priority_count": len([a for a in action_items if a.get("priority") == "high"]),
     }
 
 
-def _format_json(total_jobs, action_items, warnings, blocked_jobs, merged_jobs, summary):
+def _format_json(total_jobs, action_items, warnings, blocked_jobs, merged_jobs,
+                 informational_jobs, summary):
     """Format result as JSON."""
     return json.dumps({
         "total_jobs": total_jobs,
@@ -320,11 +380,13 @@ def _format_json(total_jobs, action_items, warnings, blocked_jobs, merged_jobs, 
         "warnings": warnings,
         "blocked_jobs": blocked_jobs,
         "merged_jobs": merged_jobs,
+        "informational_jobs": informational_jobs,
         "summary": summary,
     }, indent=2)
 
 
-def _format_text(action_items, warnings, blocked_jobs, merged_jobs, summary):
+def _format_text(action_items, warnings, blocked_jobs, merged_jobs,
+                 informational_jobs, summary):
     """Format result as human-readable text."""
     lines = [
         "========================================",
@@ -332,13 +394,15 @@ def _format_text(action_items, warnings, blocked_jobs, merged_jobs, summary):
         "========================================",
         f"  Total Jobs: {summary['total_jobs']}",
         f"  Merged: {summary['merged_jobs_count']}",
+        f"  Blocked: {summary['blocked_total']}"
+        + (f" ({summary['hidden_blocked']} hidden)" if summary.get("hidden_blocked") else ""),
         f"  Action Items: {summary['action_items_count']}",
         f"  Warnings: {summary['warnings_count']}",
-        f"  Blocked: {summary['blocked_jobs_count']}",
+        f"  Info: {summary['informational_jobs_count']}",
         "----------------------------------------",
     ]
 
-    # Blocked jobs first
+    # Blocked jobs
     if blocked_jobs:
         lines.append("  \u26d4 BLOCKED JOBS:")
         for bj in blocked_jobs:
@@ -374,6 +438,14 @@ def _format_text(action_items, warnings, blocked_jobs, merged_jobs, summary):
         lines.append("  \u26a0\ufe0f  WARNINGS:")
         for w in warnings:
             lines.append(f"    - {w['job_id']}: {w['warning']}")
+        lines.append("----------------------------------------")
+
+    # Informational (non-production)
+    if informational_jobs:
+        lines.append("  \U0001f4cb INFO (non-production):")
+        for ij in informational_jobs:
+            lines.append(f"    - {ij['job_id']}: {ij['reason']}")
+        lines.append("----------------------------------------")
 
     lines.append("========================================")
     return "\n".join(lines)
@@ -383,7 +455,7 @@ def build_parser():
     """Build and return the argument parser."""
     parser = argparse.ArgumentParser(
         prog="vibe_queue_advisor",
-        description="Queue Advisor v2 - Next action suggestions with merged-state detection.",
+        description="Queue Advisor v3 - Actionable suggestions with smoke/fixture filtering.",
     )
     parser.add_argument(
         "--jobs-dir",
@@ -429,6 +501,9 @@ def main(argv=None):
         or os.path.expanduser("~/vibedev/jobs")
     )
 
+    # Count total tainted in directory BEFORE filtering
+    total_tainted_in_dir = _count_tainted_in_dir(jobs_dir)
+
     # Collect main branch ancestors for merge detection
     main_shas = set()
     for candidate in [os.getcwd(), str(Path(jobs_dir).parent)]:
@@ -438,8 +513,14 @@ def main(argv=None):
 
     jobs = _collect_jobs(jobs_dir, include_tainted=args.include_tainted)
     _mark_merged_jobs(jobs, main_shas)
-    action_items, warnings, blocked_jobs, merged_jobs = _generate_action_items(jobs)
-    summary = _compute_summary(jobs, action_items, warnings, blocked_jobs, merged_jobs)
+
+    tainted_in_visible = sum(1 for j in jobs if j.get("audit_status") == "audit_tainted")
+
+    action_items, warnings, blocked_jobs, merged_jobs, informational_jobs = _generate_action_items(jobs)
+    summary = _compute_summary(
+        jobs, action_items, warnings, blocked_jobs, merged_jobs,
+        informational_jobs, total_tainted_in_dir, tainted_in_visible,
+    )
 
     # Apply limit to action_items
     if args.limit is not None:
@@ -456,9 +537,11 @@ def main(argv=None):
             })
 
     if args.output_json:
-        output = _format_json(len(jobs), action_items, warnings, blocked_jobs, merged_jobs, summary)
+        output = _format_json(len(jobs), action_items, warnings, blocked_jobs,
+                              merged_jobs, informational_jobs, summary)
     else:
-        output = _format_text(action_items, warnings, blocked_jobs, merged_jobs, summary)
+        output = _format_text(action_items, warnings, blocked_jobs, merged_jobs,
+                              informational_jobs, summary)
 
     print(output)
     return 0
