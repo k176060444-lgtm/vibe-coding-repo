@@ -202,3 +202,32 @@ The current toolchain state is documented in [TOOLCHAIN_FREEZE.md](TOOLCHAIN_FRE
 2. Use wrapper for all merges: 
 3. Check recommendation consistency: snapshot/dispatch/batch-plan must agree
 4. Respect the permanent audit_tainted lock on 
+
+
+## Live Entry Points (QQ/Hermes)
+
+### Daily Autonomous Workflow
+
+1. **Morning check**: `/s --compact` — verify queue_clean, no new blockers
+2. **Health gate**: `/h` — all 7 checks must pass before starting work
+3. **Plan next work**: `/d --compact` — check recommended_action
+4. **Batch execution**: `/b --json` — get execution plan for multiple tasks
+5. **Post-work verification**: `/sm` — full smoke suite (11 tests)
+
+### When to Stop and Ask Human
+
+| Signal | Command | Action |
+|--------|---------|--------|
+| `resolve_blocked` in dispatch | `/d` | STOP — tainted lock needs human |
+| `investigate_failures` | `/d` | STOP — failed job needs analysis |
+| Health check FAIL | `/h` | STOP — toolchain broken |
+| Smoke test FAIL | `/sm` | STOP — regression detected |
+| `allow_merge=false` | wrapper | STOP — gate blocker |
+
+### When to Proceed Autonomously
+
+| Signal | Command | Action |
+|--------|---------|--------|
+| `queue_clean` | `/d` | Proceed with next planned Work Order |
+| All PASS | `/h`, `/sm` | Safe to execute |
+| `tasks=0` | `/b` | Queue empty, plan new work |
