@@ -31,7 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -41,6 +41,7 @@ COMMAND_SCRIPTS = {
     "batch-plan": "vibe_batch_plan.py",
     "health": "vibe_health_check.py",
     "smoke": "test_toolchain_smoke.py",
+    "intake": "vibe_workorder_intake.py",
 }
 
 # Short aliases
@@ -51,6 +52,8 @@ ALIASES = {
     "b": "batch-plan",
     "h": "health",
     "sm": "smoke",
+    "i": "intake",
+    "wo": "intake",
     "?": "help",
     "v": "version",
 }
@@ -63,6 +66,7 @@ COMMAND_DESCRIPTIONS = {
     "batch-plan": "Batch Queue Plan - execution plan for multiple Work Orders",
     "health": "Health Check - toolchain verification",
     "smoke": "Toolchain Smoke Suite - verify all tools work",
+    "intake": "Work Order Intake - convert requirements to drafts",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -159,7 +163,7 @@ def build_parser():
         prog="vibe_command_router",
         description="Command Router v2 - Enhanced unified CLI for QQ/Hermes orchestrator.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Aliases: s=snapshot a=advisor d=dispatch b=batch-plan h=health sm=smoke ?=help v=version",
+        epilog="Aliases: s=snapshot a=advisor d=dispatch b=batch-plan h=health sm=smoke i/intake=wo-intake ?=help v=version",
     )
     parser.add_argument(
         "command",

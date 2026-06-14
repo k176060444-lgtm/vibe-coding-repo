@@ -14,6 +14,7 @@ Use the command router for all operations:
 | `b` | batch-plan | Batch Queue Plan |
 | `h` | health | Health Check |
 | `sm` | smoke | Toolchain Smoke Suite |
+| `i` / `wo` | intake | Work Order Intake |
 | `?` | help | Show help |
 | `v` | version | Show version |
 
@@ -475,3 +476,26 @@ $ python scripts/vibe_workorder_intake.py 'Update workflow docs' --type doc --js
 | high | refactor, breaking change, api change | Required |
 | medium | new script, new feature, modify | Not required |
 | low | documentation, typo, rename | Not required |
+
+
+### Intake via Router
+
+```
+$ python scripts/vibe_command_router.py intake 'Add --summary flag to snapshot'
+# Work Order Draft
+
+**ID**: `wo-code-add-summary-flag-001`
+**Title**: Add --summary flag to snapshot
+**Type**: code
+**Risk**: low
+...
+
+$ python scripts/vibe_command_router.py i 'Fix advisor crash' --type fix --priority high --json
+{
+  "work_order_id": "wo-fix-fix-advisor-crash-001",
+  "type": "fix",
+  "risk_level": "high",
+  "requires_human_approval": true,
+  ...
+}
+```

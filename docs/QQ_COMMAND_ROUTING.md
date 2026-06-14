@@ -384,3 +384,30 @@ Bot: { "total_jobs": 26, "action_items": [], ... }
 | Destructive | (none exposed) | N/A |
 
 All QQ-facing commands are read-only. The merge command is NOT exposed via QQ routing — it requires direct CLI access with wrapper gate.
+
+
+## Work Order Intake via QQ
+
+```
+User: /i Add --summary flag to snapshot
+Bot:
+  # Work Order Draft
+  **ID**: `wo-code-add-summary-flag-001`
+  **Type**: code
+  **Risk**: low
+  **Human Approval**: Not required
+  ...
+```
+
+```
+User: /wo Fix advisor crash --type fix --json
+Bot: { "work_order_id": "wo-fix-fix-advisor-crash-001", "type": "fix", "risk_level": "high", ... }
+```
+
+### QQ Intake Safety
+
+| Check | Behavior |
+|-------|----------|
+| Risk=high/critical | Marks `requires_human_approval=true` |
+| Draft only | Never auto-executes |
+| Forbidden detection | Warns if requirement mentions dangerous ops |
