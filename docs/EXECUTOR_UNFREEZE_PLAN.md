@@ -309,3 +309,6 @@ No level may be activated without explicit human approval and all entry conditio
 - `scripts/vibe_execution_gate.py` — gate checks
 - `scripts/vibe_executor_recovery.py` — recovery plans
 - `scripts/vibe_executor_control.py` — timeout/cancel control
+
+## Level 1 Fixture Specification
+Detailed fixture spec: docs/MINIMAL_EXECUTOR_FIXTURE_SPEC.md

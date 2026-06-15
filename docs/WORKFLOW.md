@@ -940,3 +940,6 @@ See docs/REAL_FEATURE_DEMO.md for a complete walkthrough from natural language t
 
 ## Executor Unfreeze Plan
 See docs/EXECUTOR_UNFREEZE_PLAN.md for graduated unfreeze levels (0-4).
+
+## Minimal Executor Fixture Spec
+See docs/MINIMAL_EXECUTOR_FIXTURE_SPEC.md for Level 1 fixture definition.
