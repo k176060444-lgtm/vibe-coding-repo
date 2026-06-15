@@ -17,6 +17,9 @@ Use the command router for all operations:
 | `i` / `wo` | intake | Work Order Intake |
 | `notes` / `rn` / `progress` | release-notes | Release Notes |
 | `dash` / `status-page` | dashboard | Project Dashboard |
+| `validate` / `vw` | validate-wo | Work Order Validator |
+| `pack` / `pw` | pack-wo | Work Order Packager |
+| `pre` | preflight | Preflight Check (intake+validate+pack) |
 | `?` | help | Show help |
 | `v` | version | Show version |
 
@@ -524,6 +527,9 @@ The smoke suite now covers 16 tests:
 - 23: Dashboard - aliases (dash, status-page)
 - 24: Daily Report - text
 - 25: Daily Report - JSON
+- 26: Validator - basic validation
+- 27: Packager - basic packaging
+- 28: Preflight - router chain
 
 
 ## Release Notes / Progress Report
@@ -772,4 +778,24 @@ $ python scripts/vibe_workorder_packager.py draft.json --max-chars 500
 ...
 === Chunk 2/3 ===
 ...
+```
+
+
+### Preflight Chain
+
+```
+$ python scripts/vibe_command_router.py preflight 'Add --verbose flag to health check'
+========================================
+  Preflight Check
+========================================
+  Requirement: Add --verbose flag to health check
+  Draft ID:    wo-code-add-verbose-flag-001
+  Type:        code
+  Risk:        low
+  Human:       False
+  Validation:  PASS
+  Package:     2278 chars, 1 chunk(s)
+----------------------------------------
+  ✓ Preflight: PASS
+========================================
 ```

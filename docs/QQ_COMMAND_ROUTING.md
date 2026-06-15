@@ -461,3 +461,16 @@ Bot: { "dashboard_path": "docs/PROJECT_DASHBOARD.md", "exists": true, ... }
 |---------|-----------|-------------|
 | /dash | ✅ | No |
 | /status-page | ✅ | No |
+
+
+## Preflight via QQ
+
+```
+User: /pre Add --verbose flag to health check
+Bot:
+  Preflight Check
+  Draft: wo-code-add-verbose-flag-001
+  Type: code | Risk: low | Human: False
+  Validation: PASS | Package: 2278 chars
+  ✓ Preflight: PASS
+```
