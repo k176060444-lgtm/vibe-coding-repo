@@ -711,3 +711,23 @@ router reg register --id my-wo      # Register new entry
 ```
 
 Registry entries track work order lifecycle: draft → validated → packaged → approved → executed → blocked.
+
+
+### Status Transitions
+
+The registry supports controlled status transitions with append-only history:
+
+```
+draft → validated → packaged → approved → executed
+  ↓         ↓          ↓         ↓         ↓
+blocked   blocked    blocked   blocked   blocked
+  ↓
+draft (reset from blocked)
+```
+
+Each transition requires:
+- Valid target status (illegal jumps rejected)
+- Reason for audit trail
+- Automatic timestamp and history digest
+
+Status history is append-only and includes SHA256 digest for integrity verification.

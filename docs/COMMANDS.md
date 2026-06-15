@@ -859,3 +859,27 @@ python3 scripts/vibe_command_router.py reg list --json
 python3 scripts/vibe_command_router.py reg show --id my-wo
 python3 scripts/vibe_command_router.py wo-list --registry-dir /tmp/registry
 ```
+
+
+### `update-status` (Status Transitions)
+Update status with controlled transitions and append-only history.
+
+**Valid Transitions:**
+- draft → validated, blocked
+- validated → packaged, blocked
+- packaged → approved, blocked
+- approved → executed, blocked
+- executed → blocked
+- blocked → draft (reset)
+
+**Usage:**
+```
+python3 scripts/vibe_workorder_registry.py update-status --id my-wo --status validated --reason "All checks passed"
+python3 scripts/vibe_workorder_registry.py update-status --id my-wo --status packaged --reason "Package ready" --json
+```
+
+**Features:**
+- Validates transitions (rejects illegal jumps)
+- Requires --reason for audit trail
+- Append-only history with SHA256 digest
+- JSON output with --json flag
