@@ -1146,3 +1146,19 @@ python3 scripts/vibe_command_router.py unfreeze --level 4 --compact
 ```
 
 **Output:** required_approvals, required_green_checks, forbidden_actions, evidence_required, rollback_required, go_no_go
+
+
+### quality-gate (qg, go-no-go)
+
+Workflow Quality Gate — aggregated pre/post-execution health check.
+
+```bash
+python scripts/vibe_command_router.py quality-gate [--json] [--compact]
+python scripts/vibe_command_router.py qg --json
+python scripts/vibe_command_router.py go-no-go
+```
+
+Checks: smoke suite, router version, audit lock, origin/main sync, loop summary, evidence verifier.
+
+Output: PASS / WARN / BLOCK with operator summary.
+

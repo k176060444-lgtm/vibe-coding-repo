@@ -978,3 +978,54 @@ The `operator_summary` field provides a human-readable explanation:
 The `missing_fields` list identifies all absent fields across WARN/FAIL checks.
 In fixture mode, expected missing fields include: `registry_entry`, `approval_receipt`, `smoke_result`.
 
+
+## Workflow Quality Gate
+
+The **quality gate** (`scripts/vibe_quality_gate.py`) provides a single-command
+aggregated health check for the entire autonomous loop. Run it before and after
+every real executor invocation to verify system readiness.
+
+### Usage
+
+```bash
+# Full output
+python3 scripts/vibe_quality_gate.py
+
+# JSON for automation
+python3 scripts/vibe_quality_gate.py --json
+
+# Compact one-liner
+python3 scripts/vibe_quality_gate.py --compact
+
+# Via router
+python scripts/vibe_command_router.py qg --json
+python scripts/vibe_command_router.py go-no-go
+```
+
+### Verdict Rules
+
+| Verdict | Meaning | Operator Action |
+|---------|---------|-----------------|
+| **PASS** | All core checks passed | Proceed with execution |
+| **WARN** | Acceptable degradation | Review warnings, then proceed if justified |
+| **BLOCK** | Critical failure | Do NOT proceed — investigate and fix |
+
+### When BLOCK triggers:
+- Smoke suite has failures
+- origin/main is unreachable or mismatched
+- Audit lock (`wo-code-repo-status-001`) is missing or `push_allowed` is not `false`
+- Quality gate script itself is missing
+
+### When WARN triggers:
+- Loop summary is unavailable
+- Evidence verifier is missing
+- Router version check failed
+- Non-critical component degradation
+
+### Integration with Real Executor
+
+```
+Pre-execution:  quality-gate → if PASS/WARN → proceed
+Post-execution: quality-gate → verify no regressions
+```
+
