@@ -639,3 +639,38 @@ $ python scripts/vibe_demo_scenarios.py --scenario queue-clean
 | `queue-clean` | snapshot→dispatch→release-notes | 3 |
 | `feature-request` | intake→dispatch→batch-plan | 3 |
 | `maintenance` | health→release-notes→snapshot | 3 |
+
+
+## Report Export
+
+Export toolchain reports (snapshot, release-notes, dashboard) to files.
+
+```
+$ python scripts/vibe_report_export.py --kind snapshot --dry-run
+========================================
+  Report Export: snapshot
+========================================
+  ✓ snapshot: snapshot_20260615_001530.md
+----------------------------------------
+  Exported: 1/1
+  Mode: DRY RUN (no files written)
+========================================
+
+$ python scripts/vibe_report_export.py --kind all --output-dir /tmp/reports --json
+{
+  "kind": "all",
+  "exported": 3,
+  "total": 3,
+  "output_dir": "/tmp/reports",
+  "written_files": ["/tmp/reports/snapshot_....md", ...]
+}
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--kind` | snapshot, release-notes, dashboard, or all |
+| `--output-dir` | Directory to write report files |
+| `--json` | JSON output |
+| `--dry-run` | Preview without writing |
