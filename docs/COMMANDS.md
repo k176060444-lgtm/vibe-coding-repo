@@ -1164,6 +1164,25 @@ Output: PASS / WARN / BLOCK with operator summary.
 
 
 
+
+
+### priv-approval (priv-appr, approval)
+
+Privileged Approval — controlled approval workflow for high-privilege actions.
+
+\
+**Short approval words:** approve, confirmed, 批准, 确认, 同意, 可以执行
+
+**Output fields:** action_id, repo, branch, action, base_sha, changed_paths, forbidden_actions, expires_at, digest, status (pending|approved|expired|blocked)
+
+
+### priv-push (pp, push-approved)
+
+Privileged Push Wrapper — dry-run controlled push for approved actions.
+
+\
+**Output:** would_push (true/false), blockers, warnings, dry_run=true. Never reads GitHub Key. Never pushes.
+
 ### QQ Operator Quick Reference
 
 See [QQ_OPERATOR_CHEATSHEET.md](QQ_OPERATOR_CHEATSHEET.md) for mobile QQ operation shortcuts.
