@@ -465,6 +465,67 @@ def _test_release_notes_router(script_dir):
     return {"passed": True, "message": "router notes works"}
 
 
+
+def _test_dashboard_text(script_dir):
+    """Test dashboard text output via router."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["dash"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    if "Dashboard" not in stdout:
+        return {"passed": False, "message": "missing dashboard output"}
+
+    if "PROJECT_DASHBOARD.md" not in stdout:
+        return {"passed": False, "message": "missing dashboard path"}
+
+    return {"passed": True, "message": "dashboard text output"}
+
+
+def _test_dashboard_json(script_dir):
+    """Test dashboard JSON output."""
+    import json as _json
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["dash", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    try:
+        d = _json.loads(stdout)
+    except _json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    if not d.get("exists"):
+        return {"passed": False, "message": "dashboard file not found"}
+
+    if "version" not in d:
+        return {"passed": False, "message": "missing version"}
+
+    return {"passed": True, "message": "ver=%s cmds=%d" % (d.get("version"), len(d.get("commands", [])))}
+
+
+def _test_dashboard_aliases(script_dir):
+    """Test dashboard aliases (dash, status-page)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    for alias in ["dash", "status-page"]:
+        rc, stdout, stderr = _run_script(path, [alias])
+        if rc != 0:
+            return {"passed": False, "message": "alias '%s' failed: exit %d" % (alias, rc)}
+        if "Dashboard" not in stdout:
+            return {"passed": False, "message": "alias '%s' missing output" % alias}
+
+    return {"passed": True, "message": "dash + status-page work"}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -533,6 +594,15 @@ def run_tests(jobs_dir=None):
     
     # Test 20: Release Notes - router
     tests.append(_run_test("release_notes_router", lambda: _test_release_notes_router(script_dir)))
+    
+    # Test 21: Dashboard - text output
+    tests.append(_run_test("dashboard_text", lambda: _test_dashboard_text(script_dir)))
+    
+    # Test 22: Dashboard - JSON output
+    tests.append(_run_test("dashboard_json", lambda: _test_dashboard_json(script_dir)))
+    
+    # Test 23: Dashboard - aliases
+    tests.append(_run_test("dashboard_aliases", lambda: _test_dashboard_aliases(script_dir)))
     
     return tests
 

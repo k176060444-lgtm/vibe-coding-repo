@@ -562,3 +562,13 @@ The [PROJECT_DASHBOARD.md](PROJECT_DASHBOARD.md) provides a single-page operator
 - Safety and audit status
 - Lifecycle summary
 - Quick command reference
+
+
+## Smoke Suite v4 (23 tests)
+
+Dashboard smoke coverage added:
+- 21: Dashboard text output via router
+- 22: Dashboard JSON output with metadata
+- 23: Dashboard aliases (dash, status-page)
+
+Run: `python scripts/test_toolchain_smoke.py`
