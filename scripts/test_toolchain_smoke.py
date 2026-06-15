@@ -526,6 +526,50 @@ def _test_dashboard_aliases(script_dir):
     return {"passed": True, "message": "dash + status-page work"}
 
 
+
+def _test_daily_report_text(script_dir):
+    """Test daily report text output."""
+    path = script_dir / "vibe_daily_report.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["--compact"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    if "Daily Report" not in stdout:
+        return {"passed": False, "message": "missing title"}
+
+    if "Main:" not in stdout:
+        return {"passed": False, "message": "missing main SHA"}
+
+    return {"passed": True, "message": "daily report generated"}
+
+
+def _test_daily_report_json(script_dir):
+    """Test daily report JSON output."""
+    import json as _json
+    path = script_dir / "vibe_daily_report.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    try:
+        d = _json.loads(stdout)
+    except _json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    required = ["main_sha", "router_version", "smoke", "health", "queue", "next_action"]
+    missing = [k for k in required if k not in d]
+    if missing:
+        return {"passed": False, "message": "missing: %s" % ", ".join(missing)}
+
+    return {"passed": True, "message": "smoke=%s health=%s" % (d["smoke"]["overall"], d["health"]["overall"])}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -603,6 +647,12 @@ def run_tests(jobs_dir=None):
     
     # Test 23: Dashboard - aliases
     tests.append(_run_test("dashboard_aliases", lambda: _test_dashboard_aliases(script_dir)))
+    
+    # Test 24: Daily Report - text
+    tests.append(_run_test("daily_report_text", lambda: _test_daily_report_text(script_dir)))
+    
+    # Test 25: Daily Report - JSON
+    tests.append(_run_test("daily_report_json", lambda: _test_daily_report_json(script_dir)))
     
     return tests
 
