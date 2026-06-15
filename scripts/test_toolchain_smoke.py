@@ -3017,6 +3017,201 @@ def _test_bare_gh_merge_forbidden(script_dir):
     return {"passed": True, "message": "wrapper merge documented"}
 
 
+
+
+def _test_batch_runner_status(script_dir):
+    """Test batch runner --status returns capabilities."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--status", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data.get("repo_trust_level") != "trusted-self":
+        return {"passed": False, "message": "expected trusted-self"}
+    if "stop_conditions" not in data:
+        return {"passed": False, "message": "missing stop_conditions"}
+    if len(data["stop_conditions"]) < 8:
+        return {"passed": False, "message": "too few stop conditions: %d" % len(data["stop_conditions"])}
+    return {"passed": True, "message": "batch runner status ok, %d stop conditions" % len(data["stop_conditions"])}
+
+
+def _test_batch_runner_dry_run(script_dir):
+    """Test batch runner --dry-run validates batch plan."""
+    import tempfile, json as json_mod
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-batch-")
+    batch_path = pathlib.Path(tmpdir) / "batch.json"
+    batch = {
+        "batch_id": "test-batch-001",
+        "repo": "k176060444-lgtm/vibe-coding-repo",
+        "work_orders": [
+            {
+                "wo_id": "test-wo-001",
+                "branch": "v101/test-001",
+                "title": "test: wo 001",
+                "changed_paths": ["scripts/test.py"],
+                "allowed_paths": ["scripts/test.py"],
+            },
+            {
+                "wo_id": "test-wo-002",
+                "branch": "v101/test-002",
+                "title": "test: wo 002",
+                "changed_paths": ["docs/test.md"],
+                "allowed_paths": ["docs/test.md"],
+            },
+        ],
+    }
+    batch_path.write_text(json_mod.dumps(batch))
+    rc, stdout, stderr = _run_script(path, ["--batch", str(batch_path), "--dry-run", "--json"])
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON: %s" % stdout[:100]}
+    if data.get("status") != "completed":
+        return {"passed": False, "message": "expected completed, got %s" % data.get("status")}
+    if data.get("completed") != 2:
+        return {"passed": False, "message": "expected 2 completed, got %d" % data.get("completed")}
+    return {"passed": True, "message": "batch dry-run ok, %d WOs" % data.get("completed")}
+
+
+def _test_batch_runner_stop_on_policy_violation(script_dir):
+    """Test batch runner stops when policy gate fails."""
+    import tempfile, json as json_mod
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-batch-")
+    batch_path = pathlib.Path(tmpdir) / "batch.json"
+    batch = {
+        "batch_id": "test-batch-stop",
+        "repo": "k176060444-lgtm/vibe-coding-repo",
+        "work_orders": [
+            {
+                "wo_id": "test-wo-ok",
+                "branch": "v101/test-ok",
+                "title": "test: ok",
+                "changed_paths": ["scripts/test.py"],
+                "allowed_paths": ["scripts/test.py"],
+            },
+            {
+                "wo_id": "test-wo-bad",
+                "branch": "v101/test-bad",
+                "title": "test: bad path",
+                "changed_paths": [".github/workflows/deploy.yml"],
+                "allowed_paths": ["scripts/test.py"],
+            },
+        ],
+    }
+    batch_path.write_text(json_mod.dumps(batch))
+    rc, stdout, stderr = _run_script(path, ["--batch", str(batch_path), "--dry-run", "--json"])
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data.get("status") != "stopped":
+        return {"passed": False, "message": "expected stopped, got %s" % data.get("status")}
+    if data.get("stop_reason") != "unexpected_changed_paths":
+        return {"passed": False, "message": "expected unexpected_changed_paths, got %s" % data.get("stop_reason")}
+    if data.get("completed") != 1:
+        return {"passed": False, "message": "expected 1 completed before stop, got %d" % data.get("completed")}
+    return {"passed": True, "message": "batch stopped on policy violation, %d completed" % data.get("completed")}
+
+
+def _test_batch_runner_external_repo_block(script_dir):
+    """Test batch runner blocks external repo."""
+    import tempfile, json as json_mod
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-batch-")
+    batch_path = pathlib.Path(tmpdir) / "batch.json"
+    batch = {
+        "batch_id": "test-batch-ext",
+        "repo": "other-org/other-repo",
+        "work_orders": [{"wo_id": "ext-001", "branch": "main", "changed_paths": ["src/x.py"], "allowed_paths": ["src/x.py"]}],
+    }
+    batch_path.write_text(json_mod.dumps(batch))
+    rc, stdout, stderr = _run_script(path, ["--batch", str(batch_path), "--dry-run", "--json"])
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data.get("status") != "blocked":
+        return {"passed": False, "message": "expected blocked, got %s" % data.get("status")}
+    return {"passed": True, "message": "external repo correctly blocked"}
+
+
+def _test_batch_runner_max_size(script_dir):
+    """Test batch runner rejects >5 work orders."""
+    import tempfile, json as json_mod
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-batch-")
+    batch_path = pathlib.Path(tmpdir) / "batch.json"
+    batch = {
+        "batch_id": "test-batch-big",
+        "repo": "k176060444-lgtm/vibe-coding-repo",
+        "work_orders": [
+            {"wo_id": f"wo-{i}", "branch": f"v101/wo-{i}", "changed_paths": [f"scripts/x{i}.py"], "allowed_paths": [f"scripts/x{i}.py"]}
+            for i in range(6)
+        ],
+    }
+    batch_path.write_text(json_mod.dumps(batch))
+    rc, stdout, stderr = _run_script(path, ["--batch", str(batch_path), "--dry-run", "--json"])
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if "error" not in data and data.get("status") != "blocked":
+        return {"passed": False, "message": "should reject >5 WOs"}
+    return {"passed": True, "message": "max size enforced"}
+
+
+def _test_batch_runner_router(script_dir):
+    """Test batch-runner router alias (br, batch)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+    rc, stdout, stderr = _run_script(path, ["br", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from router"}
+    if "stop_conditions" not in data and "batch_runner_version" not in data:
+        return {"passed": False, "message": "missing batch runner fields"}
+    return {"passed": True, "message": "br->batch-runner ok"}
+
+
+def _test_batch_runner_token_redaction(script_dir):
+    """Test batch runner does not leak token patterns."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--status", "--json"])
+    combined = stdout + stderr
+    suspicious = ["ghp_", "gho_", "github_pat_", "Bearer ", "Basic "]
+    for pat in suspicious:
+        if pat in combined:
+            return {"passed": False, "message": "token pattern found: %s" % pat}
+    return {"passed": True, "message": "no token patterns in batch runner output"}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
