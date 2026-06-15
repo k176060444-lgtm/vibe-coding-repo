@@ -48,7 +48,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.12.0"
+VERSION = "2.13.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -83,6 +83,7 @@ COMMAND_SCRIPTS = {
     "priv-approval": "vibe_privileged_approval.py",
     "priv-push": "vibe_privileged_push.py",
     "trusted-loop": "vibe_trusted_self_loop.py",
+    "batch-runner": "vibe_batch_runner.py",
 }
 
 # Short aliases
@@ -143,6 +144,8 @@ ALIASES = {
     "tl": "trusted-loop",
     "auto-loop": "trusted-loop",
     "loop": "trusted-loop",
+    "br": "batch-runner",
+    "batch": "batch-runner",
     "?": "help",
     "v": "version",
 }
@@ -208,6 +211,7 @@ COMMAND_FLAGS = {
     "priv-approval": ["--json", "--approval-dir"],
     "priv-push": ["--json", "--compact", "--approval-dir", "--action-id", "--list-approved"],
     "trusted-loop": ["--json", "--compact", "--check", "--contract"],
+    "batch-runner": ["--json", "--compact", "--batch", "--status", "--dry-run"],
 }
 
 
@@ -282,6 +286,7 @@ def _show_help():
     lines.append("  priv-approval (priv-appr, approval)  Privileged approval workflow")
     lines.append("  priv-push (pp, push-approved)  Privileged push dry-run")
     lines.append("  trusted-loop (tl, auto-loop, loop)  Trusted self-repo auto-loop")
+    lines.append("  batch-runner (br, batch)  Trusted self-repo batch runner")
     lines.append("  snapshot                     Operator status snapshot")
     lines.append("")
     lines.append("Options:")
@@ -510,6 +515,11 @@ def main(argv=None):
         if not args or args[0].startswith("-"):
             if not any(a in ("--check", "--contract", "--validate") for a in args):
                 args = ["--check"] + args
+
+    # Special handling for batch-runner command (default to --status)
+    if cmd == "batch-runner":
+        if not args:
+            args = ["--status"]
 
     return _run_script(script_path, args)
 
