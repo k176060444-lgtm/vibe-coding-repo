@@ -1074,3 +1074,12 @@ python scripts/vibe_command_router.py handoff --compact
 | QG:BLOCK, Next:HALT | Investigate and fix before any execution |
 | Audit lock missing | STOP — critical security issue |
 
+
+## V1 Operational Freeze
+
+The V1 workflow is now frozen and operational. See [V1_OPERATIONAL_FREEZE.md](V1_OPERATIONAL_FREEZE.md) for full details.
+
+Key commands before/after every execution:
+-  — quality gate (must PASS)
+-  — run report (generate summary)
+-  — V1 freeze check (verify freeze intact)
