@@ -142,8 +142,8 @@ def cmd_verify(args):
     if entry:
         checks.append({"name": "registry_entry", "result": "PASS", "detail": "Registry entry exists"})
     else:
-        checks.append({"name": "registry_entry", "result": "WARN", "detail": "Registry entry not found"})
-        warnings.append(f"Registry entry '{workorder_id}' not found")
+        checks.append({"name": "registry_entry", "result": "WARN", "detail": "Registry entry not found", "missing_fields": ["registry_entry"], "expected_fixture_mode": True})
+        warnings.append(f"Registry entry '{workorder_id}' not found (expected in fixture mode)")
 
     # Check 4: Approval receipt exists
     receipts_dir = registry_dir / "receipts"
@@ -151,8 +151,8 @@ def cmd_verify(args):
     if receipt:
         checks.append({"name": "approval_receipt", "result": "PASS", "detail": "Approval receipt exists"})
     else:
-        checks.append({"name": "approval_receipt", "result": "WARN", "detail": "Approval receipt not found"})
-        warnings.append(f"Approval receipt for '{workorder_id}' not found")
+        checks.append({"name": "approval_receipt", "result": "WARN", "detail": "Approval receipt not found", "missing_fields": ["approval_receipt"], "expected_fixture_mode": True})
+        warnings.append(f"Approval receipt for '{workorder_id}' not found (expected in fixture mode)")
 
     # Check 5: SHAs are non-empty
     if evidence.get("base_sha") and evidence.get("result_sha"):
@@ -170,8 +170,8 @@ def cmd_verify(args):
             checks.append({"name": "smoke_result", "result": "WARN", "detail": f"Smoke: {smoke_result}"})
             warnings.append(f"Smoke result indicates issues: {smoke_result}")
     else:
-        checks.append({"name": "smoke_result", "result": "WARN", "detail": "No smoke result recorded"})
-        warnings.append("No smoke result recorded")
+        checks.append({"name": "smoke_result", "result": "WARN", "detail": "No smoke result recorded", "missing_fields": ["smoke_result"], "expected_fixture_mode": True})
+        warnings.append("No smoke result recorded (expected in fixture mode)")
 
     # Check 7: Job status
     job_status = evidence.get("job_status", "")
@@ -179,7 +179,7 @@ def cmd_verify(args):
         if "passed" in job_status.lower() or "clean" in job_status.lower():
             checks.append({"name": "job_status", "result": "PASS", "detail": f"Job status: {job_status}"})
         else:
-            checks.append({"name": "job_status", "result": "WARN", "detail": f"Job status: {job_status}"})
+            checks.append({"name": "job_status", "result": "WARN", "detail": f"Job status: {job_status}", "expected_fixture_mode": job_status == "completed"})
             warnings.append(f"Job status indicates issues: {job_status}")
     else:
         checks.append({"name": "job_status", "result": "WARN", "detail": "No job status recorded"})
@@ -225,6 +225,15 @@ def cmd_verify(args):
     else:
         verdict = "PASS"
 
+    # Collect all missing fields from WARN/FAIL checks
+    all_missing = []
+    fixture_mode = False
+    for c in checks:
+        if c.get("missing_fields"):
+            all_missing.extend(c["missing_fields"])
+        if c.get("expected_fixture_mode"):
+            fixture_mode = True
+
     result = {
         "verdict": verdict,
         "evidence_id": evidence_id,
@@ -232,6 +241,8 @@ def cmd_verify(args):
         "checks": checks,
         "errors": errors,
         "warnings": warnings,
+        "missing_fields": sorted(set(all_missing)),
+        "expected_fixture_mode": fixture_mode,
         "summary": {
             "total": len(checks),
             "pass": sum(1 for c in checks if c["result"] == "PASS"),
