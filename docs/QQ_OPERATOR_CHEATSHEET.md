@@ -147,4 +147,31 @@ priv-push --action-id <id> --push            # 真实 push
 创建审批 → 批准 → token 预检 → dry-run → push → rr → v1
 ```
 
+## V1.3 Trusted Self-Repo Auto-Loop
+
+### 常用命令
+```
+qg                    # Quality Gate 检查
+rr                    # Run Report 会话交接
+v1                    # V1 Freeze 验证
+tl                    # Trusted Loop 合约检查
+tl --contract         # 查看完整合约
+```
+
+### Trusted Self Repo 自动执行 WO
+```
+执行 WO：intake → branch → commit → push → PR → wrapper merge → smoke/qg/rr/v1
+无需人工 approve，但必须通过 policy gate
+```
+
+### External Repo Privileged Approve
+```
+priv-approval create --action-id <id> --repo <external-repo> ...
+批准 / 确认 / approve
+priv-push --action-id <id> --push
+```
+
+### V1.3 一句话原则
+**trusted self repo 低风险自动闭环；protected external repo 写操作人工授权。**
+
 *V1 Operational Freeze — 2026-06-15*
