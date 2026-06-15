@@ -232,7 +232,7 @@ def _run_dashboard(args):
                 "version": router_version,
                 "script_count": script_count,
                 "smoke_tests": smoke_count,
-                "commands": len(COMMAND_SCRIPTS),
+                "commands": list(COMMAND_SCRIPTS.keys()),
                 "aliases": len(ALIASES),
             }
             print(json.dumps(output, indent=2))
