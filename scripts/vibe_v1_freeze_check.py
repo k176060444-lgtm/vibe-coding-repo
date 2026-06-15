@@ -73,7 +73,9 @@ def _check_smoke_count(script_dir):
     if not path.exists():
         return "BLOCK", "script not found"
     content = path.read_text()
-    count = content.count("def _test_")
+    # Use _run_test( count — this matches actual registered tests
+    # def _test_ misses some tests that use different naming
+    count = content.count("_run_test(")
     if count >= 75:
         return "PASS", "%d tests" % count
     elif count >= 70:
