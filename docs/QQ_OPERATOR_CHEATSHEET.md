@@ -130,11 +130,17 @@ priv-push --action-id <id> --dry-run-push   # 验证约束
 priv-push --action-id <id> --push            # 真实 push
 ```
 
+### 仓库信任策略
+- **Self-repo** (`k176060444-lgtm/vibe-coding-repo`): 自动化优先，低风险 push 无需人工批准
+- **External repo**: 授权优先，push/PR/merge 必须先批准
+- 一句话原则：**VibeCoding 自己仓库自动化优先；其他仓库授权优先。**
+
 ### 约束
 - Token 永远不输出到 stdout/stderr/log
-- 仅 self-repo (k176060444-lgtm/vibe-coding-repo)
-- 仅 test 分支 (privileged-smoke/)
+- Self-repo: 任意分支均可 push（policy gate 通过即可）
+- External repo: 必须先 `priv-approval create` + 人工批准
 - 禁止: force push / merge / secrets / CI / workflow / deploy / tag / release
+- Token 仅在 policy 允许 push/PR-write 时读取
 
 ### 决策流程
 ```

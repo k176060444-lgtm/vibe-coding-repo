@@ -1178,7 +1178,7 @@ Privileged Approval — controlled approval workflow for high-privilege actions.
 
 ### priv-push (pp, push-approved)
 
-Privileged Push Wrapper — dry-run controlled push for approved actions.
+Privileged Push Wrapper — controlled push with repo trust policy (self-repo auto-allow, external requires approval).
 
 \
 **Output:** would_push (true/false), blockers, warnings, dry_run=true. Never reads GitHub Key. Never pushes.
