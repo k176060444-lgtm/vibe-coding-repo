@@ -934,3 +934,6 @@ The stub does NOT:
 Output includes: execution_plan (phases), required_inputs, blocked_if, evidence_expectations.
 ## Executor Boundary Freeze
 See docs/EXECUTOR_BOUNDARY_FREEZE.md for frozen executor boundaries and unfreeze requirements.
+
+## Real Feature Demo
+See docs/REAL_FEATURE_DEMO.md for a complete walkthrough from natural language to verified execution.
