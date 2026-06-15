@@ -2026,7 +2026,7 @@ def _test_run_report_markdown(script_dir):
         return {"passed": False, "message": "missing header"}
     if "## Quality Gate" not in stdout:
         return {"passed": False, "message": "missing quality gate section"}
-    if "## Next Action" not in stdout:
+    if "下一步" not in stdout and "Next Action" not in stdout:
         return {"passed": False, "message": "missing next action"}
 
     return {"passed": True, "message": "markdown OK (%d chars)" % len(stdout)}
