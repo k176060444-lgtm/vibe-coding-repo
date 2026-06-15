@@ -1216,3 +1216,35 @@ intake → branch → commit → push → PR → wrapper merge → smoke/qg/rr/v
 
 ### One-line principle
 **trusted self repo can batch auto-execute; pause/resume at safe points; cancel before mutation; abort with no destructive cleanup; external repo write ops require human approval.**
+
+## V1.7 Fast Batch Validation Mode
+
+### Validation Modes
+
+| Mode | Per-WO Checks | Batch-End Full | Use Case |
+|------|---------------|----------------|----------|
+| **full** | smoke+QG+v1-freeze | Yes | External repo, high-risk |
+| **fast** | 7 quick checks | Yes (deferred) | Trusted self repo, low-risk |
+| **final-only** | None | Yes (dry-run only) | Demo/docs only |
+
+### Quick Checks (per-WO in fast mode)
+1. `git_status_clean` — worktree clean
+2. `changed_paths_allowlist` — paths within allowed set
+3. `forbidden_paths` — no .github/workflows, secrets, etc.
+4. `wrapper_merge_result` — wrapper merge succeeded
+5. `baseline_refresh` — origin/main updated
+6. `pr_changed_paths` — PR paths match expectations
+7. `token_redaction_scan` — no token patterns in changed files
+
+### Safety Boundary
+**Quality checks can be deferred; safety boundary checks cannot.**
+Quick checks run after every WO. Full smoke/QG/v1-freeze deferred to batch end.
+If final full validation fails, batch status = BLOCK, no freeze allowed.
+
+### Auto-Detection
+- `k176060444-lgtm/vibe-coding-repo` + low-risk → fast
+- External repo or high-risk → full
+- `final-only` only for dry-run/docs demonstrations
+
+### One-line principle
+**Quality validation can be deferred; safety boundary checks run per-WO. Fast mode: quick checks per WO, full validation at batch end.**
