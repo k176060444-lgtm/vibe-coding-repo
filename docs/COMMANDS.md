@@ -994,3 +994,14 @@ python3 scripts/vibe_execution_gate.py check --id my-wo --current-main-sha abc12
 - **ALLOW** — all checks passed, safe to execute
 - **REVIEW** — warnings found, human review recommended
 - **BLOCK** — critical issues found, must not execute
+
+
+### `exec-gate` / `gate` / `ready-run` (Execution Gate)
+Pre-execution admission check via router.
+
+**Usage:**
+```
+python3 scripts/vibe_command_router.py gate --id my-wo --current-main-sha abc123
+python3 scripts/vibe_command_router.py exec-gate --id my-wo --current-main-sha abc123 --json
+python3 scripts/vibe_command_router.py ready-run --id my-wo --current-main-sha abc123
+```

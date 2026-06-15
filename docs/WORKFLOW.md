@@ -850,3 +850,19 @@ Gate checks:
 8. Audit tainted lock is not set
 
 BLOCK verdicts must halt execution. REVIEW verdicts require human decision.
+
+
+### Router Integration (v2.8)
+
+Execution gate is now accessible via the Command Router:
+
+```
+router gate --id my-wo --current-main-sha abc123          # Run gate check
+router exec-gate --id my-wo --current-main-sha abc123 --json  # JSON output
+router ready-run --id my-wo --current-main-sha abc123     # Alias
+```
+
+Router v2.8 adds:
+- `exec-gate` / `gate` / `ready-run` → execution gate
+
+Smoke suite remains 40/40 PASS.
