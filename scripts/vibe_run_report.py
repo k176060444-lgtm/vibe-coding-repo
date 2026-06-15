@@ -130,6 +130,23 @@ def _get_pr_summary():
         return {"error": str(e)}
 
 
+def _get_v1_freeze(script_dir, repo_root):
+    """Get V1 freeze check status."""
+    path = script_dir / "vibe_v1_freeze_check.py"
+    if not path.exists():
+        return {"verdict": "NOT_AVAILABLE", "checks": 0}
+    rc, stdout, stderr = _run_script(path, ["--json", "--repo-root", str(repo_root)])
+    try:
+        data = json.loads(stdout)
+        return {
+            "verdict": data.get("verdict", "UNKNOWN"),
+            "checks": len(data.get("checks", [])),
+            "summary": data.get("summary", {}),
+        }
+    except (json.JSONDecodeError, KeyError):
+        return {"verdict": "ERROR", "checks": 0}
+
+
 def _determine_next_action(quality_gate, audit_lock):
     """Determine recommended next action based on current state."""
     qg_verdict = quality_gate.get("verdict", "UNKNOWN")
@@ -161,6 +178,7 @@ def run_report(repo_root=None, jobs_dir=None):
 
     # Collect all data
     quality_gate = _get_quality_gate(script_dir, repo_root)
+    v1_freeze = _get_v1_freeze(script_dir, repo_root)
     loop_summary = _get_loop_summary(script_dir)
     operator_snapshot = _get_operator_snapshot(script_dir, jobs_dir)
     audit_lock = _get_audit_lock(script_dir)
@@ -199,6 +217,7 @@ def run_report(repo_root=None, jobs_dir=None):
         "audit_lock": audit_lock,
         "pr_summary": pr_summary,
         "new_freeze_baseline": origin_main.get("sha", "unknown"),
+        "v1_freeze": v1_freeze,
         "next_recommended_action": next_action,
         "operator_summary": op_summary,
     }
@@ -274,6 +293,14 @@ def _format_markdown(result):
         lines.append("- Commit: `%s`" % pr.get("merge_commit", ""))
         lines.append("")
 
+    # V1 Freeze
+    v1f = result.get("v1_freeze", {})
+    v1f_verdict = v1f.get("verdict", "N/A")
+    v1f_icon = {"PASS": "✅", "WARN": "⚠️", "BLOCK": "❌"}.get(v1f_verdict, "❓")
+    lines.append("## V1 Freeze")
+    lines.append("- %s %s" % (v1f_icon, v1f_verdict))
+    lines.append("")
+
     # Next
     lines.append("## 下一步")
     lines.append(result.get("next_recommended_action", "unknown"))
@@ -293,8 +320,9 @@ def _format_compact(result):
     baseline = result.get("baseline", {}).get("short", "?")
     pr = result.get("pr_summary", {})
     pr_str = "#%s" % pr.get("number", "?") if pr.get("number") else "none"
-    return "QG:%s Smoke:%s Audit:%s Baseline:%s PR:%s | %s" % (
-        qg, smoke, audit, baseline, pr_str, result.get("operator_summary", "")[:60])
+    v1f = result.get("v1_freeze", {}).get("verdict", "?")
+    return "QG:%s Smoke:%s Audit:%s Baseline:%s PR:%s V1:%s | %s" % (
+        qg, smoke, audit, baseline, pr_str, v1f, result.get("operator_summary", "")[:60])
 
 
 def build_parser():
