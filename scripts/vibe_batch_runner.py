@@ -33,7 +33,7 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
 
@@ -550,6 +550,118 @@ def _cmd_run(args):
     return batch_result, 0 if batch_result["status"] == "completed" else 1
 
 
+
+def _cmd_cancel(args):
+    """Cancel batch -- only before mutation or on unstarted WOs.
+
+    Completed WOs are NOT rolled back. Generates operator report.
+    """
+    checkpoint_path = _resolve_checkpoint_path(args)
+
+    if not checkpoint_path:
+        return {
+            "cancel_status": "NO_CHECKPOINT",
+            "note": "No checkpoint found. Nothing to cancel.",
+        }, 0
+
+    cp = _load_checkpoint(checkpoint_path)
+    if not cp:
+        return {
+            "cancel_status": "NO_CHECKPOINT",
+            "note": "Checkpoint file empty or unreadable.",
+        }, 1
+
+    status = cp.get("status", "unknown")
+    phase = cp.get("phase", "unknown")
+
+    # Cancel is only safe before mutation
+    if phase not in ("before_any_mutation", None):
+        return {
+            "cancel_status": "BLOCKED_MUTATION_OCCURRED",
+            "note": "Cannot cancel after mutation. Use --abort instead.",
+            "phase": phase,
+            "status": status,
+        }, 1
+
+    # Generate operator report
+    report = {
+        "cancel_status": "CANCELLED",
+        "batch_id": cp.get("batch_id"),
+        "cancelled_at": time.time(),
+        "completed_wos": cp.get("completed_wos", []),
+        "uncompleted_wos": cp.get("uncompleted_wos", cp.get("work_orders", [])),
+        "last_safe_point": cp.get("last_safe_point"),
+        "resume_allowed": False,
+        "note": "Batch cancelled before any mutation. Completed WOs preserved.",
+    }
+
+    # Update checkpoint
+    cp["status"] = "CANCELLED"
+    cp["cancelled_at"] = time.time()
+    cp["resume_allowed"] = False
+    if checkpoint_path:
+        try:
+            tmp = Path(checkpoint_path).with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cp, f, indent=2, ensure_ascii=False)
+            tmp.replace(Path(checkpoint_path))
+        except OSError:
+            pass
+
+    return report, 0
+
+
+def _cmd_abort(args):
+    """Abort batch immediately -- stops execution, no destructive cleanup.
+
+    Does NOT force push, delete branches, or reset.
+    Generates operator report with completed/uncompleted WOs.
+    """
+    checkpoint_path = _resolve_checkpoint_path(args)
+
+    if not checkpoint_path:
+        return {
+            "abort_status": "NO_CHECKPOINT",
+            "note": "No checkpoint found. Nothing to abort.",
+        }, 0
+
+    cp = _load_checkpoint(checkpoint_path)
+    if not cp:
+        return {
+            "abort_status": "NO_CHECKPOINT",
+            "note": "Checkpoint file empty or unreadable.",
+        }, 1
+
+    # Generate operator report
+    report = {
+        "abort_status": "ABORTED",
+        "batch_id": cp.get("batch_id"),
+        "aborted_at": time.time(),
+        "completed_wos": cp.get("completed_wos", []),
+        "uncompleted_wos": cp.get("uncompleted_wos", cp.get("work_orders", [])),
+        "last_safe_point": cp.get("last_safe_point"),
+        "phase": cp.get("phase"),
+        "resume_allowed": False,
+        "destructive_cleanup": False,
+        "note": "Batch aborted. No destructive cleanup performed. Completed WOs preserved.",
+    }
+
+    # Update checkpoint
+    cp["status"] = "ABORTED"
+    cp["aborted_at"] = time.time()
+    cp["resume_allowed"] = False
+    if checkpoint_path:
+        try:
+            tmp = Path(checkpoint_path).with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cp, f, indent=2, ensure_ascii=False)
+            tmp.replace(Path(checkpoint_path))
+        except OSError:
+            pass
+
+    return report, 0
+
+
 def _cmd_status(args):
     """Show batch runner status/capabilities."""
     return {
@@ -583,6 +695,8 @@ def build_parser():
     group.add_argument("--batch-report", action="store_true", help="Show detailed batch report (read-only)")
     group.add_argument("--pause", action="store_true", help="Pause batch at safe point")
     group.add_argument("--resume", action="store_true", help="Resume batch with reconcile")
+    group.add_argument("--cancel", action="store_true", help="Cancel batch (before mutation only)")
+    group.add_argument("--abort", action="store_true", help="Abort batch (no destructive cleanup)")
 
     return parser
 
@@ -620,6 +734,10 @@ def main(argv=None):
         result, rc = _cmd_pause(args)
     elif args.resume:
         result, rc = _cmd_resume(args)
+    elif args.cancel:
+        result, rc = _cmd_cancel(args)
+    elif args.abort:
+        result, rc = _cmd_abort(args)
     else:
         parser.print_help()
         return 1

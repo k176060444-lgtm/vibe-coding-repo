@@ -88,6 +88,8 @@ COMMAND_SCRIPTS = {
     "batch-report": "vibe_batch_runner.py",
     "batch-pause": "vibe_batch_runner.py",
     "batch-resume": "vibe_batch_runner.py",
+    "batch-cancel": "vibe_batch_runner.py",
+    "batch-abort": "vibe_batch_runner.py",
     "worker-resilience": "vibe_worker_resilience.py",
 }
 
@@ -154,6 +156,8 @@ ALIASES = {
     "breport": "batch-report",
     "bp": "batch-pause",
     "bresume": "batch-resume",
+    "bcancel": "batch-cancel",
+    "babort": "batch-abort",
     "batch": "batch-runner",
     "wr": "worker-resilience",
     "worker": "worker-resilience",
@@ -548,6 +552,14 @@ def main(argv=None):
         args = ["--pause"] + [a for a in args if a not in ("--pause",)]
 
     # Special handling for batch-resume command
+    # Special handling for batch-cancel command
+    if cmd == "batch-cancel":
+        args = ["--cancel"] + [a for a in args if a not in ("--cancel",)]
+
+    # Special handling for batch-abort command
+    if cmd == "batch-abort":
+        args = ["--abort"] + [a for a in args if a not in ("--abort",)]
+
     if cmd == "batch-resume":
         args = ["--resume"] + [a for a in args if a not in ("--resume",)]
 

@@ -3688,11 +3688,11 @@ def _test_batch_runner_version_140(script_dir):
     if not path.exists():
         return {"passed": False, "message": "script not found"}
     content = path.read_text()
-    if 'VERSION = "1.4.0"' not in content:
-        return {"passed": False, "message": "expected version 1.4.0"}
-    return {"passed": True, "message": "batch runner v1.4.0"}
-
-
+    v = content.split("VERSION = ")[1].split(chr(34))[1] if "VERSION = " in content else "0.0.0"
+    parts = v.split("."); major, minor = int(parts[0]), int(parts[1])
+    if major < 1 or (major == 1 and minor < 4):
+        return {"passed": False, "message": "expected version >= 1.4.0, got %s" % v}
+    return {"passed": True, "message": "batch runner v%s" % v}
 def _test_worker_resilience_version_110(script_dir):
     """Test worker resilience version >= 1.1.0."""
     path = script_dir / "vibe_worker_resilience.py"
@@ -3702,6 +3702,209 @@ def _test_worker_resilience_version_110(script_dir):
     if 'VERSION = "1.1.0"' not in content:
         return {"passed": False, "message": "expected version 1.1.0"}
     return {"passed": True, "message": "worker resilience v1.1.0"}
+
+
+
+
+def _test_batch_cancel_before_mutation(script_dir):
+    """Test --cancel works before any mutation."""
+    import tempfile, json as json_mod, shutil
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-cancel-")
+    cp_path = Path(tmpdir) / "cancel-cp.json"
+    cp_data = {
+        "batch_id": "test-cancel-001",
+        "status": "running",
+        "phase": "before_any_mutation",
+        "work_orders": [{"wo_id": "wo-1"}, {"wo_id": "wo-2"}],
+        "completed_wos": [],
+        "uncompleted_wos": [{"wo_id": "wo-1"}, {"wo_id": "wo-2"}],
+        "last_safe_point": 1000000,
+        "resume_allowed": True,
+    }
+    cp_path.write_text(json_mod.dumps(cp_data))
+    rc, stdout, stderr = _run_script(path, ["--cancel", "--checkpoint", str(cp_path), "--json"])
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON: %s" % stdout[:100]}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    if data.get("cancel_status") != "CANCELLED":
+        return {"passed": False, "message": "expected CANCELLED, got %s" % data.get("cancel_status")}
+    if data.get("resume_allowed") is not False:
+        return {"passed": False, "message": "expected resume_allowed=False"}
+    return {"passed": True, "message": "cancel before mutation ok"}
+
+
+def _test_batch_cancel_after_mutation_blocked(script_dir):
+    """Test --cancel blocked after mutation."""
+    import tempfile, json as json_mod, shutil
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-cancel-block-")
+    cp_path = Path(tmpdir) / "cancel-block-cp.json"
+    cp_data = {
+        "batch_id": "test-cancel-block",
+        "status": "running",
+        "phase": "after_push",
+        "resume_allowed": True,
+    }
+    cp_path.write_text(json_mod.dumps(cp_data))
+    rc, stdout, stderr = _run_script(path, ["--cancel", "--checkpoint", str(cp_path), "--json"])
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON"}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    if data.get("cancel_status") != "BLOCKED_MUTATION_OCCURRED":
+        return {"passed": False, "message": "expected BLOCKED_MUTATION_OCCURRED, got %s" % data.get("cancel_status")}
+    return {"passed": True, "message": "cancel after mutation correctly blocked"}
+
+
+def _test_batch_abort_after_checkpoint(script_dir):
+    """Test --abort works after checkpoint with no destructive cleanup."""
+    import tempfile, json as json_mod, shutil
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-abort-")
+    cp_path = Path(tmpdir) / "abort-cp.json"
+    cp_data = {
+        "batch_id": "test-abort-001",
+        "status": "running",
+        "phase": "after_push",
+        "work_orders": [{"wo_id": "wo-1"}, {"wo_id": "wo-2"}],
+        "completed_wos": [{"wo_id": "wo-1"}],
+        "uncompleted_wos": [{"wo_id": "wo-2"}],
+        "last_safe_point": 1000000,
+        "resume_allowed": True,
+    }
+    cp_path.write_text(json_mod.dumps(cp_data))
+    rc, stdout, stderr = _run_script(path, ["--abort", "--checkpoint", str(cp_path), "--json"])
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON"}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    if data.get("abort_status") != "ABORTED":
+        return {"passed": False, "message": "expected ABORTED, got %s" % data.get("abort_status")}
+    if data.get("destructive_cleanup") is not False:
+        return {"passed": False, "message": "expected destructive_cleanup=False"}
+    if data.get("resume_allowed") is not False:
+        return {"passed": False, "message": "expected resume_allowed=False"}
+    return {"passed": True, "message": "abort ok, no destructive cleanup"}
+
+
+def _test_batch_cancel_operator_report(script_dir):
+    """Test --cancel generates operator report with completed/uncompleted WOs."""
+    import tempfile, json as json_mod, shutil
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-cancel-rpt-")
+    cp_path = Path(tmpdir) / "cancel-rpt-cp.json"
+    cp_data = {
+        "batch_id": "test-cancel-rpt",
+        "status": "running",
+        "phase": "before_any_mutation",
+        "work_orders": [{"wo_id": "wo-a"}, {"wo_id": "wo-b"}, {"wo_id": "wo-c"}],
+        "completed_wos": [],
+        "uncompleted_wos": [{"wo_id": "wo-a"}, {"wo_id": "wo-b"}, {"wo_id": "wo-c"}],
+        "last_safe_point": 1000000,
+    }
+    cp_path.write_text(json_mod.dumps(cp_data))
+    rc, stdout, stderr = _run_script(path, ["--cancel", "--checkpoint", str(cp_path), "--json"])
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON"}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    required = ["cancel_status", "batch_id", "cancelled_at", "completed_wos", "uncompleted_wos", "last_safe_point", "resume_allowed"]
+    missing = [f for f in required if f not in data]
+    if missing:
+        return {"passed": False, "message": "missing report fields: %s" % missing}
+    return {"passed": True, "message": "cancel operator report complete"}
+
+
+def _test_batch_abort_operator_report(script_dir):
+    """Test --abort generates operator report."""
+    import tempfile, json as json_mod, shutil
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-abort-rpt-")
+    cp_path = Path(tmpdir) / "abort-rpt-cp.json"
+    cp_data = {
+        "batch_id": "test-abort-rpt",
+        "status": "running",
+        "phase": "after_merge",
+        "completed_wos": [{"wo_id": "wo-1"}],
+        "uncompleted_wos": [{"wo_id": "wo-2"}],
+        "last_safe_point": 1000000,
+    }
+    cp_path.write_text(json_mod.dumps(cp_data))
+    rc, stdout, stderr = _run_script(path, ["--abort", "--checkpoint", str(cp_path), "--json"])
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON"}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    required = ["abort_status", "batch_id", "aborted_at", "completed_wos", "uncompleted_wos", "last_safe_point", "resume_allowed", "destructive_cleanup"]
+    missing = [f for f in required if f not in data]
+    if missing:
+        return {"passed": False, "message": "missing report fields: %s" % missing}
+    return {"passed": True, "message": "abort operator report complete"}
+
+
+def _test_batch_cancel_router(script_dir):
+    """Test batch-cancel router alias (bcancel)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+    rc, stdout, stderr = _run_script(path, ["bcancel", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from router"}
+    if "cancel_status" not in data:
+        return {"passed": False, "message": "missing cancel_status"}
+    return {"passed": True, "message": "bcancel->batch-cancel ok"}
+
+
+def _test_batch_abort_router(script_dir):
+    """Test batch-abort router alias (babort)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+    rc, stdout, stderr = _run_script(path, ["babort", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from router"}
+    if "abort_status" not in data:
+        return {"passed": False, "message": "missing abort_status"}
+    return {"passed": True, "message": "babort->batch-abort ok"}
+
+
+def _test_batch_runner_version_150(script_dir):
+    """Test batch runner version >= 1.5.0."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    content = path.read_text()
+    if 'VERSION = "1.5.0"' not in content:
+        return {"passed": False, "message": "expected version 1.5.0"}
+    return {"passed": True, "message": "batch runner v1.5.0"}
 
 
 def _test_batch_runner_checkpoint_status_field(script_dir):
@@ -4019,6 +4222,32 @@ def run_tests(jobs_dir=None):
 
     # Test 91: worker resilience version 1.1.0
     tests.append(_run_test("worker_resilience_version_110", lambda: _test_worker_resilience_version_110(script_dir)))
+
+
+
+    # Test 92: cancel before mutation
+    tests.append(_run_test("batch_cancel_before_mutation", lambda: _test_batch_cancel_before_mutation(script_dir)))
+
+    # Test 93: cancel after mutation blocked
+    tests.append(_run_test("batch_cancel_after_mutation_blocked", lambda: _test_batch_cancel_after_mutation_blocked(script_dir)))
+
+    # Test 94: abort after checkpoint
+    tests.append(_run_test("batch_abort_after_checkpoint", lambda: _test_batch_abort_after_checkpoint(script_dir)))
+
+    # Test 95: cancel operator report
+    tests.append(_run_test("batch_cancel_operator_report", lambda: _test_batch_cancel_operator_report(script_dir)))
+
+    # Test 96: abort operator report
+    tests.append(_run_test("batch_abort_operator_report", lambda: _test_batch_abort_operator_report(script_dir)))
+
+    # Test 97: cancel router alias
+    tests.append(_run_test("batch_cancel_router", lambda: _test_batch_cancel_router(script_dir)))
+
+    # Test 98: abort router alias
+    tests.append(_run_test("batch_abort_router", lambda: _test_batch_abort_router(script_dir)))
+
+    # Test 99: batch runner version 1.5.0
+    tests.append(_run_test("batch_runner_version_150", lambda: _test_batch_runner_version_150(script_dir)))
 
     return tests
 
