@@ -866,3 +866,23 @@ Router v2.8 adds:
 - `exec-gate` / `gate` / `ready-run` → execution gate
 
 Smoke suite remains 40/40 PASS.
+
+
+### Smoke Suite (44 tests)
+
+The smoke suite now includes 44 tests covering:
+- Router commands (snapshot, advisor, dispatch, batch-plan, health, smoke)
+- Intake (basic, JSON, risk, type, router)
+- Release Notes (basic, JSON, safety, router)
+- Dashboard (text, JSON, aliases)
+- Daily Report (text, JSON)
+- Validator (basic)
+- Packager (basic)
+- Preflight (router)
+- Registry (basic, JSON, router, readonly)
+- Status Update (valid, invalid)
+- Approval Receipt (create/list, router)
+- Execution Evidence (basic, JSON, router, readonly)
+- Execution Gate (ALLOW, BLOCK, REVIEW, router)
+
+All tests must PASS for deployment.
