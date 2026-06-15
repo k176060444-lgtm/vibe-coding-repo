@@ -22,6 +22,7 @@ Commands:
     receipt     - Approval Receipt (create/list/show)
     evidence    - Execution Evidence (create/list/show)
     exec-gate   - Execution Gate (pre-execution admission check)
+    safe-executor - Safe Executor (execution plan generator)
     help        - Show this help message
     version     - Show version
 
@@ -31,7 +32,7 @@ Short aliases:
     dash/status-page → dashboard, validate/vw → validate-wo, pack/pw → pack-wo,
     pre → preflight, reg/wo-list/wo-show → registry, ws → wo-status,
     approve-receipt → receipt, ar → receipt, ev → evidence, exec-log → evidence,
-    gate → exec-gate, ready-run → exec-gate, ? → help, v → version
+    gate → exec-gate, ready-run → exec-gate, se → safe-executor, plan → safe-executor, ? → help, v → version
 
 Constraints:
     - Read-only, no IO on import, standard library only.
@@ -67,6 +68,7 @@ COMMAND_SCRIPTS = {
     "receipt": "vibe_approval_receipt.py",
     "evidence": "vibe_execution_evidence.py",
     "exec-gate": "vibe_execution_gate.py",
+    "safe-executor": "vibe_safe_executor.py",
 }
 
 # Short aliases
@@ -99,6 +101,8 @@ ALIASES = {
     "exec-log": "evidence",
     "gate": "exec-gate",
     "ready-run": "exec-gate",
+    "se": "safe-executor",
+    "plan": "safe-executor",
     "?": "help",
     "v": "version",
 }
@@ -122,6 +126,7 @@ COMMAND_DESCRIPTIONS = {
     "receipt": "Approval Receipt - create/list/show approval receipts",
     "evidence": "Execution Evidence - create/list/show evidence bundles",
     "exec-gate": "Execution Gate - pre-execution admission check (ALLOW/REVIEW/BLOCK)",
+    "safe-executor": "Safe Executor - generate execution plans (no real execution)",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -139,6 +144,7 @@ COMMAND_FLAGS = {
     "receipt": ["--json", "--registry-dir"],
     "evidence": ["--json", "--evidence-dir"],
     "exec-gate": ["--json", "--registry-dir"],
+    "safe-executor": ["--json", "--registry-dir"],
 }
 
 

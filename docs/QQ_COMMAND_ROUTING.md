@@ -530,3 +530,14 @@ Bot:
 /gate --id my-wo --current-main-sha abc123 --json
 /ready-run --id my-wo --current-main-sha abc123
 ```
+
+### Safe Executor Commands
+| 命令 | 别名 | 说明 |
+|------|------|------|
+|  | ,  | 安全执行器：生成执行计划 |
+
+**示例:**
+```
+/se plan --id my-wo --current-main-sha abc123
+/se plan --id my-wo --current-main-sha abc123 --json --dry-run
+```
