@@ -101,38 +101,44 @@ fetch origin 确认基线。运行 qg。创建 branch。实现改动。运行 sm
 
 ---
 
-## 受控推送审批 (Privileged Approval)
+## 受控推送审批 (Privileged Approval) — V1.2
+
+### 标准链路
+```
+priv-approval create → 人工批准 → token 预检 → priv-push dry-run → priv-push --push → rr → v1
+```
 
 ### 发起审批
 ```
-创建推送审批：priv-approval create --action-id <id> --repo <repo> --branch <branch> --action push --base-sha <sha>
+priv-approval create --action-id <id> --repo k176060444-lgtm/vibe-coding-repo --branch <branch> --action push --base-sha <sha> --changed-path <file>
 ```
 
-### 短授权
+### 短授权（仅 1 个 pending 时有效）
 ```
-批准
-确认
-同意
-可以执行
-approve
-```
-**规则：** 只有恰好 1 个未过期 pending 时才生效。多个 pending / 无 pending / 已过期 → BLOCK。
-
-### 查看审批
-```
-查看审批列表：priv-approval list
-查看审批详情：priv-approval show --action-id <id>
+批准 / 确认 / 同意 / 可以执行 / approve / confirm
 ```
 
-### 推送检查（dry-run）
+### Token 预检
 ```
-检查推送：priv-push --action-id <id>
-列出已批准：priv-push --list-approved
+priv-push --token-preflight
 ```
+检查：文件存在 / owner=vibeworker / mode=600 / size>20。**不读取 token 内容。**
+
+### Push 执行
+```
+priv-push --action-id <id> --dry-run-push   # 验证约束
+priv-push --action-id <id> --push            # 真实 push
+```
+
+### 约束
+- Token 永远不输出到 stdout/stderr/log
+- 仅 self-repo (k176060444-lgtm/vibe-coding-repo)
+- 仅 test 分支 (privileged-smoke/)
+- 禁止: force push / merge / secrets / CI / workflow / deploy / tag / release
 
 ### 决策流程
 ```
-发起审批 → 人工确认（批准/确认/approve）→ priv-push dry-run → 等待真实推送授权
+创建审批 → 批准 → token 预检 → dry-run → push → rr → v1
 ```
 
 *V1 Operational Freeze — 2026-06-15*
