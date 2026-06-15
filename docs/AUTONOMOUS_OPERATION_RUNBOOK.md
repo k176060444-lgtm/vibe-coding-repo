@@ -264,3 +264,9 @@ The executor subsystem is currently frozen at noop/dry-run level. No real execut
 6. Record decision in transcript
 
 For full details, see [EXECUTOR_BOUNDARY_FREEZE.md](EXECUTOR_BOUNDARY_FREEZE.md).
+
+## Executor Control (Timeout/Cancel)
+Timeout and cancel contracts defined by vibe_executor_control.py. Real executor must support:
+- Heartbeat monitoring (30s interval)
+- Stale lock detection (600s threshold)
+- Graceful cancel with 10s grace period

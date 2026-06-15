@@ -1107,3 +1107,17 @@ python3 scripts/vibe_command_router.py sb plan --id my-wo --base-sha abc123
 ```
 
 **Checks:** constraints_defined, forbidden_actions, base_sha, artifact_dirs, network/model/write isolation, forbidden/allowed paths, execution_timeout, destructive_blocked, shell_blocked
+
+### exec-control / ec / ctrl (Executor Control)
+Timeout, cancel, and control contract for executor lifecycle. Planning only; no process killed.
+
+**Usage:**
+```
+python3 scripts/vibe_executor_control.py plan-timeout --id my-wo --max-seconds 300 --json
+python3 scripts/vibe_executor_control.py cancel-token --id my-wo --json
+python3 scripts/vibe_executor_control.py status --id my-wo --json
+python3 scripts/vibe_command_router.py ec plan-timeout --id my-wo --json
+python3 scripts/vibe_command_router.py ec cancel-token --id my-wo
+```
+
+**Features:** timeout phases, heartbeat monitoring, stale lock detection, cancel token, graceful/immediate/file-signal cancel methods
