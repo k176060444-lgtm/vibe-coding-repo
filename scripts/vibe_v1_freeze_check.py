@@ -148,7 +148,7 @@ def _check_wrapper_documented(repo_root):
     return "WARN", "wrapper requirement not fully documented"
 
 
-def run_v1_freeze_check(repo_root=None, jobs_dir=None):
+def run_v1_freeze_check(repo_root=None, jobs_dir=None, skip_run_report=False):
     if repo_root is None:
         repo_root = Path.cwd()
     else:
@@ -162,7 +162,7 @@ def run_v1_freeze_check(repo_root=None, jobs_dir=None):
 
     check_fns = [
         ("quality_gate", lambda: _check_quality_gate(script_dir, repo_root)),
-        ("run_report", lambda: _check_run_report(script_dir, repo_root)),
+        ("run_report", lambda: ("PASS", "skipped (--skip-run-report)") if skip_run_report else _check_run_report(script_dir, repo_root)),
         ("smoke_count", lambda: _check_smoke_count(script_dir)),
         ("router_commands", lambda: _check_router_commands(script_dir)),
         ("audit_lock", lambda: _check_audit_lock(script_dir)),
@@ -211,6 +211,7 @@ def build_parser():
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--compact", action="store_true", help="Compact output")
     parser.add_argument("--repo-root", help="Repository root")
+    parser.add_argument("--skip-run-report", action="store_true", help="Skip run-report check (avoids circular dependency)")
     parser.add_argument("--jobs-dir", help="Jobs directory")
     return parser
 
@@ -222,6 +223,7 @@ def main(argv=None):
     result = run_v1_freeze_check(
         repo_root=args.repo_root or Path(__file__).parent.parent,
         jobs_dir=args.jobs_dir,
+        skip_run_report=getattr(args, "skip_run_report", False),
     )
 
     if args.json:
