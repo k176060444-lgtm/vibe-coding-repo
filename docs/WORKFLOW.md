@@ -886,3 +886,23 @@ The smoke suite now includes 44 tests covering:
 - Execution Gate (ALLOW, BLOCK, REVIEW, router)
 
 All tests must PASS for deployment.
+
+
+### Golden Path E2E
+
+The golden path E2E test suite validates the complete Work Order lifecycle:
+
+```
+requirement → intake → validate → registry.register → packager
+    → registry.update-status (draft → validated → packaged → approved)
+    → approval-receipt.create
+    → execution-gate.check (ALLOW / REVIEW / BLOCK)
+    → evidence.create
+```
+
+Three test paths:
+1. **ALLOW** — clean workorder, all checks pass, gate allows execution
+2. **BLOCK** — base_sha mismatch, gate blocks execution
+3. **REVIEW** — stop conditions present, gate requires human review
+
+All tests use temporary directories and do NOT modify repo source code.

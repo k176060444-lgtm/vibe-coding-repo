@@ -1005,3 +1005,28 @@ python3 scripts/vibe_command_router.py gate --id my-wo --current-main-sha abc123
 python3 scripts/vibe_command_router.py exec-gate --id my-wo --current-main-sha abc123 --json
 python3 scripts/vibe_command_router.py ready-run --id my-wo --current-main-sha abc123
 ```
+
+
+### Golden Path E2E Test Suite
+
+End-to-end tests covering the complete Work Order lifecycle:
+
+```
+requirement → intake → validate → registry.register → packager →
+registry.update-status → approval-receipt.create → execution-gate.check →
+evidence.create
+```
+
+**Test Paths:**
+- **ALLOW** — valid workorder through full pipeline, gate returns ALLOW
+- **BLOCK** — base_sha mismatch triggers BLOCK at gate
+- **REVIEW** — stop conditions trigger REVIEW at gate
+
+**Usage:**
+```
+python3 scripts/test_golden_path_e2e.py
+python3 scripts/test_golden_path_e2e.py --json
+python3 scripts/test_golden_path_e2e.py --verbose
+```
+
+All tests use temporary directories, no repo modifications.
