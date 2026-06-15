@@ -1,31 +1,43 @@
 #!/usr/bin/env python3
 """Work Order Registry — local registry for intake/validate/packager outputs.
 
-Provides register/list/show operations for Work Order entries stored in a
-local registry directory. Each entry is a JSON file with metadata about a
-work order draft or validated work order.
+Provides register/list/show/update-status operations for Work Order entries
+stored in a local registry directory. Each entry is a JSON file with metadata
+about a work order draft or validated work order.
 
 Usage:
-    python3 scripts/vibe_workorder_registry.py register --registry-dir /path/to/registry --id my-wo --title "My Work Order"
-    python3 scripts/vibe_workorder_registry.py list --registry-dir /path/to/registry
-    python3 scripts/vibe_workorder_registry.py show --registry-dir /path/to/registry --id my-wo
-    python3 scripts/vibe_workorder_registry.py list --registry-dir /path/to/registry --json
-    python3 scripts/vibe_workorder_registry.py show --registry-dir /path/to/registry --id my-wo --json
+    python3 scripts/vibe_workorder_registry.py register --registry-dir /path --id my-wo --title "My Work Order"
+    python3 scripts/vibe_workorder_registry.py list --registry-dir /path
+    python3 scripts/vibe_workorder_registry.py show --registry-dir /path --id my-wo
+    python3 scripts/vibe_workorder_registry.py list --registry-dir /path --json
+    python3 scripts/vibe_workorder_registry.py show --registry-dir /path --id my-wo --json
+    python3 scripts/vibe_workorder_registry.py update-status --registry-dir /path --id my-wo --status validated --reason "All checks passed"
 
 Environment Variables:
     VIBEDEV_REGISTRY_DIR  Default registry directory (overridden by --registry-dir)
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 VALID_STATUSES = {"draft", "validated", "packaged", "approved", "executed", "blocked"}
+
+# Valid status transitions (from -> set of allowed targets)
+VALID_TRANSITIONS = {
+    "draft": {"validated", "blocked"},
+    "validated": {"packaged", "blocked"},
+    "packaged": {"approved", "blocked"},
+    "approved": {"executed", "blocked"},
+    "executed": {"blocked"},
+    "blocked": {"draft"},  # Can reset to draft from blocked
+}
 
 def _registry_dir_path(args):
     """Resolve registry directory from args or environment."""
@@ -73,6 +85,11 @@ def _list_entries(registry_dir):
             continue
     return entries
 
+def _compute_history_digest(history):
+    """Compute SHA256 digest of status history."""
+    history_str = json.dumps(history, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(history_str.encode("utf-8")).hexdigest()
+
 def cmd_register(args):
     """Register a new work order entry."""
     registry_dir = _registry_dir_path(args)
@@ -99,19 +116,30 @@ def cmd_register(args):
         print(f"ERROR: Invalid status '{status}'. Valid: {', '.join(sorted(VALID_STATUSES))}", file=sys.stderr)
         return 1
 
+    now = datetime.now(timezone.utc).isoformat()
+    history = [{
+        "from": None,
+        "to": status,
+        "reason": "initial registration",
+        "timestamp": now,
+    }]
+
     entry = {
         "workorder_id": workorder_id,
         "title": args.title or workorder_id,
         "risk_level": args.risk_level or "low",
         "status": status,
         "base_sha": args.base_sha or "",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now,
+        "updated_at": now,
         "source": args.source or "manual",
         "requires_human_approval": args.requires_human_approval if args.requires_human_approval is not None else False,
         "changed_paths": [],
         "forbidden_actions": [],
         "acceptance_tests": [],
         "stop_conditions": [],
+        "status_history": history,
+        "history_digest": _compute_history_digest(history),
     }
 
     _save_entry(registry_dir, entry)
@@ -194,18 +222,101 @@ def cmd_show(args):
         print(f"  Base SHA: {entry.get('base_sha', '')}")
         print(f"  Source: {entry.get('source', '')}")
         print(f"  Created: {entry.get('created_at', '')}")
+        print(f"  Updated: {entry.get('updated_at', '')}")
         print(f"  Requires Approval: {entry.get('requires_human_approval', False)}")
         if entry.get("changed_paths"):
             print(f"  Changed Paths: {', '.join(entry['changed_paths'])}")
         if entry.get("forbidden_actions"):
             print(f"  Forbidden Actions: {', '.join(entry['forbidden_actions'])}")
+        if entry.get("status_history"):
+            print(f"  Status History: {len(entry['status_history'])} transitions")
+            for h in entry["status_history"][-3:]:  # Show last 3
+                print(f"    {h.get('from', 'init')} → {h.get('to')}: {h.get('reason', '')}")
+    return 0
+
+def cmd_update_status(args):
+    """Update status of a work order entry with controlled transitions."""
+    registry_dir = _registry_dir_path(args)
+    if not registry_dir:
+        print("ERROR: --registry-dir or VIBEDEV_REGISTRY_DIR required", file=sys.stderr)
+        return 1
+
+    workorder_id = args.id
+    if not workorder_id:
+        print("ERROR: --id required", file=sys.stderr)
+        return 1
+
+    target_status = args.status
+    if not target_status:
+        print("ERROR: --status required", file=sys.stderr)
+        return 1
+
+    if target_status not in VALID_STATUSES:
+        print(f"ERROR: Invalid status '{target_status}'. Valid: {', '.join(sorted(VALID_STATUSES))}", file=sys.stderr)
+        return 1
+
+    reason = args.reason
+    if not reason:
+        print("ERROR: --reason required", file=sys.stderr)
+        return 1
+
+    # Load entry
+    entry = _load_entry(registry_dir, workorder_id)
+    if not entry:
+        print(f"ERROR: Entry '{workorder_id}' not found", file=sys.stderr)
+        return 1
+
+    current_status = entry.get("status", "draft")
+
+    # Check valid transition
+    allowed_targets = VALID_TRANSITIONS.get(current_status, set())
+    if target_status not in allowed_targets:
+        print(f"ERROR: Invalid transition: {current_status} → {target_status}", file=sys.stderr)
+        print(f"  Allowed from '{current_status}': {', '.join(sorted(allowed_targets))}", file=sys.stderr)
+        return 1
+
+    # Update status
+    now = datetime.now(timezone.utc).isoformat()
+    history = entry.get("status_history", [])
+    history.append({
+        "from": current_status,
+        "to": target_status,
+        "reason": reason,
+        "timestamp": now,
+    })
+
+    entry["status"] = target_status
+    entry["updated_at"] = now
+    entry["status_history"] = history
+    entry["history_digest"] = _compute_history_digest(history)
+
+    _save_entry(registry_dir, entry)
+
+    use_json = getattr(args, 'json', False)
+    if use_json:
+        output = {
+            "action": "update_status",
+            "workorder_id": workorder_id,
+            "from_status": current_status,
+            "to_status": target_status,
+            "reason": reason,
+            "timestamp": now,
+            "history_digest": entry["history_digest"],
+        }
+        print(json.dumps(output, indent=2, ensure_ascii=False))
+    else:
+        print(f"Status Updated: {workorder_id}")
+        print(f"  {current_status} → {target_status}")
+        print(f"  Reason: {reason}")
+        print(f"  History Digest: {entry['history_digest'][:16]}...")
+
     return 0
 
 def build_parser():
     """Build argument parser."""
     parser = argparse.ArgumentParser(
         description="Work Order Registry — local registry for intake/validate/packager outputs",
-        epilog="Aliases: reg (register), ls (list), info (show)\n"
+        epilog="Aliases: reg (register), ls (list), info (show), update (update-status)\n"
                "Env: VIBEDEV_REGISTRY_DIR sets default registry directory"
     )
     parser.add_argument("--version", action="version", version=f"vibe_workorder_registry {VERSION}")
@@ -236,6 +347,14 @@ def build_parser():
     sh.add_argument("--registry-dir", help="Registry directory")
     sh.add_argument("--json", action="store_true", help="Output as JSON")
 
+    # update-status
+    us = sub.add_parser("update-status", help="Update status with controlled transitions")
+    us.add_argument("--id", required=True, help="Work order ID")
+    us.add_argument("--status", required=True, choices=sorted(VALID_STATUSES), help="Target status")
+    us.add_argument("--reason", required=True, help="Reason for status change")
+    us.add_argument("--registry-dir", help="Registry directory")
+    us.add_argument("--json", action="store_true", help="Output as JSON")
+
     return parser
 
 def main(argv=None):
@@ -253,6 +372,8 @@ def main(argv=None):
         return cmd_list(args)
     elif args.command == "show":
         return cmd_show(args)
+    elif args.command == "update-status":
+        return cmd_update_status(args)
     else:
         parser.print_help()
         return 0
