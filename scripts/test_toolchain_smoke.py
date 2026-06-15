@@ -1056,6 +1056,180 @@ def _test_approval_router(script_dir):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+
+def _test_evidence_basic(script_dir):
+    """Test evidence basic operations: create, list, show."""
+    import subprocess
+    import tempfile
+    import shutil
+
+    evidence_script = script_dir / "vibe_execution_evidence.py"
+    if not evidence_script.exists():
+        return {"passed": False, "message": "evidence script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="evidence_smoke_")
+
+    try:
+        # Create evidence
+        cmd = [sys.executable, str(evidence_script), "create",
+               "--evidence-dir", tmpdir,
+               "--id", "test-wo-evidence",
+               "--base-sha", "abc123",
+               "--result-sha", "def456",
+               "--smoke-result", "36/36 PASS",
+               "--job-status", "review_passed"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "create failed: %s" % result.stderr}
+
+        # List evidence
+        cmd = [sys.executable, str(evidence_script), "list",
+               "--evidence-dir", tmpdir]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "list failed: %s" % result.stderr}
+
+        if "test-wo-evidence" not in result.stdout:
+            return {"passed": False, "message": "created evidence not in list output"}
+
+        # Show evidence
+        cmd = [sys.executable, str(evidence_script), "show",
+               "--evidence-dir", tmpdir,
+               "--evidence-id", "ev-001"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "show failed: %s" % result.stderr}
+
+        if "test-wo-evidence" not in result.stdout:
+            return {"passed": False, "message": "workorder_id not in show output"}
+
+        return {"passed": True, "message": "create/list/show work"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_evidence_json(script_dir):
+    """Test evidence JSON output."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    evidence_script = script_dir / "vibe_execution_evidence.py"
+    if not evidence_script.exists():
+        return {"passed": False, "message": "evidence script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="evidence_smoke_")
+
+    try:
+        # Create evidence with JSON
+        cmd = [sys.executable, str(evidence_script), "create",
+               "--evidence-dir", tmpdir,
+               "--id", "test-wo-json",
+               "--base-sha", "abc123",
+               "--result-sha", "def456",
+               "--pr-url", "https://github.com/test/pr/1",
+               "--smoke-result", "36/36 PASS",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "create failed"}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON output"}
+
+        evidence = data.get("evidence", {})
+        if evidence.get("workorder_id") != "test-wo-json":
+            return {"passed": False, "message": "wrong workorder_id"}
+        if evidence.get("base_sha") != "abc123":
+            return {"passed": False, "message": "wrong base_sha"}
+        if evidence.get("result_sha") != "def456":
+            return {"passed": False, "message": "wrong result_sha"}
+        if not evidence.get("digest"):
+            return {"passed": False, "message": "missing digest"}
+
+        return {"passed": True, "message": "JSON output valid, fields correct"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_evidence_router(script_dir):
+    """Test evidence via command router."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    router_script = script_dir / "vibe_command_router.py"
+    if not router_script.exists():
+        return {"passed": False, "message": "router script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="evidence_smoke_")
+
+    try:
+        # Create evidence via router
+        cmd = [sys.executable, str(router_script), "ev", "create",
+               "--evidence-dir", tmpdir,
+               "--id", "test-wo-router-ev",
+               "--base-sha", "abc123",
+               "--result-sha", "def456",
+               "--smoke-result", "36/36 PASS",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "router evidence create failed: %s" % result.stderr}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON from router"}
+
+        if not data.get("evidence", {}).get("evidence_id"):
+            return {"passed": False, "message": "missing evidence_id from router"}
+
+        # List via router
+        cmd = [sys.executable, str(router_script), "ev", "list",
+               "--evidence-dir", tmpdir, "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "router evidence list failed"}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON from router list"}
+
+        if data.get("count") != 1:
+            return {"passed": False, "message": "expected 1 evidence"}
+
+        return {"passed": True, "message": "ev (evidence) alias works"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_evidence_readonly(script_dir):
+    """Test evidence is read-only by default."""
+    import subprocess
+
+    evidence_script = script_dir / "vibe_execution_evidence.py"
+    if not evidence_script.exists():
+        return {"passed": False, "message": "evidence script not found"}
+
+    # Try list without --evidence-dir (should fail gracefully)
+    cmd = [sys.executable, str(evidence_script), "list"]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+    if result.returncode == 0:
+        return {"passed": False, "message": "list without --evidence-dir should fail"}
+
+    if "ERROR" not in result.stderr and "ERROR" not in result.stdout:
+        return {"passed": False, "message": "missing error message"}
+
+    return {"passed": True, "message": "graceful failure without evidence dir"}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -1163,6 +1337,18 @@ def run_tests(jobs_dir=None):
     # Test 35: Approval Receipt - create/list
     tests.append(_run_test("approval_receipt", lambda: _test_approval_receipt(script_dir)))
     
+
+    # Test 37: Evidence - basic operations
+    tests.append(_run_test("evidence_basic", lambda: _test_evidence_basic(script_dir)))
+    
+    # Test 38: Evidence - JSON output
+    tests.append(_run_test("evidence_json", lambda: _test_evidence_json(script_dir)))
+    
+    # Test 39: Evidence - router integration
+    tests.append(_run_test("evidence_router", lambda: _test_evidence_router(script_dir)))
+    
+    # Test 40: Evidence - read-only behavior
+    tests.append(_run_test("evidence_readonly", lambda: _test_evidence_readonly(script_dir)))
     # Test 36: Approval Receipt - router integration
     tests.append(_run_test("approval_router", lambda: _test_approval_router(script_dir)))
     # Test 30: Registry - JSON output
