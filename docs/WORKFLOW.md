@@ -916,3 +916,19 @@ evidence.create → evidence-verifier.verify → PASS / WARN / FAIL
 ```
 
 Verifies: required fields, digest, registry entry, approval receipt, SHAs, smoke/health, job/audit status, changed_paths scope.
+
+### Safe Executor Stub
+
+The safe executor generates execution plans from ALLOW gate results:
+
+```
+execution-gate.check → ALLOW → safe-executor.plan → execution_plan
+```
+
+The stub does NOT:
+- Execute coding agents
+- Call models
+- Push, merge, or deploy
+- Write to repo source code
+
+Output includes: execution_plan (phases), required_inputs, blocked_if, evidence_expectations.

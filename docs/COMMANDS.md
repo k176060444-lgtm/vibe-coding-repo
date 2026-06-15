@@ -1051,3 +1051,15 @@ python3 scripts/vibe_evidence_verifier.py verify --evidence-dir /path --registry
 - Changed paths within scope
 
 **Verdicts:** PASS / WARN / FAIL
+
+###  /  /  (Safe Executor)
+Generate execution plans from ALLOW gate results. Does NOT execute coding agents.
+
+**Usage:**
+```
+python3 scripts/vibe_safe_executor.py plan --id my-wo --current-main-sha abc123
+python3 scripts/vibe_command_router.py se plan --id my-wo --current-main-sha abc123 --json
+python3 scripts/vibe_safe_executor.py plan --id my-wo --current-main-sha abc123 --dry-run --plan-only
+```
+
+**Output:** execution_plan, required_inputs, blocked_if, evidence_expectations

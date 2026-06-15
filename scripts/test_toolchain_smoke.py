@@ -1477,6 +1477,123 @@ def _test_gate_router(script_dir):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+
+def _test_safe_executor_block(script_dir):
+    """Test safe executor blocks on non-ALLOW gate."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+    import os
+
+    executor_script = script_dir / "vibe_safe_executor.py"
+    if not executor_script.exists():
+        return {"passed": False, "message": "executor script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="executor_smoke_")
+
+    try:
+        entry_file = os.path.join(tmpdir, "test-wo-exec.json")
+        with open(entry_file, "w") as f:
+            json.dump({
+                "workorder_id": "test-wo-exec",
+                "status": "approved",
+                "base_sha": "abc123",
+                "risk_level": "low",
+                "requires_human_approval": False,
+                "stop_conditions": ["py_compile fails"],
+                "allowed_paths": ["scripts/"],
+                "forbidden_actions": ["push_to_main"],
+                "audit_status": "clean"
+            }, f)
+
+        cmd = [sys.executable, str(executor_script), "plan",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-exec",
+               "--current-main-sha", "abc123",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+        if result.returncode != 1:
+            return {"passed": False, "message": "expected exit 1, got %d" % result.returncode}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON"}
+
+        if data.get("status") != "BLOCKED":
+            return {"passed": False, "message": "expected BLOCKED, got %s" % data.get("status")}
+
+        return {"passed": True, "message": "blocks on non-ALLOW gate"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_safe_executor_router(script_dir):
+    """Test safe executor via command router."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+    import os
+
+    router_script = script_dir / "vibe_command_router.py"
+    if not router_script.exists():
+        return {"passed": False, "message": "router script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="executor_smoke_")
+
+    try:
+        entry_file = os.path.join(tmpdir, "test-wo-exec-router.json")
+        with open(entry_file, "w") as f:
+            json.dump({
+                "workorder_id": "test-wo-exec-router",
+                "status": "approved",
+                "base_sha": "abc123",
+                "risk_level": "low",
+                "requires_human_approval": False,
+                "stop_conditions": [],
+                "allowed_paths": ["scripts/"],
+                "forbidden_actions": ["push_to_main"],
+                "audit_status": "clean"
+            }, f)
+
+        receipts_dir = os.path.join(tmpdir, "receipts")
+        os.makedirs(receipts_dir, exist_ok=True)
+        receipt_path = os.path.join(receipts_dir, "receipt-001.json")
+        with open(receipt_path, "w") as f:
+            json.dump({
+                "receipt_id": "receipt-001",
+                "workorder_id": "test-wo-exec-router",
+                "base_sha": "abc123"
+            }, f)
+
+        cmd = [sys.executable, str(router_script), "se", "plan",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-exec-router",
+               "--current-main-sha", "abc123",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "router executor failed: %s" % result.stderr}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON"}
+
+        if data.get("status") != "READY":
+            return {"passed": False, "message": "expected READY, got %s" % data.get("status")}
+
+        if not data.get("execution_plan", {}).get("phases"):
+            return {"passed": False, "message": "missing execution plan phases"}
+
+        return {"passed": True, "message": "se/plan aliases work, READY status"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -1600,6 +1717,12 @@ def run_tests(jobs_dir=None):
     
     # Test 44: Gate - router integration
     tests.append(_run_test("gate_router", lambda: _test_gate_router(script_dir)))
+    
+    # Test 45: Safe Executor - blocks on non-ALLOW
+    tests.append(_run_test("safe_executor_block", lambda: _test_safe_executor_block(script_dir)))
+    
+    # Test 46: Safe Executor - router integration
+    tests.append(_run_test("safe_executor_router", lambda: _test_safe_executor_router(script_dir)))
     # Test 38: Evidence - JSON output
     tests.append(_run_test("evidence_json", lambda: _test_evidence_json(script_dir)))
     
