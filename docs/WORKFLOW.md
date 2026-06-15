@@ -572,3 +572,16 @@ Dashboard smoke coverage added:
 - 23: Dashboard aliases (dash, status-page)
 
 Run: `python scripts/test_toolchain_smoke.py`
+
+
+## Demo Scenarios (v1)
+
+Run repeatable scenario examples to verify the pipeline:
+
+```
+python scripts/vibe_demo_scenarios.py --scenario queue-clean
+python scripts/vibe_demo_scenarios.py --scenario feature-request --json
+python scripts/vibe_demo_scenarios.py --scenario maintenance
+```
+
+All scenarios are read-only. No PRs created, no tasks executed.
