@@ -10,6 +10,8 @@ Stop rules: any WO failure stops the batch immediately.
 Usage:
     python3 scripts/vibe_batch_runner.py --batch <batch.json> [--json] [--compact] [--dry-run]
     python3 scripts/vibe_batch_runner.py --status [--json]
+    python3 scripts/vibe_batch_runner.py --batch-status [--checkpoint <file>] [--json] [--compact]
+    python3 scripts/vibe_batch_runner.py --batch-report [--checkpoint <file>] [--json] [--compact]
 
 Batch JSON format:
     {
@@ -45,7 +47,7 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
 
@@ -91,7 +93,6 @@ def _check_policy_gate(changed_paths, allowed_paths):
     violations = []
     for cp in changed_paths:
         if cp not in allowed_paths:
-            # Check prefix match
             matched = False
             for ap in allowed_paths:
                 if cp.startswith(ap) or ap.startswith(cp):
@@ -165,8 +166,6 @@ def _run_post_merge_checks(script_dir, repo_root, wo_id):
     return True, results, None
 
 
-
-
 def _check_worker_and_wait(script_dir, checkpoint_path):
     """Check worker reachability; if unreachable, create checkpoint.
 
@@ -205,6 +204,144 @@ def _generate_status_report(script_dir, checkpoint_path):
         return None
 
 
+def _get_current_baseline():
+    """Get current git baseline SHA (read-only)."""
+    rc, stdout, stderr = _run_cmd(["git", "rev-parse", "HEAD"])
+    if rc == 0:
+        return stdout
+    return None
+
+
+def _load_checkpoint(checkpoint_path):
+    """Load checkpoint file if it exists."""
+    p = Path(checkpoint_path)
+    if not p.exists():
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _find_latest_checkpoint():
+    """Find the most recent batch checkpoint in temp dir."""
+    tmpdir = tempfile.gettempdir()
+    candidates = []
+    for f in Path(tmpdir).glob("batch-*-checkpoint.json"):
+        try:
+            candidates.append((f.stat().st_mtime, f))
+        except OSError:
+            pass
+    if candidates:
+        candidates.sort(reverse=True)
+        return str(candidates[0][1])
+    return None
+
+
+def _cmd_batch_status(args):
+    """Show batch status — read-only snapshot of current batch state.
+
+    Reads checkpoint file and git state. No mutation, no token read.
+    """
+    checkpoint_path = None
+    if args.checkpoint:
+        checkpoint_path = args.checkpoint
+    else:
+        checkpoint_path = _find_latest_checkpoint()
+
+    result = {
+        "batch_id": None,
+        "status": "no_active_batch",
+        "current_wo": None,
+        "phase": None,
+        "baseline_before": None,
+        "current_baseline": _get_current_baseline(),
+        "last_safe_point": None,
+        "resume_allowed": None,
+        "worker_status": None,
+        "retry_count": 0,
+        "next_retry_at": None,
+        "completed_count": 0,
+        "remaining_count": 0,
+        "last_pr": None,
+        "last_changed_paths": [],
+    }
+
+    if checkpoint_path:
+        cp = _load_checkpoint(checkpoint_path)
+        if cp:
+            result["batch_id"] = cp.get("batch_id")
+            result["status"] = cp.get("status", "unknown")
+            result["current_wo"] = cp.get("current_wo")
+            result["phase"] = cp.get("phase")
+            result["baseline_before"] = cp.get("baseline_before")
+            result["last_safe_point"] = cp.get("last_safe_point")
+            result["resume_allowed"] = cp.get("resume_allowed")
+            result["retry_count"] = cp.get("retry_count", 0)
+            result["next_retry_at"] = cp.get("next_retry_at")
+            result["last_pr"] = cp.get("pr")
+            result["last_changed_paths"] = cp.get("changed_paths", [])
+            wo_list = cp.get("work_orders", [])
+            current_idx = cp.get("current_wo_index", 0)
+            result["completed_count"] = current_idx
+            result["remaining_count"] = max(0, len(wo_list) - current_idx)
+
+    # Check worker status (read-only)
+    script_dir = Path(__file__).parent
+    resilience_path = script_dir / "vibe_worker_resilience.py"
+    if resilience_path.exists():
+        rc, stdout, stderr = _run_script(resilience_path, ["--check", "--json"], timeout=20)
+        try:
+            worker_data = json.loads(stdout)
+            result["worker_status"] = worker_data.get("worker_status", "unknown")
+        except (json.JSONDecodeError, KeyError):
+            result["worker_status"] = "check_failed"
+
+    return result, 0
+
+
+def _cmd_batch_report(args):
+    """Show detailed batch report — read-only, extended status with per-WO breakdown.
+
+    Reads checkpoint file, git state, and worker status. No mutation, no token read.
+    """
+    status_result, rc = _cmd_batch_status(args)
+
+    report = dict(status_result)
+    report["report_type"] = "batch_report"
+    report["report_time"] = time.time()
+    report["batch_runner_version"] = VERSION
+    report["repo"] = SELF_REPO
+    report["repo_trust_level"] = "trusted-self"
+
+    # Add per-WO details from checkpoint
+    checkpoint_path = args.checkpoint
+    if not checkpoint_path:
+        checkpoint_path = _find_latest_checkpoint()
+    if checkpoint_path:
+        cp = _load_checkpoint(checkpoint_path)
+        if cp:
+            report["per_wo_status"] = cp.get("per_wo_status", [])
+            report["stop_reason"] = cp.get("stop_reason")
+            report["last_successful_baseline"] = cp.get("last_successful_baseline")
+            report["final_baseline"] = cp.get("final_baseline")
+
+    # Add worker resilience details
+    script_dir = Path(__file__).parent
+    resilience_path = script_dir / "vibe_worker_resilience.py"
+    if resilience_path.exists():
+        rc, stdout, stderr = _run_script(resilience_path, ["--check", "--json"], timeout=20)
+        try:
+            worker_data = json.loads(stdout)
+            report["worker_error"] = worker_data.get("worker_error")
+            report["recommended_action"] = worker_data.get("recommended_action")
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    return report, 0
+
+
 def _execute_wo(wo, script_dir, repo_dir, repo_root, dry_run=False):
     """Execute a single Work Order.
 
@@ -238,17 +375,6 @@ def _execute_wo(wo, script_dir, repo_dir, repo_root, dry_run=False):
         result["status"] = "dry_run_ok"
         result["blockers"] = []
         return True, result, None
-
-    # Real execution would go here:
-    # 1. Create worktree
-    # 2. Make changes
-    # 3. Commit
-    # 4. Push
-    # 5. Create PR
-    # 6. Wrapper merge
-    # 7. Post-merge checks
-    # For now, this is a contract/validation script — actual execution
-    # is done by the orchestrator (Hermes) following this contract.
 
     result["status"] = "contract_validated"
     result["note"] = "Execution delegated to orchestrator following this contract"
@@ -333,7 +459,6 @@ def _cmd_run(args):
             batch_result["failed"] += 1
             batch_result["status"] = "stopped"
             batch_result["stop_reason"] = stop_reason
-            # Stop batch on failure
             break
 
     if batch_result["status"] == "running":
@@ -352,7 +477,6 @@ def _cmd_run(args):
         {"wo_id": r.get("wo_id"), "changed_paths": r.get("changed_paths", [])}
         for r in batch_result["work_order_results"]
     ]
-    # Determine last successful baseline
     baselines = [r.get("post_merge_baseline") for r in batch_result["work_order_results"] if r.get("post_merge_baseline")]
     batch_result["last_successful_baseline"] = baselines[-1] if baselines else None
     batch_result["final_baseline"] = baselines[-1] if baselines else None
@@ -370,7 +494,7 @@ def _cmd_status(args):
         "repo_trust_level": "trusted-self",
         "max_batch_size": 5,
         "stop_conditions": STOP_CONDITIONS,
-        "supported_commands": ["run", "status"],
+        "supported_commands": ["run", "status", "batch-status", "batch-report"],
         "dry_run_supported": True,
     }, 0
 
@@ -385,10 +509,13 @@ def build_parser():
     parser.add_argument("--json", action="store_true", dest="output_json", help="JSON output")
     parser.add_argument("--compact", action="store_true", help="Compact output")
     parser.add_argument("--dry-run", action="store_true", help="Validate only, no execution")
+    parser.add_argument("--checkpoint", metavar="FILE", help="Checkpoint file for status/report")
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--batch", metavar="FILE", help="Batch plan JSON file")
     group.add_argument("--status", action="store_true", help="Show runner status")
+    group.add_argument("--batch-status", action="store_true", help="Show current batch status (read-only)")
+    group.add_argument("--batch-report", action="store_true", help="Show detailed batch report (read-only)")
 
     return parser
 
@@ -398,11 +525,14 @@ def _format_compact(result):
     if "error" in result:
         return f"BATCH ERROR | {result['error']}"
     status = result.get("status", "?")
-    completed = result.get("completed", 0)
-    total = result.get("total_work_orders", 0)
+    completed = result.get("completed", result.get("completed_count", 0))
+    total = result.get("total_work_orders", result.get("remaining_count", 0)) + completed
     stop = result.get("stop_reason", "")
     if stop:
         return f"BATCH {status} | {completed}/{total} done | stop={stop}"
+    wo = result.get("current_wo", "")
+    if wo:
+        return f"BATCH {status} | wo={wo} | {completed} done"
     return f"BATCH {status} | {completed}/{total} done"
 
 
@@ -415,6 +545,10 @@ def main(argv=None):
         result, rc = _cmd_run(args)
     elif args.status:
         result, rc = _cmd_status(args)
+    elif args.batch_status:
+        result, rc = _cmd_batch_status(args)
+    elif args.batch_report:
+        result, rc = _cmd_batch_report(args)
     else:
         parser.print_help()
         return 1

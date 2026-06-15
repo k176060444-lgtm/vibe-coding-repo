@@ -3240,7 +3240,7 @@ def _test_worker_resilience_checkpoint(script_dir):
     if not path.exists():
         return {"passed": False, "message": "script not found"}
     tmpdir = tempfile.mkdtemp(prefix="vibedev-test-cp-")
-    cp_path = pathlib.Path(tmpdir) / "checkpoint.json"
+    cp_path = Path(tmpdir) / "checkpoint.json"
     rc, stdout, stderr = _run_script(path, ["--checkpoint", str(cp_path), "--json"])
     import json, shutil
     try:
@@ -3281,7 +3281,7 @@ def _test_worker_resilience_status_report(script_dir):
     if not path.exists():
         return {"passed": False, "message": "script not found"}
     tmpdir = tempfile.mkdtemp(prefix="vibedev-test-rpt-")
-    cp_path = pathlib.Path(tmpdir) / "checkpoint.json"
+    cp_path = Path(tmpdir) / "checkpoint.json"
     # Create checkpoint first
     _run_script(path, ["--checkpoint", str(cp_path), "--json"])
     # Generate report
@@ -3307,7 +3307,7 @@ def _test_worker_resilience_resume(script_dir):
     if not path.exists():
         return {"passed": False, "message": "script not found"}
     tmpdir = tempfile.mkdtemp(prefix="vibedev-test-resume-")
-    cp_path = pathlib.Path(tmpdir) / "checkpoint.json"
+    cp_path = Path(tmpdir) / "checkpoint.json"
     _run_script(path, ["--checkpoint", str(cp_path), "--json"])
     rc, stdout, stderr = _run_script(path, ["--resume", str(cp_path), "--json"])
     import json, shutil
@@ -3379,6 +3379,139 @@ def _test_batch_runner_version(script_dir):
     if 'VERSION = "1.2.0"' not in content:
         return {"passed": False, "message": "expected version 1.2.0"}
     return {"passed": True, "message": "batch runner v1.2.0"}
+
+
+
+
+def _test_batch_status_json(script_dir):
+    """Test batch-status --json returns valid JSON with required fields."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--batch-status", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    required = ["batch_id", "status", "current_wo", "phase", "baseline_before",
+                "current_baseline", "last_safe_point", "resume_allowed",
+                "worker_status", "retry_count", "next_retry_at",
+                "completed_count", "remaining_count", "last_pr", "last_changed_paths"]
+    missing = [f for f in required if f not in data]
+    if missing:
+        return {"passed": False, "message": "missing fields: %s" % missing}
+    return {"passed": True, "message": "batch-status has all %d required fields" % len(required)}
+
+
+def _test_batch_report_json(script_dir):
+    """Test batch-report --json returns valid JSON with report fields."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--batch-report", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    required = ["report_type", "report_time", "batch_runner_version", "repo", "repo_trust_level"]
+    missing = [f for f in required if f not in data]
+    if missing:
+        return {"passed": False, "message": "missing report fields: %s" % missing}
+    if data.get("report_type") != "batch_report":
+        return {"passed": False, "message": "expected report_type=batch_report"}
+    return {"passed": True, "message": "batch-report ok, v%s" % data.get("batch_runner_version")}
+
+
+def _test_batch_status_router_bs(script_dir):
+    """Test batch-status router alias (bs)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+    rc, stdout, stderr = _run_script(path, ["bs", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from router"}
+    if "status" not in data:
+        return {"passed": False, "message": "missing status field"}
+    return {"passed": True, "message": "bs->batch-status ok"}
+
+
+def _test_batch_report_router_breport(script_dir):
+    """Test batch-report router alias (breport)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+    rc, stdout, stderr = _run_script(path, ["breport", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from router"}
+    if "report_type" not in data:
+        return {"passed": False, "message": "missing report_type field"}
+    return {"passed": True, "message": "breport->batch-report ok"}
+
+
+def _test_batch_status_token_no_leak(script_dir):
+    """Test batch-status does not leak token patterns."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--batch-status", "--json"])
+    combined = stdout + stderr
+    suspicious = ["ghp_", "gho_", "github_pat_", "Bearer ", "Basic "]
+    for pat in suspicious:
+        if pat in combined:
+            return {"passed": False, "message": "token pattern found: %s" % pat}
+    return {"passed": True, "message": "no token patterns in batch-status output"}
+
+
+def _test_batch_status_with_checkpoint(script_dir):
+    """Test batch-status reads checkpoint data."""
+    import tempfile, json as json_mod
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-bs-")
+    cp_path = Path(tmpdir) / "checkpoint.json"
+    cp_data = {
+        "batch_id": "test-bs-001",
+        "status": "WAITING_WORKER_RECOVERY",
+        "current_wo": "wo-test-002",
+        "phase": "after_push",
+        "baseline_before": "abc123",
+        "last_safe_point": 1000000,
+        "resume_allowed": True,
+        "retry_count": 3,
+        "next_retry_at": 1000300,
+        "pr": 42,
+        "changed_paths": ["scripts/test.py"],
+        "work_orders": [{"wo_id": "wo-1"}, {"wo_id": "wo-2"}, {"wo_id": "wo-3"}],
+        "current_wo_index": 1,
+    }
+    cp_path.write_text(json_mod.dumps(cp_data))
+    rc, stdout, stderr = _run_script(path, ["--batch-status", "--checkpoint", str(cp_path), "--json"])
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON: %s" % stdout[:100]}
+    if data.get("batch_id") != "test-bs-001":
+        return {"passed": False, "message": "expected batch_id=test-bs-001, got %s" % data.get("batch_id")}
+    if data.get("status") != "WAITING_WORKER_RECOVERY":
+        return {"passed": False, "message": "expected WAITING_WORKER_RECOVERY, got %s" % data.get("status")}
+    if data.get("current_wo") != "wo-test-002":
+        return {"passed": False, "message": "expected current_wo=wo-test-002"}
+    if data.get("completed_count") != 1:
+        return {"passed": False, "message": "expected completed_count=1, got %s" % data.get("completed_count")}
+    if data.get("remaining_count") != 2:
+        return {"passed": False, "message": "expected remaining_count=2, got %s" % data.get("remaining_count")}
+    return {"passed": True, "message": "batch-status checkpoint read ok, batch_id=%s" % data.get("batch_id")}
 
 
 def _test_batch_runner_checkpoint_status_field(script_dir):
@@ -3651,6 +3784,25 @@ def run_tests(jobs_dir=None):
 
     # Test 77: V1 freeze check router aliases
     tests.append(_run_test("v1_freeze_router", lambda: _test_v1_freeze_router(script_dir)))
+
+
+    # Test 78: batch-status --json
+    tests.append(_run_test("batch_status_json", lambda: _test_batch_status_json(script_dir)))
+
+    # Test 79: batch-report --json
+    tests.append(_run_test("batch_report_json", lambda: _test_batch_report_json(script_dir)))
+
+    # Test 80: batch-status router alias (bs)
+    tests.append(_run_test("batch_status_router_bs", lambda: _test_batch_status_router_bs(script_dir)))
+
+    # Test 81: batch-report router alias (breport)
+    tests.append(_run_test("batch_report_router_breport", lambda: _test_batch_report_router_breport(script_dir)))
+
+    # Test 82: batch-status no token leak
+    tests.append(_run_test("batch_status_token_no_leak", lambda: _test_batch_status_token_no_leak(script_dir)))
+
+    # Test 83: batch-status with checkpoint
+    tests.append(_run_test("batch_status_with_checkpoint", lambda: _test_batch_status_with_checkpoint(script_dir)))
 
     return tests
 
