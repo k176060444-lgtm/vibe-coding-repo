@@ -573,3 +573,10 @@ $ python scripts/vibe_command_router.py notes --compact
 $ python scripts/vibe_command_router.py rn --json --limit 5
 { "current_main_sha": "e4a1ac9...", "total_merged_prs": 5, ... }
 ```
+
+
+## Project Dashboard
+
+See [PROJECT_DASHBOARD.md](PROJECT_DASHBOARD.md) for the complete operator-facing status dashboard.
+
+Includes: system status, router commands, toolchain scripts, autonomous capabilities, safety status, lifecycle summary, recent merges, quick commands, and next phase recommendations.
