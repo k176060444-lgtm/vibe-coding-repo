@@ -23,6 +23,7 @@ Commands:
     evidence    - Execution Evidence (create/list/show)
     exec-gate   - Execution Gate (pre-execution admission check)
     safe-executor - Safe Executor (execution plan generator)
+    quality-gate - Workflow Quality Gate (aggregated health check)
     help        - Show this help message
     version     - Show version
 
@@ -32,7 +33,7 @@ Short aliases:
     dash/status-page → dashboard, validate/vw → validate-wo, pack/pw → pack-wo,
     pre → preflight, reg/wo-list/wo-show → registry, ws → wo-status,
     approve-receipt → receipt, ar → receipt, ev → evidence, exec-log → evidence,
-    gate → exec-gate, ready-run → exec-gate, se → safe-executor, plan → safe-executor, ? → help, v → version
+    gate → exec-gate, ready-run → exec-gate, se → safe-executor, plan → safe-executor, qg → quality-gate, go-no-go → quality-gate, ? → help, v → version
 
 Constraints:
     - Read-only, no IO on import, standard library only.
@@ -47,7 +48,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.8.0"
+VERSION = "2.9.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -76,6 +77,7 @@ COMMAND_SCRIPTS = {
     "recovery": "vibe_executor_recovery.py",
     "unfreeze-checklist": "vibe_executor_unfreeze_checklist.py",
     "transcript": "vibe_execution_transcript.py",
+    "quality-gate": "vibe_quality_gate.py",
 }
 
 # Short aliases
@@ -123,6 +125,8 @@ ALIASES = {
     "txn": "transcript",
     "exec-txn": "transcript",
     "adapter-cap": "adapter",
+    "qg": "quality-gate",
+    "go-no-go": "quality-gate",
     "?": "help",
     "v": "version",
 }
@@ -154,6 +158,7 @@ COMMAND_DESCRIPTIONS = {
     "recovery": "Executor Recovery Plan - failure recovery/rollback plan generator",
     "unfreeze-checklist": "Executor Unfreeze Checklist - machine-readable unfreeze readiness check",
     "transcript": "Execution Transcript - append-only record of dry-run / noop sessions",
+    "quality-gate": "Workflow Quality Gate - aggregated pre/post-execution health check",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -179,6 +184,7 @@ COMMAND_FLAGS = {
     "recovery": ["--json"],
     "unfreeze-checklist": ["--json", "--compact", "--level"],
     "transcript": ["--json", "--transcript-dir"],
+    "quality-gate": ["--json", "--compact", "--repo-root", "--jobs-dir"],
 }
 
 

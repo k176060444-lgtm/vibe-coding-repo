@@ -1908,6 +1908,83 @@ def _test_evidence_verifier_unexpected_warn(script_dir):
 
 
 
+
+def _test_quality_gate_json(script_dir):
+    """Test quality gate JSON output."""
+    path = script_dir / "vibe_quality_gate.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["--json", "--skip-smoke", "--repo-root", str(script_dir.parent)])
+    if rc != 0 and rc != 1:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    if "verdict" not in data:
+        return {"passed": False, "message": "missing verdict"}
+    if "checks" not in data:
+        return {"passed": False, "message": "missing checks"}
+    if "operator_summary" not in data:
+        return {"passed": False, "message": "missing operator_summary"}
+
+    verdict = data.get("verdict", "UNKNOWN")
+    total = data.get("summary", {}).get("total", 0)
+    return {"passed": True, "message": "verdict=%s checks=%d" % (verdict, total)}
+
+
+def _test_quality_gate_router(script_dir):
+    """Test quality gate router aliases (qg, go-no-go)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+
+    # Test qg alias
+    rc1, stdout1, stderr1 = _run_script(path, ["qg", "--json", "--skip-smoke", "--repo-root", str(script_dir.parent)])
+    if rc1 != 0 and rc1 != 1:
+        return {"passed": False, "message": "qg exit=%d" % rc1}
+
+    try:
+        data1 = json.loads(stdout1)
+        if "verdict" not in data1:
+            return {"passed": False, "message": "qg missing verdict"}
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "qg invalid JSON"}
+
+    # Test go-no-go alias
+    rc2, stdout2, stderr2 = _run_script(path, ["go-no-go", "--json", "--skip-smoke", "--repo-root", str(script_dir.parent)])
+    if rc2 != 0 and rc2 != 1:
+        return {"passed": False, "message": "go-no-go exit=%d" % rc2}
+
+    return {"passed": True, "message": "qg+go-no-go verdict=%s" % data1.get("verdict")}
+
+
+def _test_quality_gate_block_scenario(script_dir):
+    """Test quality gate BLOCK scenario (nonexistent repo root)."""
+    path = script_dir / "vibe_quality_gate.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    # Use a nonexistent repo root to trigger BLOCK
+    rc, stdout, stderr = _run_script(path, ["--json", "--repo-root", "/nonexistent/repo"])
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    verdict = data.get("verdict", "UNKNOWN")
+    # Should be BLOCK or WARN (smoke will fail at minimum)
+    if verdict == "PASS":
+        return {"passed": False, "message": "verdict=PASS with bad repo root (should be BLOCK/WARN)"}
+
+    blocks = data.get("summary", {}).get("block", 0)
+    return {"passed": True, "message": "verdict=%s blocks=%d" % (verdict, blocks)}
+
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -2121,6 +2198,15 @@ def run_tests(jobs_dir=None):
 
     # Test 68: Evidence verifier unexpected WARN in non-fixture mode
     tests.append(_run_test("evidence_verifier_unexpected_warn", lambda: _test_evidence_verifier_unexpected_warn(script_dir)))
+
+    # Test 69: Quality gate JSON output
+    tests.append(_run_test("quality_gate_json", lambda: _test_quality_gate_json(script_dir)))
+
+    # Test 70: Quality gate router aliases (qg, go-no-go)
+    tests.append(_run_test("quality_gate_router", lambda: _test_quality_gate_router(script_dir)))
+
+    # Test 71: Quality gate BLOCK scenario
+    tests.append(_run_test("quality_gate_block", lambda: _test_quality_gate_block_scenario(script_dir)))
 
     return tests
 
