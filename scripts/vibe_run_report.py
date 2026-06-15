@@ -207,40 +207,62 @@ def run_report(repo_root=None, jobs_dir=None):
 
 
 def _format_markdown(result):
-    """Format result as Markdown suitable for QQ."""
+    """Format result as Markdown suitable for QQ/mobile reading.
+
+    Fixed sections: Conclusion, Baseline, QG, Smoke, Audit, PR, Next.
+    """
     lines = []
-    lines.append("# Run Report")
+    qg_verdict = result.get("quality_gate", {}).get("verdict", "UNKNOWN")
+    audit = result.get("audit_lock", {})
+    audit_status = audit.get("audit_status", "unknown")
+
+    # Conclusion (always first)
+    if qg_verdict == "PASS" and audit_status == "audit_tainted":
+        conclusion = "✅ 系统健康，可继续执行"
+    elif qg_verdict == "BLOCK":
+        conclusion = "❌ 系统阻塞，禁止继续"
+    elif qg_verdict == "WARN":
+        conclusion = "⚠️ 系统有警告，需审查"
+    else:
+        conclusion = "❓ 状态不明"
+
+    lines.append("# 执行报告 / Run Report")
     lines.append("")
-    lines.append("**Time:** %s" % result.get("timestamp", "")[:19])
+    lines.append("## 结论")
+    lines.append(conclusion)
     lines.append("")
 
     # Baseline
     baseline = result.get("baseline", {})
-    lines.append("## Baseline")
+    lines.append("## 当前基线")
     lines.append("- origin/main: `%s`" % baseline.get("short", "unknown"))
+    lines.append("- Full SHA: `%s`" % baseline.get("sha", "unknown"))
     lines.append("")
 
-    # Quality Gate
+    # QG
     qg = result.get("quality_gate", {})
     lines.append("## Quality Gate")
-    lines.append("- Verdict: **%s**" % qg.get("verdict", "unknown"))
+    icon = {"PASS": "✅", "WARN": "⚠️", "BLOCK": "❌"}.get(qg_verdict, "❓")
+    lines.append("- %s **%s**" % (icon, qg_verdict))
     checks = qg.get("checks", {})
     if checks:
-        lines.append("- Checks: %d total, %d pass, %d warn, %d block" % (
+        lines.append("- %d total | %d pass | %d warn | %d block" % (
             checks.get("total", 0), checks.get("pass", 0),
             checks.get("warn", 0), checks.get("block", 0)))
     lines.append("")
 
-    # Status
-    lines.append("## Status")
-    lines.append("- Smoke: %s" % result.get("smoke_status", "unknown"))
-    ls = result.get("loop_summary", {})
-    lines.append("- Loop components: %s" % ls.get("total_components", "unknown"))
-    os_snap = result.get("operator_snapshot", {})
-    lines.append("- Operator: %s" % os_snap.get("overall", "unknown"))
-    al = result.get("audit_lock", {})
-    lines.append("- Audit lock: %s (push_allowed=%s)" % (
-        al.get("audit_status", "unknown"), al.get("push_allowed", "unknown")))
+    # Smoke
+    smoke = result.get("smoke_status", "unknown")
+    smoke_icon = "✅" if smoke == "PASS" else "❌"
+    lines.append("## Smoke")
+    lines.append("- %s %s" % (smoke_icon, smoke))
+    lines.append("")
+
+    # Audit
+    lines.append("## Audit Lock")
+    al_icon = "✅" if audit_status == "audit_tainted" else "❌"
+    lines.append("- %s %s (push_allowed=%s)" % (
+        al_icon, audit_status, audit.get("push_allowed", "unknown")))
     lines.append("")
 
     # PR
@@ -252,13 +274,13 @@ def _format_markdown(result):
         lines.append("- Commit: `%s`" % pr.get("merge_commit", ""))
         lines.append("")
 
-    # Next action
-    lines.append("## Next Action")
+    # Next
+    lines.append("## 下一步")
     lines.append(result.get("next_recommended_action", "unknown"))
     lines.append("")
 
-    # Summary
-    lines.append("**%s**" % result.get("operator_summary", ""))
+    lines.append("---")
+    lines.append("*%s*" % result.get("operator_summary", ""))
 
     return "\n".join(lines)
 
