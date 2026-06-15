@@ -303,12 +303,30 @@ def main(argv=None):
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.compact:
-        checks_str = " ".join(
-            "%s:%s" % (c["name"].replace("_", "-"), c["result"])
-            for c in result["checks"]
-        )
-        print("%s | %s" % (result["verdict"], checks_str))
-        print(result["operator_summary"])
+        # Enhanced compact: one-line QQ-friendly summary
+        qg = result["verdict"]
+        smoke = result.get("smoke_status", "?")
+        audit = result.get("audit_lock_status", "?")
+        origin = result.get("origin_main_status", "?")
+        loop_s = result.get("loop_summary_status", "?")
+        ev = result.get("evidence_verifier_status", "?")
+
+        # Short labels
+        audit_short = {"PASS": "tainted-intact"}.get(audit, audit)
+        origin_short = {"PASS": "synced"}.get(origin, origin)
+        loop_short = {"PASS": "ok"}.get(loop_s, loop_s)
+        ev_short = {"PASS": "ok"}.get(ev, ev)
+
+        # Next action hint
+        if qg == "BLOCK":
+            next_hint = "HALT"
+        elif qg == "WARN":
+            next_hint = "REVIEW"
+        else:
+            next_hint = "run-report"
+
+        print("QG %s | Smoke %s | Audit %s | Main %s | Loop %s | EV %s | Next: %s" % (
+            qg, smoke, audit_short, origin_short, loop_short, ev_short, next_hint))
     else:
         print("=" * 50)
         print("  Workflow Quality Gate v%s" % VERSION)
