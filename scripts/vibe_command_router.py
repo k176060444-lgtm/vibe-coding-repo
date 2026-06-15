@@ -79,6 +79,7 @@ COMMAND_SCRIPTS = {
     "transcript": "vibe_execution_transcript.py",
     "quality-gate": "vibe_quality_gate.py",
     "run-report": "vibe_run_report.py",
+    "v1-freeze": "vibe_v1_freeze_check.py",
 }
 
 # Short aliases
@@ -130,6 +131,8 @@ ALIASES = {
     "go-no-go": "quality-gate",
     "rr": "run-report",
     "handoff": "run-report",
+    "v1": "v1-freeze",
+    "freeze-check": "v1-freeze",
     "?": "help",
     "v": "version",
 }
@@ -163,6 +166,7 @@ COMMAND_DESCRIPTIONS = {
     "transcript": "Execution Transcript - append-only record of dry-run / noop sessions",
     "quality-gate": "Workflow Quality Gate - aggregated pre/post-execution health check",
     "run-report": "Run Report / Session Handoff - execution summary for QQ/mobile",
+    "v1-freeze": "V1 Freeze Check - verify operational freeze is healthy",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -259,6 +263,7 @@ def _show_help():
     lines.append("  run-report (rr, handoff)     Session handoff / execution summary")
     lines.append("  smoke                        Full smoke suite (75 tests)")
     lines.append("  health                       Quick health check")
+    lines.append("  v1-freeze (v1, freeze-check)  V1 freeze verification")
     lines.append("  snapshot                     Operator status snapshot")
     lines.append("")
     lines.append("Options:")

@@ -1162,3 +1162,10 @@ Checks: smoke suite, router version, audit lock, origin/main sync, loop summary,
 
 Output: PASS / WARN / BLOCK with operator summary.
 
+
+
+### QQ Operator Quick Reference
+
+See [QQ_OPERATOR_CHEATSHEET.md](QQ_OPERATOR_CHEATSHEET.md) for mobile QQ operation shortcuts.
+
+Key shortcuts: qg, rr, smoke, snapshot, dashboard, loop-summary, advisor, batch-plan
