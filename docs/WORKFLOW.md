@@ -767,3 +767,26 @@ Router v2.6 adds:
 - `receipt` / `ar` / `approve-receipt` → approval receipt
 
 Smoke suite now 36/36 PASS.
+
+
+### Execution Evidence
+
+Execution evidence bundles collect all artifacts from a Work Order execution:
+
+```
+requirement → intake → validate → registry → packager → approval-receipt
+                                                              ↓
+                              execution-evidence.create ← [execute]
+                                                              ↓
+                              evidence includes:
+                              - registry entry
+                              - approval receipt
+                              - base_sha, result_sha, post_merge_sha
+                              - PR URL, wrapper results
+                              - smoke/health results
+                              - implementer/reviewer models
+                              - job_status, audit_status
+                              - changed_paths
+```
+
+Evidence bundles are stored in `evidence/` directory with SHA256 digest for integrity.
