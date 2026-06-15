@@ -135,7 +135,7 @@ def _get_v1_freeze(script_dir, repo_root):
     path = script_dir / "vibe_v1_freeze_check.py"
     if not path.exists():
         return {"verdict": "NOT_AVAILABLE", "checks": 0}
-    rc, stdout, stderr = _run_script(path, ["--json", "--repo-root", str(repo_root)])
+    rc, stdout, stderr = _run_script(path, ["--json", "--skip-run-report", "--repo-root", str(repo_root)])
     try:
         data = json.loads(stdout)
         return {
