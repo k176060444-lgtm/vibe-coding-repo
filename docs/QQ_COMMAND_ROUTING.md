@@ -437,3 +437,27 @@ Bot: { "current_main_sha": "...", "total_merged_prs": 3, ... }
 | /notes | ✅ | No |
 | /rn | ✅ | No |
 | /progress | ✅ | No |
+
+
+## Dashboard via QQ
+
+```
+User: /dash
+Bot:
+  📊 Project Dashboard
+  Baseline: cc5501f375ef...
+  Status: 🟢 OPERATIONAL
+  Smoke: PASS (20/20)
+  Health: PASS (7/7)
+  Queue: Clean
+```
+
+```
+User: /dash --json
+Bot: { "dashboard_path": "docs/PROJECT_DASHBOARD.md", "exists": true, ... }
+```
+
+| Command | Read-Only | Auto-Execute |
+|---------|-----------|-------------|
+| /dash | ✅ | No |
+| /status-page | ✅ | No |

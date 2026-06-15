@@ -31,7 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -43,6 +43,7 @@ COMMAND_SCRIPTS = {
     "smoke": "test_toolchain_smoke.py",
     "intake": "vibe_workorder_intake.py",
     "release-notes": "vibe_release_notes.py",
+    "dashboard": None,
 }
 
 # Short aliases
@@ -58,6 +59,8 @@ ALIASES = {
     "notes": "release-notes",
     "rn": "release-notes",
     "progress": "release-notes",
+    "dash": "dashboard",
+    "status-page": "dashboard",
     "?": "help",
     "v": "version",
 }
@@ -72,6 +75,7 @@ COMMAND_DESCRIPTIONS = {
     "smoke": "Toolchain Smoke Suite - verify all tools work",
     "intake": "Work Order Intake - convert requirements to drafts",
     "release-notes": "Release Notes - progress report from git history",
+    "dashboard": "Project Dashboard - system status overview",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -184,6 +188,73 @@ def build_parser():
     return parser
 
 
+
+def _show_dashboard(output_json=False):
+    """Show project dashboard summary."""
+    script_dir = Path(__file__).parent
+    repo_root = script_dir.parent
+    dashboard_path = repo_root / "docs" / "PROJECT_DASHBOARD.md"
+
+    if output_json:
+        import json as _json
+        result = {
+            "dashboard_path": str(dashboard_path),
+            "exists": dashboard_path.exists(),
+            "commands": list(COMMAND_SCRIPTS.keys()) + ["dashboard", "help", "version"],
+            "aliases": dict(ALIASES),
+            "version": VERSION,
+        }
+        # Try to read first line for baseline info
+        if dashboard_path.exists():
+            try:
+                with open(dashboard_path, "r") as f:
+                    for line in f:
+                        if "Baseline" in line:
+                            result["baseline"] = line.strip().split("`")[1] if "`" in line else line.strip()
+                            break
+            except (OSError, IOError):
+                pass
+        print(_json.dumps(result, indent=2))
+    else:
+        lines = [
+            "=" * 40,
+            "  \U0001f4ca Project Dashboard",
+            "=" * 40,
+            "",
+            "  Dashboard: docs/PROJECT_DASHBOARD.md",
+        ]
+        if dashboard_path.exists():
+            try:
+                with open(dashboard_path, "r") as f:
+                    content = f.read()
+                # Extract key metrics
+                for line in content.split("\n"):
+                    if "Baseline" in line and "`" in line:
+                        lines.append("  Baseline:  %s" % line.strip().split("`")[1])
+                    elif "Total PRs" in line:
+                        lines.append("  %s" % line.strip().replace("**", ""))
+                    elif "System Status" in line:
+                        lines.append("  Status:    %s" % line.split(":")[1].strip() if ":" in line else "")
+                    elif "Smoke Suite" in line and "PASS" in line:
+                        lines.append("  Smoke:     PASS")
+                    elif "Health Check" in line and "PASS" in line:
+                        lines.append("  Health:    PASS")
+                    elif "Queue" in line and "Clean" in line:
+                        lines.append("  Queue:     Clean")
+            except (OSError, IOError):
+                lines.append("  (cannot read dashboard)")
+        else:
+            lines.append("  (dashboard not found)")
+        lines.extend([
+            "",
+            "  Run: python scripts/vibe_command_router.py dashboard --json",
+            "  Full: cat docs/PROJECT_DASHBOARD.md",
+            "=" * 40,
+        ])
+        print("\n".join(lines))
+    return 0
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -212,6 +283,10 @@ def main(argv=None):
     if command == "version":
         _show_version()
         return 0
+
+    # Handle dashboard (no script, built-in)
+    if command == "dashboard":
+        return _show_dashboard(args.output_json if hasattr(args, "output_json") else "--json" in args.args)
 
     # Get script path
     script_name = COMMAND_SCRIPTS[command]
