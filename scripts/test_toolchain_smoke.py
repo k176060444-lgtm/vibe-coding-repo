@@ -3212,6 +3212,146 @@ def _test_batch_runner_token_redaction(script_dir):
     return {"passed": True, "message": "no token patterns in batch runner output"}
 
 
+
+
+def _test_worker_resilience_check(script_dir):
+    """Test worker resilience --check returns status."""
+    path = script_dir / "vibe_worker_resilience.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--check", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if "worker_status" not in data:
+        return {"passed": False, "message": "missing worker_status"}
+    valid_statuses = ["reachable", "unreachable_timeout", "unreachable_refused", "unknown"]
+    if data["worker_status"] not in valid_statuses:
+        return {"passed": False, "message": "invalid status: %s" % data["worker_status"]}
+    return {"passed": True, "message": "worker_status=%s" % data["worker_status"]}
+
+
+def _test_worker_resilience_checkpoint(script_dir):
+    """Test checkpoint creation."""
+    import tempfile
+    path = script_dir / "vibe_worker_resilience.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-cp-")
+    cp_path = pathlib.Path(tmpdir) / "checkpoint.json"
+    rc, stdout, stderr = _run_script(path, ["--checkpoint", str(cp_path), "--json"])
+    import json, shutil
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON"}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    if "status" not in data:
+        return {"passed": False, "message": "missing status in checkpoint"}
+    if data.get("resume_allowed") is None:
+        return {"passed": False, "message": "missing resume_allowed"}
+    return {"passed": True, "message": "checkpoint created, resume_allowed=%s" % data.get("resume_allowed")}
+
+
+def _test_worker_resilience_retry_config(script_dir):
+    """Test retry config: 5min interval, 75min max, 15 retries."""
+    path = script_dir / "vibe_worker_resilience.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    content = path.read_text()
+    checks = [
+        ("RETRY_INTERVAL_MINUTES = 5", "retry interval 5min"),
+        ("MAX_WAIT_MINUTES = 75", "max wait 75min"),
+        ("MAX_RETRY_COUNT = 15", "max retry 15"),
+        ("REPORT_INTERVAL_MINUTES = 15", "report interval 15min"),
+    ]
+    for pattern, desc in checks:
+        if pattern not in content:
+            return {"passed": False, "message": "missing: %s" % desc}
+    return {"passed": True, "message": "retry config: 5min/75min/15/15min"}
+
+
+def _test_worker_resilience_status_report(script_dir):
+    """Test status report generation."""
+    import tempfile
+    path = script_dir / "vibe_worker_resilience.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-rpt-")
+    cp_path = pathlib.Path(tmpdir) / "checkpoint.json"
+    # Create checkpoint first
+    _run_script(path, ["--checkpoint", str(cp_path), "--json"])
+    # Generate report
+    rc, stdout, stderr = _run_script(path, ["--status-report", str(cp_path), "--json"])
+    import json, shutil
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON"}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    required = ["batch_id", "status", "retry_count", "resume_allowed", "recommendation"]
+    missing = [f for f in required if f not in data]
+    if missing:
+        return {"passed": False, "message": "missing fields: %s" % missing}
+    return {"passed": True, "message": "status report has all required fields"}
+
+
+def _test_worker_resilience_resume(script_dir):
+    """Test resume from checkpoint."""
+    import tempfile
+    path = script_dir / "vibe_worker_resilience.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-resume-")
+    cp_path = pathlib.Path(tmpdir) / "checkpoint.json"
+    _run_script(path, ["--checkpoint", str(cp_path), "--json"])
+    rc, stdout, stderr = _run_script(path, ["--resume", str(cp_path), "--json"])
+    import json, shutil
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON"}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    if "resume_allowed" not in data:
+        return {"passed": False, "message": "missing resume_allowed"}
+    return {"passed": True, "message": "resume check ok, resume_allowed=%s" % data.get("resume_allowed")}
+
+
+def _test_worker_resilience_router(script_dir):
+    """Test worker-resilience router alias (wr, worker, resilience)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+    rc, stdout, stderr = _run_script(path, ["wr", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from router"}
+    if "worker_status" not in data:
+        return {"passed": False, "message": "missing worker_status"}
+    return {"passed": True, "message": "wr->worker-resilience ok"}
+
+
+def _test_worker_resilience_token_no_leak(script_dir):
+    """Test worker resilience does not leak token."""
+    path = script_dir / "vibe_worker_resilience.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--check", "--json"])
+    combined = stdout + stderr
+    suspicious = ["ghp_", "gho_", "github_pat_", "Bearer ", "Basic "]
+    for pat in suspicious:
+        if pat in combined:
+            return {"passed": False, "message": "token pattern found: %s" % pat}
+    return {"passed": True, "message": "no token patterns"}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
