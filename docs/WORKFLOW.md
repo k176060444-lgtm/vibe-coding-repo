@@ -548,3 +548,14 @@ Release notes smoke coverage added:
 - 20: Release Notes via router (notes command)
 
 Run: `python scripts/test_toolchain_smoke.py`
+
+
+## Project Dashboard
+
+The [PROJECT_DASHBOARD.md](PROJECT_DASHBOARD.md) provides a single-page operator view of the entire system:
+- Current baseline and sync status
+- All available commands and aliases
+- Autonomous capability matrix
+- Safety and audit status
+- Lifecycle summary
+- Quick command reference
