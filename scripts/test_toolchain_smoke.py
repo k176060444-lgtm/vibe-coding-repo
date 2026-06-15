@@ -2073,6 +2073,55 @@ def _test_run_report_router(script_dir):
 
 
 
+
+def _test_v1_freeze_check_json(script_dir):
+    """Test V1 freeze check JSON output."""
+    path = script_dir / "vibe_v1_freeze_check.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["--json", "--repo-root", str(script_dir.parent)])
+    if rc != 0 and rc != 1:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    if "verdict" not in data:
+        return {"passed": False, "message": "missing verdict"}
+    if "checks" not in data:
+        return {"passed": False, "message": "missing checks"}
+    if "operator_summary" not in data:
+        return {"passed": False, "message": "missing operator_summary"}
+
+    verdict = data.get("verdict", "UNKNOWN")
+    total = len(data.get("checks", []))
+    return {"passed": True, "message": "verdict=%s checks=%d" % (verdict, total)}
+
+
+def _test_v1_freeze_router(script_dir):
+    """Test V1 freeze check router aliases (v1, freeze-check)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+
+    rc, stdout, stderr = _run_script(path, ["v1", "--json", "--repo-root", str(script_dir.parent)])
+    if rc != 0 and rc != 1:
+        return {"passed": False, "message": "v1 exit=%d" % rc}
+
+    try:
+        data = json.loads(stdout)
+        if "verdict" not in data:
+            return {"passed": False, "message": "v1 missing verdict"}
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "v1 invalid JSON"}
+
+    return {"passed": True, "message": "v1+freeze-check verdict=%s" % data.get("verdict")}
+
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -2307,6 +2356,12 @@ def run_tests(jobs_dir=None):
 
     # Test 75: Run report router aliases
     tests.append(_run_test("run_report_router", lambda: _test_run_report_router(script_dir)))
+
+    # Test 76: V1 freeze check JSON
+    tests.append(_run_test("v1_freeze_check_json", lambda: _test_v1_freeze_check_json(script_dir)))
+
+    # Test 77: V1 freeze check router aliases
+    tests.append(_run_test("v1_freeze_router", lambda: _test_v1_freeze_router(script_dir)))
 
     return tests
 
