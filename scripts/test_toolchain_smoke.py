@@ -1645,6 +1645,37 @@ def _test_transcript_create_list(script_dir):
         return {"passed": False, "message": "count < 1"}
     return {"passed": True, "message": f"create+list OK: {data['transcript_id']}"}
 
+
+def _test_loop_summary(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_loop_summary.py", ["--compact"])
+    if rc != 0:
+        return {"passed": False, "message": f"exit {rc}"}
+    if "Autonomous Loop Summary" not in out:
+        return {"passed": False, "message": "missing title"}
+    if "Components:" not in out:
+        return {"passed": False, "message": "missing components"}
+    return {"passed": True, "message": "loop summary OK"}
+
+def _test_loop_summary_json(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_loop_summary.py", ["--json"])
+    if rc != 0:
+        return {"passed": False, "message": f"exit {rc}"}
+    import json
+    data = json.loads(out)
+    if "components" not in data or len(data["components"]) < 10:
+        return {"passed": False, "message": f"too few components: {len(data.get('components', []))}"}
+    return {"passed": True, "message": f"loop summary JSON OK: {len(data['components'])} components"}
+
+def _test_loop_summary_router(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_command_router.py", ["ls", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": f"exit {rc}"}
+    import json
+    data = json.loads(out)
+    if "components" not in data:
+        return {"passed": False, "message": "missing components"}
+    return {"passed": True, "message": "router loop-summary OK"}
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -1816,6 +1847,15 @@ def run_tests(jobs_dir=None):
     # Test 50: Transcript - create and list
     tests.append(_run_test("transcript_create_list", lambda: _test_transcript_create_list(script_dir)))
 
+
+    # Test 51: Loop Summary - compact
+    tests.append(_run_test("loop_summary", lambda: _test_loop_summary(script_dir)))
+
+    # Test 52: Loop Summary - JSON
+    tests.append(_run_test("loop_summary_json", lambda: _test_loop_summary_json(script_dir)))
+
+    # Test 53: Loop Summary - router integration
+    tests.append(_run_test("loop_summary_router", lambda: _test_loop_summary_router(script_dir)))
     return tests
 
 
