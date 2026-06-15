@@ -1246,3 +1246,77 @@ Enhanced batch report includes:
 - `stop_reason`, `per_wo_prs`, `per_wo_changed_paths`
 - `checkpoint_status`, `resume_status`
 
+
+### batch-status (bs)
+
+Current batch status — read-only snapshot.
+
+```bash
+python3 scripts/vibe_batch_runner.py --batch-status [--checkpoint <file>] [--json] [--compact]
+python3 scripts/vibe_command_router.py bs --json
+```
+
+Output: batch_id, status, current_wo, phase, baseline_before, current_baseline, last_safe_point, resume_allowed, worker_status, retry_count, next_retry_at, completed_count, remaining_count, last_pr, last_changed_paths.
+
+### batch-report (breport)
+
+Detailed batch report — read-only, extended status with per-WO breakdown.
+
+```bash
+python3 scripts/vibe_batch_runner.py --batch-report [--checkpoint <file>] [--json] [--compact]
+python3 scripts/vibe_command_router.py breport --json
+```
+
+Output: All batch-status fields plus report_type, report_time, batch_runner_version, repo, repo_trust_level, per_wo_status, stop_reason, worker_error, recommended_action.
+
+### batch-pause (bp)
+
+Pause batch at safe point. Writes PAUSED checkpoint. Does not interrupt in-flight git operations.
+
+```bash
+python3 scripts/vibe_batch_runner.py --pause [--checkpoint <file>] [--json] [--compact]
+python3 scripts/vibe_command_router.py bp --checkpoint <file> --json
+```
+
+### batch-resume (bresume)
+
+Resume batch with reconciliation. Checks worker, baseline, worktree. Blocks on mismatch.
+
+```bash
+python3 scripts/vibe_batch_runner.py --resume [--checkpoint <file>] [--json] [--compact]
+python3 scripts/vibe_command_router.py bresume --checkpoint <file> --json
+```
+
+### batch-cancel (bcancel)
+
+Cancel batch — only before mutation. Completed WOs preserved. Generates operator report.
+
+```bash
+python3 scripts/vibe_batch_runner.py --cancel [--checkpoint <file>] [--json] [--compact]
+python3 scripts/vibe_command_router.py bcancel --checkpoint <file> --json
+```
+
+### batch-abort (babort)
+
+Abort batch — immediate stop, no destructive cleanup. Generates operator report.
+
+```bash
+python3 scripts/vibe_batch_runner.py --abort [--checkpoint <file>] [--json] [--compact]
+python3 scripts/vibe_command_router.py babort --checkpoint <file> --json
+```
+
+### worker-resilience v1.1.0 additions
+
+```bash
+python3 scripts/vibe_worker_resilience.py --pause <file> [--json]
+python3 scripts/vibe_worker_resilience.py --reconcile <file> [--json]
+```
+
+### batch-runner v1.5.0 report fields
+
+Enhanced batch report includes:
+- `work_order_count`, `completed_count`, `stopped_count`
+- `last_successful_baseline`, `final_baseline`
+- `stop_reason`, `per_wo_prs`, `per_wo_changed_paths`
+- `checkpoint_status`, `resume_status`
+- `pause_resume_supported`, `cancel_abort_supported`

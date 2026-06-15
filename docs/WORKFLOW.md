@@ -1188,3 +1188,31 @@ intake → branch → commit → push → PR → wrapper merge → smoke/qg/rr/v
 - Wrapper merge required (`vibe_autonomous_merge.py`)
 - No bare `gh pr merge`
 
+
+## V1.6 Operator Control Plane
+
+### QQ/Operator Control Commands
+
+| Command | Alias | Description | Read-only |
+|---------|-------|-------------|-----------|
+| batch-status | bs | Current batch status snapshot | Yes |
+| batch-report | breport | Detailed batch report | Yes |
+| batch-pause | bp | Pause at safe point | No (writes checkpoint) |
+| batch-resume | bresume | Resume with reconcile | No (writes checkpoint) |
+| batch-cancel | bcancel | Cancel before mutation | No (writes checkpoint) |
+| batch-abort | babort | Immediate stop, no cleanup | No (writes checkpoint) |
+
+### Pause/Resume Semantics
+- **Pause**: Sets PAUSED flag at safe point (between WOs). Does not interrupt in-flight git operations.
+- **Resume**: Reconciles worker reachability, baseline match, worktree clean. Blocks on mismatch.
+- **Cancel**: Only before mutation. Completed WOs preserved. resume_allowed=false.
+- **Abort**: Immediate stop. No destructive cleanup (no force/delete/reset). resume_allowed=false.
+
+### Reconcile Checks (resume prerequisite)
+1. Worker reachable (SSH check)
+2. Baseline matches checkpoint
+3. Worktree clean (no uncommitted changes)
+4. Status allows resume (PAUSED or WAITING_WORKER_RECOVERY)
+
+### One-line principle
+**trusted self repo can batch auto-execute; pause/resume at safe points; cancel before mutation; abort with no destructive cleanup; external repo write ops require human approval.**
