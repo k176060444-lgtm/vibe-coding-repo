@@ -1083,3 +1083,19 @@ Key commands before/after every execution:
 -  — quality gate (must PASS)
 -  — run report (generate summary)
 -  — V1 freeze check (verify freeze intact)
+
+
+## Privileged Push Approval Workflow
+
+High-privilege GitHub keys are controlled via a two-stage approval workflow:
+
+1. **Create approval request**: "priv-approval create --action-id <id> --repo <repo> --branch <branch> --action push --base-sha <sha>"
+2. **Human approves**: "approve" / "批准" / "确认" (short approval when exactly 1 pending)
+3. **Privileged push (dry-run)**: "priv-push --action-id <id>" — validates constraints, outputs would_push=true/false
+4. **Future**: real push only after dry-run PASS + explicit authorization
+
+### Invariants
+- Default: no privileged action is available
+- Short approval requires exactly 1 pending, non-expired action
+- No force push, no PR merge, no secrets/CI/workflow/provider/SSH paths
+- All actions are audit-logged in approval-dir
