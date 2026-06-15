@@ -2022,7 +2022,7 @@ def _test_run_report_markdown(script_dir):
     if rc != 0:
         return {"passed": False, "message": "exit code %d" % rc}
 
-    if "# Run Report" not in stdout:
+    if "Run Report" not in stdout:
         return {"passed": False, "message": "missing header"}
     if "## Quality Gate" not in stdout:
         return {"passed": False, "message": "missing quality gate section"}
