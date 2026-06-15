@@ -806,3 +806,22 @@ Router v2.7 adds:
 - `evidence` / `ev` / `exec-log` → execution evidence
 
 Smoke suite remains 36/36 PASS.
+
+
+### Smoke Suite (40 tests)
+
+The smoke suite now includes 40 tests covering:
+- Router commands (snapshot, advisor, dispatch, batch-plan, health, smoke)
+- Intake (basic, JSON, risk, type, router)
+- Release Notes (basic, JSON, safety, router)
+- Dashboard (text, JSON, aliases)
+- Daily Report (text, JSON)
+- Validator (basic)
+- Packager (basic)
+- Preflight (router)
+- Registry (basic, JSON, router, readonly)
+- Status Update (valid, invalid)
+- Approval Receipt (create/list, router)
+- Execution Evidence (basic, JSON, router, readonly)
+
+All tests must PASS for deployment.
