@@ -1101,6 +1101,29 @@ High-privilege GitHub keys are controlled via a two-stage approval workflow:
 - All actions are audit-logged in approval-dir
 
 
+
+
+## V1.4 Trusted Self Batch Runner
+
+**One-line principle: trusted self repo can batch auto-execute; any blocker stops immediately; external repo writes still require human authorization.**
+
+### Batch Execution Chain
+```
+batch plan → [WO1 → WO2 → ... → WO_N] → batch report
+  Each WO: branch → commit → push → PR → wrapper merge → smoke/qg/v1-freeze
+  After each WO: refresh baseline before next
+  On any failure: STOP, generate batch report, do not continue
+```
+
+### Stop Rules
+Any of these stops the batch immediately:
+- smoke fail, QG fail, V1-freeze fail
+- dirty worktree, merge conflict
+- forbidden path, token redaction fail
+- wrapper merge fail, unexpected changed_paths
+- external repo write without approval
+
+
 ## V1.3 Trusted Self-Repo Auto-Loop
 
 **One-line principle: trusted self repo low-risk auto-loop; protected external repo write ops require human authorization.**

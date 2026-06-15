@@ -174,4 +174,27 @@ priv-push --action-id <id> --push
 ### V1.3 一句话原则
 **trusted self repo 低风险自动闭环；protected external repo 写操作人工授权。**
 
+## V1.4 Trusted Self Batch Runner
+
+### 创建 batch
+```
+准备 batch.json，包含 batch_id、repo、work_orders 数组
+br --batch batch.json --dry-run --json   # 先 dry-run 验证
+br --batch batch.json --json             # 执行
+```
+
+### 查看 batch 状态
+```
+br --status --json
+```
+
+### 停止/恢复策略
+```
+任一 WO 失败 → 自动停止 → 生成 batch report
+暂不支持 resume，必须人工审查后重新创建 batch
+```
+
+### V1.4 一句话原则
+**trusted self repo 可批次自动执行；任何 blocker 立即停止；external repo 写操作仍需人工授权。**
+
 *V1 Operational Freeze — 2026-06-15*

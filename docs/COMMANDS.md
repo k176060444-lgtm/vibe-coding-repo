@@ -1204,3 +1204,19 @@ python3 scripts/vibe_command_router.py auto-loop --compact
 
 Output: repo, repo_trust_level, requires_human_approval, policy_verdict, checks (smoke/qg/v1-freeze/rr/policy/wrapper).
 
+
+
+### batch-runner (br, batch)
+
+Trusted Self-Repo Batch Runner — serial execution of low-risk Work Orders.
+
+```bash
+python3 scripts/vibe_batch_runner.py --batch <batch.json> [--json] [--dry-run]
+python3 scripts/vibe_batch_runner.py --status [--json]
+python3 scripts/vibe_command_router.py br --status --json
+python3 scripts/vibe_command_router.py batch --batch plan.json --dry-run --json
+```
+
+Output: batch_id, wo_id, repo_trust_level, branch, pr, changed_paths, merge_sha, status, blockers, stop_reason.
+
+Max batch size: 5 Work Orders. Stop on any failure.
