@@ -906,3 +906,13 @@ Three test paths:
 3. **REVIEW** — stop conditions present, gate requires human review
 
 All tests use temporary directories and do NOT modify repo source code.
+
+### Evidence Verifier
+
+The evidence verifier checks execution evidence bundle integrity:
+
+```
+evidence.create → evidence-verifier.verify → PASS / WARN / FAIL
+```
+
+Verifies: required fields, digest, registry entry, approval receipt, SHAs, smoke/health, job/audit status, changed_paths scope.
