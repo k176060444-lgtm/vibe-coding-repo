@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Report Export v1 - Export snapshot/release-notes/dashboard reports to files.
+
+Usage:
+    python scripts/vibe_report_export.py --kind snapshot|release-notes|dashboard|all
+                                         [--output-dir DIR] [--json] [--dry-run]
+
+Exports toolchain reports as Markdown files for QQ/Hermes delivery or archival.
+Read-only by default; writes only to specified --output-dir.
+
+Constraints:
+    - Read-only, no IO on import, standard library only.
+    - Writes only to --output-dir (never modifies repo source).
+    - Never writes secrets or credentials.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def _run_script(script_path, args, timeout=30):
+    """Run a script and return (returncode, stdout, stderr)."""
+    try:
+        cmd = [sys.executable, str(script_path)] + args
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return (result.returncode, result.stdout, result.stderr)
+    except subprocess.TimeoutExpired:
+        return (1, "", "timeout")
+    except (OSError, FileNotFoundError) as e:
+        return (1, "", str(e))
+
+
+def _export_kind(script_dir, kind):
+    """Export a single report kind."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    if kind == "snapshot":
+        rc, stdout, stderr = _run_script(script_dir / "vibe_operator_snapshot.py", ["--compact"])
+        filename = "snapshot_%s.md" % timestamp
+    elif kind == "release-notes":
+        rc, stdout, stderr = _run_script(script_dir / "vibe_release_notes.py", ["--compact"])
+        filename = "release_notes_%s.md" % timestamp
+    elif kind == "dashboard":
+        rc, stdout, stderr = _run_script(script_dir / "vibe_operator_snapshot.py", ["--compact"])
+        # Also read the dashboard doc
+        dashboard_path = script_dir.parent / "docs" / "PROJECT_DASHBOARD.md"
+        if dashboard_path.exists():
+            try:
+                with open(dashboard_path, "r") as f:
+                    stdout = f.read()
+            except (OSError, IOError):
+                pass
+        filename = "dashboard_%s.md" % timestamp
+    else:
+        return None
+
+    return {
+        "kind": kind,
+        "filename": filename,
+        "exit_code": rc,
+        "content": stdout if rc == 0 else "",
+        "error": stderr if rc != 0 else "",
+        "timestamp": timestamp,
+    }
+
+
+def export_reports(kind, script_dir, output_dir=None, dry_run=False):
+    """Export reports and optionally write to output directory.
+
+    Args:
+        kind: 'snapshot', 'release-notes', 'dashboard', or 'all'
+        script_dir: Path to scripts directory
+        output_dir: Directory to write files (None = preview only)
+        dry_run: If True, show what would be written without writing
+
+    Returns:
+        dict with export results
+    """
+    kinds = ["snapshot", "release-notes", "dashboard"] if kind == "all" else [kind]
+    results = []
+
+    for k in kinds:
+        result = _export_kind(script_dir, k)
+        if result:
+            results.append(result)
+
+    # Write files if output_dir specified and not dry_run
+    written = []
+    if output_dir and not dry_run:
+        os.makedirs(output_dir, exist_ok=True)
+        for r in results:
+            if r["exit_code"] == 0 and r["content"]:
+                filepath = os.path.join(output_dir, r["filename"])
+                try:
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        f.write(r["content"])
+                    written.append(filepath)
+                except (OSError, IOError) as e:
+                    r["error"] = "write failed: %s" % e
+
+    return {
+        "kind": kind,
+        "exported": len([r for r in results if r["exit_code"] == 0]),
+        "total": len(results),
+        "output_dir": output_dir,
+        "dry_run": dry_run,
+        "written_files": written,
+        "results": results,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="vibe_report_export",
+        description="Report Export v1 - export toolchain reports to files.",
+    )
+    parser.add_argument("--kind", required=True,
+                        choices=["snapshot", "release-notes", "dashboard", "all"],
+                        help="Report kind to export")
+    parser.add_argument("--output-dir", "-o", default=None,
+                        help="Directory to write report files")
+    parser.add_argument("--json", dest="output_json", action="store_true", default=False)
+    parser.add_argument("--dry-run", action="store_true", default=False,
+                        help="Preview what would be exported without writing")
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    script_dir = Path(__file__).parent
+
+    result = export_reports(args.kind, script_dir, args.output_dir, args.dry_run)
+
+    if args.output_json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print("=" * 40)
+        print("  Report Export: %s" % result["kind"])
+        print("=" * 40)
+        for r in result["results"]:
+            icon = "✓" if r["exit_code"] == 0 else "✗"
+            print("  %s %s: %s" % (icon, r["kind"], r["filename"] if r["exit_code"] == 0 else r["error"]))
+        print("-" * 40)
+        print("  Exported: %d/%d" % (result["exported"], result["total"]))
+        if result["dry_run"]:
+            print("  Mode: DRY RUN (no files written)")
+        elif result["written_files"]:
+            print("  Written to: %s" % result["output_dir"])
+        print("=" * 40)
+
+    return 0 if result["exported"] == result["total"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -585,3 +585,16 @@ python scripts/vibe_demo_scenarios.py --scenario maintenance
 ```
 
 All scenarios are read-only. No PRs created, no tasks executed.
+
+
+## Report Export (v1)
+
+Export reports to files for QQ/Hermes delivery or archival:
+
+```
+python scripts/vibe_report_export.py --kind snapshot --output-dir /tmp/reports
+python scripts/vibe_report_export.py --kind all --output-dir /tmp/reports --json
+python scripts/vibe_report_export.py --kind dashboard --dry-run
+```
+
+Writes only to --output-dir. Never modifies repo source. Never exports secrets.
