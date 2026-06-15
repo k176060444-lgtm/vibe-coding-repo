@@ -790,3 +790,19 @@ requirement → intake → validate → registry → packager → approval-recei
 ```
 
 Evidence bundles are stored in `evidence/` directory with SHA256 digest for integrity.
+
+
+### Router Integration (v2.7)
+
+Execution evidence is now accessible via the Command Router:
+
+```
+router ev create --id my-wo --base-sha abc123 --result-sha def456 ...  # Create evidence
+router ev list --json                                                  # List evidence
+router ev show --evidence-id ev-001                                    # Show evidence
+```
+
+Router v2.7 adds:
+- `evidence` / `ev` / `exec-log` → execution evidence
+
+Smoke suite remains 36/36 PASS.

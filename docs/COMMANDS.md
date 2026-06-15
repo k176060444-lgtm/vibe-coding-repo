@@ -958,3 +958,14 @@ python3 scripts/vibe_execution_evidence.py create --id my-wo --base-sha abc123 -
 python3 scripts/vibe_execution_evidence.py list --json
 python3 scripts/vibe_execution_evidence.py show --evidence-id ev-001
 ```
+
+
+### `evidence` / `ev` / `exec-log` (Execution Evidence)
+Create and manage execution evidence bundles via router.
+
+**Usage:**
+```
+python3 scripts/vibe_command_router.py ev create --id my-wo --base-sha abc123 --result-sha def456 --smoke-result "36/36 PASS"
+python3 scripts/vibe_command_router.py evidence list --json
+python3 scripts/vibe_command_router.py ev show --evidence-id ev-001
+```

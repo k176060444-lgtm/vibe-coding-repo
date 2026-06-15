@@ -504,3 +504,16 @@ Bot:
 /ar create --id my-wo --base-sha abc123 --package-digest def456 --approver "human" --approval-text "OK"
 /ar list --json
 ```
+
+
+### Evidence Commands
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `evidence` | `ev`, `exec-log` | 执行证据：创建/列出/查看 |
+
+**示例:**
+```
+/ev create --id my-wo --base-sha abc123 --result-sha def456 --smoke-result "36/36 PASS"
+/ev list --json
+/ev show --evidence-id ev-001
+```
