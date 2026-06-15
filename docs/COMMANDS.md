@@ -1188,3 +1188,19 @@ Privileged Push Wrapper — controlled push with repo trust policy (self-repo au
 See [QQ_OPERATOR_CHEATSHEET.md](QQ_OPERATOR_CHEATSHEET.md) for mobile QQ operation shortcuts.
 
 Key shortcuts: qg, rr, smoke, snapshot, dashboard, loop-summary, advisor, batch-plan
+
+
+### trusted-loop (tl, auto-loop, loop)
+
+Trusted Self-Repo Auto-Loop Contract — verify autonomous execution loop.
+
+```bash
+python3 scripts/vibe_trusted_self_loop.py --check [--json] [--compact]
+python3 scripts/vibe_trusted_self_loop.py --contract [--json]
+python3 scripts/vibe_trusted_self_loop.py --validate <work-order.json> [--json]
+python3 scripts/vibe_command_router.py tl --json
+python3 scripts/vibe_command_router.py auto-loop --compact
+```
+
+Output: repo, repo_trust_level, requires_human_approval, policy_verdict, checks (smoke/qg/v1-freeze/rr/policy/wrapper).
+

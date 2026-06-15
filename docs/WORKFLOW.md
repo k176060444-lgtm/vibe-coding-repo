@@ -1099,3 +1099,26 @@ High-privilege GitHub keys are controlled via a two-stage approval workflow:
 - Short approval requires exactly 1 pending, non-expired action
 - No force push, no PR merge, no secrets/CI/workflow/provider/SSH paths
 - All actions are audit-logged in approval-dir
+
+
+## V1.3 Trusted Self-Repo Auto-Loop
+
+**One-line principle: trusted self repo low-risk auto-loop; protected external repo write ops require human authorization.**
+
+### Auto-Loop Chain (trusted-self)
+```
+intake → branch → commit → push → PR → wrapper merge → smoke/qg/rr/v1-freeze → freeze baseline
+```
+
+### Trust Policy
+| Repo | Trust Level | Push Requires Approval | Token Read |
+|------|-------------|----------------------|------------|
+| k176060444-lgtm/vibe-coding-repo | trusted-self | No (policy gate auto) | After policy passes |
+| All others | protected-external | Yes (must approve) | After approval |
+
+### Policy Gate (all repos)
+- Forbidden paths: `.github/workflows/`, `secrets/`, `.env`, `ssh/`
+- No force push, no PR merge, no secrets/CI/workflow/provider/SSH
+- Wrapper merge required (`vibe_autonomous_merge.py`)
+- No bare `gh pr merge`
+
