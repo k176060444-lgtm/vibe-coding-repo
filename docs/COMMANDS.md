@@ -607,3 +607,35 @@ $ python scripts/vibe_command_router.py dash
 $ python scripts/vibe_command_router.py dash --json
 { "dashboard_path": "docs/PROJECT_DASHBOARD.md", "exists": true, "version": "2.3.0", ... }
 ```
+
+
+## Demo Scenarios
+
+Repeatable scenario examples for the intake→dispatch→report pipeline.
+
+```
+$ python scripts/vibe_demo_scenarios.py --list
+  queue-clean          Queue Clean — System Health & Status
+  feature-request      Feature Request — Intake & Planning
+  maintenance          Maintenance — Health & Reporting
+
+$ python scripts/vibe_demo_scenarios.py --scenario queue-clean
+========================================
+  Demo Scenario: Queue Clean — System Health & Status
+========================================
+  ✓ Operator Snapshot: PASS
+  ✓ Dispatch Planner: PASS
+  ✓ Release Notes (last 5): PASS
+----------------------------------------
+  Overall: PASS (3/3)
+  Expected: queue_clean — no action required
+========================================
+```
+
+### Scenarios
+
+| Scenario | Flow | Steps |
+|----------|------|-------|
+| `queue-clean` | snapshot→dispatch→release-notes | 3 |
+| `feature-request` | intake→dispatch→batch-plan | 3 |
+| `maintenance` | health→release-notes→snapshot | 3 |
