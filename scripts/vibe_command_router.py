@@ -72,6 +72,7 @@ COMMAND_SCRIPTS = {
     "adapter": "vibe_executor_adapter.py",
     "loop-summary": "vibe_loop_summary.py",
     "sandbox": "vibe_executor_sandbox.py",
+    "exec-control": "vibe_executor_control.py",
     "transcript": "vibe_execution_transcript.py",
 }
 
@@ -110,6 +111,8 @@ ALIASES = {
     "ac": "adapter",
     "ls": "loop-summary",
     "sb": "sandbox",
+    "ec": "exec-control",
+    "ctrl": "exec-control",
     "summary": "loop-summary",
     "txn": "transcript",
     "exec-txn": "transcript",
@@ -141,6 +144,7 @@ COMMAND_DESCRIPTIONS = {
     "adapter": "Executor Adapter Contract - query and validate adapter capabilities",
     "loop-summary": "Autonomous Loop Summary - complete chain capability overview",
     "sandbox": "Executor Sandbox Contract - verify sandbox constraints",
+    "exec-control": "Executor Control - timeout, cancel, and lifecycle management",
     "transcript": "Execution Transcript - append-only record of dry-run / noop sessions",
     "help": "Show this help message",
     "version": "Show version",
@@ -163,6 +167,7 @@ COMMAND_FLAGS = {
     "adapter": ["--json", "--adapter"],
     "loop-summary": ["--json", "--compact"],
     "sandbox": ["--json", "--base-sha"],
+    "exec-control": ["--json"],
     "transcript": ["--json", "--transcript-dir"],
 }
 

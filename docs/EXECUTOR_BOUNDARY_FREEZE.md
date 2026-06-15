@@ -134,3 +134,6 @@ To unfreeze the executor boundary and enable real execution:
 
 ## Sandbox Contract
 Sandbox readiness is verified by vibe_executor_sandbox.py before any future real execution.
+
+## Timeout/Cancel Control
+Control contracts defined by vibe_executor_control.py. Real executor must implement timeout, heartbeat, stale lock detection, and cancel support.
