@@ -519,6 +519,9 @@ The smoke suite now covers 16 tests:
 - 18: Release Notes - JSON output
 - 19: Release Notes - safety/audit lock
 - 20: Release Notes - router integration
+- 21: Dashboard - text output
+- 22: Dashboard - JSON output
+- 23: Dashboard - aliases (dash, status-page)
 
 
 ## Release Notes / Progress Report
