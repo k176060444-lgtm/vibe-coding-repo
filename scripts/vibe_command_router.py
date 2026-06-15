@@ -69,6 +69,7 @@ COMMAND_SCRIPTS = {
     "evidence": "vibe_execution_evidence.py",
     "exec-gate": "vibe_execution_gate.py",
     "safe-executor": "vibe_safe_executor.py",
+    "adapter": "vibe_executor_adapter.py",
 }
 
 # Short aliases
@@ -103,6 +104,8 @@ ALIASES = {
     "ready-run": "exec-gate",
     "se": "safe-executor",
     "plan": "safe-executor",
+    "ac": "adapter",
+    "adapter-cap": "adapter",
     "?": "help",
     "v": "version",
 }
@@ -127,6 +130,7 @@ COMMAND_DESCRIPTIONS = {
     "evidence": "Execution Evidence - create/list/show evidence bundles",
     "exec-gate": "Execution Gate - pre-execution admission check (ALLOW/REVIEW/BLOCK)",
     "safe-executor": "Safe Executor - generate execution plans (no real execution)",
+    "adapter": "Executor Adapter Contract - query and validate adapter capabilities",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -145,6 +149,7 @@ COMMAND_FLAGS = {
     "evidence": ["--json", "--evidence-dir"],
     "exec-gate": ["--json", "--registry-dir"],
     "safe-executor": ["--json", "--registry-dir"],
+    "adapter": ["--json", "--adapter"],
 }
 
 

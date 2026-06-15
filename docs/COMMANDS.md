@@ -1063,3 +1063,20 @@ python3 scripts/vibe_safe_executor.py plan --id my-wo --current-main-sha abc123 
 ```
 
 **Output:** execution_plan, required_inputs, blocked_if, evidence_expectations
+
+### adapter / ac (Executor Adapter Contract)
+Query and validate executor adapter capabilities. Read-only contract definition; adapters never execute real work.
+
+**Usage:**
+```
+python3 scripts/vibe_executor_adapter.py capabilities
+python3 scripts/vibe_executor_adapter.py capabilities --adapter noop --json
+python3 scripts/vibe_executor_adapter.py plan --adapter dry-run --id my-wo --base-sha abc123 --json
+python3 scripts/vibe_executor_adapter.py validate-inputs --adapter noop --id my-wo --base-sha abc123 --gate-verdict ALLOW
+python3 scripts/vibe_command_router.py adapter capabilities --json
+python3 scripts/vibe_command_router.py adapter plan --adapter noop --id my-wo --base-sha abc123
+python3 scripts/vibe_command_router.py adapter validate-inputs --adapter dry-run --id my-wo --base-sha abc123
+```
+
+**Adapters:** noop (1-step no-op), dry-run (8-step simulated execution)
+**Forbidden actions:** model_call, shell_exec, repo_write, git_push, git_merge, deploy, tag, file_delete
