@@ -698,3 +698,16 @@ intake → validate → registry.register → packager → [human approval] → 
 Registry entries track: workorder_id, title, risk_level, status (draft/validated/packaged/approved/executed/blocked), base_sha, source, requires_human_approval.
 
 The registry is read-only by default. Only `register` subcommand with explicit `--registry-dir` writes to the registry.
+
+
+### Registry Integration
+
+The Work Order Registry is now accessible via the Command Router:
+
+```
+router reg list --json              # List all registry entries
+router reg show --id my-wo          # Show specific entry
+router reg register --id my-wo      # Register new entry
+```
+
+Registry entries track work order lifecycle: draft → validated → packaged → approved → executed → blocked.

@@ -11,12 +11,21 @@ Commands:
     batch-plan  - Batch Queue Plan (execution plan)
     health      - Health Check (toolchain verification)
     smoke       - Toolchain Smoke Suite
+    intake      - Work Order Intake (NL to draft)
+    release-notes - Release Notes (progress from git)
+    dashboard   - Project Dashboard (status overview)
+    validate-wo - Work Order Validator (draft validation)
+    pack-wo     - Work Order Packager (draft to prompt)
+    preflight   - Preflight Check (intake+validate+pack)
+    registry    - Work Order Registry (register/list/show)
     help        - Show this help message
     version     - Show version
 
 Short aliases:
     s → snapshot, a → advisor, d → dispatch, b → batch-plan,
-    h → health, sm → smoke, ? → help, v → version
+    h → health, sm → smoke, i/wo → intake, notes/rn/progress → release-notes,
+    dash/status-page → dashboard, validate/vw → validate-wo, pack/pw → pack-wo,
+    pre → preflight, reg/wo-list/wo-show → registry, ? → help, v → version
 
 Constraints:
     - Read-only, no IO on import, standard library only.
@@ -31,7 +40,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -47,6 +56,7 @@ COMMAND_SCRIPTS = {
     "validate-wo": "vibe_workorder_validator.py",
     "pack-wo": "vibe_workorder_packager.py",
     "preflight": None,
+    "registry": "vibe_workorder_registry.py",
 }
 
 # Short aliases
@@ -69,6 +79,9 @@ ALIASES = {
     "pack": "pack-wo",
     "pw": "pack-wo",
     "pre": "preflight",
+    "reg": "registry",
+    "wo-list": "registry",
+    "wo-show": "registry",
     "?": "help",
     "v": "version",
 }
@@ -87,6 +100,7 @@ COMMAND_DESCRIPTIONS = {
     "validate-wo": "Work Order Validator - validate intake drafts",
     "pack-wo": "Work Order Packager - package drafts into prompts",
     "preflight": "Preflight Check - intake + validate + package chain",
+    "registry": "Work Order Registry - register/list/show work orders",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -99,6 +113,7 @@ COMMAND_FLAGS = {
     "batch-plan": ["--json", "--limit", "--jobs-dir"],
     "health": ["--json", "--jobs-dir"],
     "smoke": ["--json", "--jobs-dir"],
+    "registry": ["--json", "--registry-dir"],
 }
 
 
@@ -148,278 +163,217 @@ def _show_help():
         "",
         "Commands:",
     ]
-    for cmd, desc in COMMAND_DESCRIPTIONS.items():
-        lines.append("  %-12s %s" % (cmd, desc))
-    lines.extend([
-        "",
-        "Aliases:",
-        "  s=snapshot  a=advisor  d=dispatch  b=batch-plan",
-        "  h=health    sm=smoke   ?=help      v=version",
-        "",
-        "Examples:",
-        "  vibe_command_router snapshot --compact",
-        "  vibe_command_router s --json              # same as snapshot --json",
-        "  vibe_command_router advisor --json",
-        "  vibe_command_router dispatch --compact",
-        "  vibe_command_router batch-plan --json --limit 3",
-        "  vibe_command_router health",
-        "  vibe_command_router smoke",
-        "",
-        "For command-specific help:",
-        "  vibe_command_router <command> --help",
-    ])
+
+    max_name = max(len(n) for n in COMMAND_SCRIPTS) + 2
+    for name in sorted(COMMAND_SCRIPTS):
+        desc = COMMAND_DESCRIPTIONS.get(name, "")
+        lines.append("  %s%s%s" % (name, " " * (max_name - len(name)), desc))
+
+    lines.append("")
+    lines.append("Aliases:")
+    alias_groups = {}
+    for alias, target in sorted(ALIASES.items()):
+        alias_groups.setdefault(target, []).append(alias)
+    for target in sorted(alias_groups):
+        aliases = ", ".join(alias_groups[target])
+        lines.append("  %s → %s" % (aliases, target))
+
+    lines.append("")
+    lines.append("Options:")
+    lines.append("  --help, -h    Show this help message")
+    lines.append("  --version     Show version")
+    lines.append("")
+    lines.append("Built-in commands (preflight, dashboard) run internally.")
+    lines.append("Other commands route to scripts/vibe_*.py")
+    lines.append("")
+    lines.append("Examples:")
+    lines.append("  python scripts/vibe_command_router.py snapshot --compact")
+    lines.append("  python scripts/vibe_command_router.py s --json")
+    lines.append("  python scripts/vibe_command_router.py pre 'Add --verbose flag to health check'")
+    lines.append("  python scripts/vibe_command_router.py reg list --registry-dir /tmp/registry")
+    lines.append("  python scripts/vibe_command_router.py reg show --id my-wo --json")
+
     print("\n".join(lines))
 
 
 def _show_version():
     """Show version."""
     print("vibe_command_router %s" % VERSION)
-    print("Scripts: %d registered" % len(COMMAND_SCRIPTS))
-    print("Aliases: %d defined" % len(ALIASES))
 
 
-def build_parser():
-    parser = argparse.ArgumentParser(
-        prog="vibe_command_router",
-        description="Command Router v2 - Enhanced unified CLI for QQ/Hermes orchestrator.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Aliases: s=snapshot a=advisor d=dispatch b=batch-plan h=health sm=smoke i/intake=wo-intake notes/rn/progress=release-notes ?=help v=version",
-    )
-    parser.add_argument(
-        "command",
-        nargs="?",
-        default="help",
-        help="Command to execute (default: help). Supports aliases.",
-    )
-    parser.add_argument(
-        "args",
-        nargs=argparse.REMAINDER,
-        help="Arguments to pass to the command",
-    )
-    return parser
-
-
-
-def _show_dashboard(output_json=False):
-    """Show project dashboard summary."""
-    script_dir = Path(__file__).parent
-    repo_root = script_dir.parent
-    dashboard_path = repo_root / "docs" / "PROJECT_DASHBOARD.md"
-
-    if output_json:
-        import json as _json
-        result = {
-            "dashboard_path": str(dashboard_path),
-            "exists": dashboard_path.exists(),
-            "commands": list(COMMAND_SCRIPTS.keys()) + ["dashboard", "help", "version"],
-            "aliases": dict(ALIASES),
-            "version": VERSION,
-        }
-        # Try to read first line for baseline info
-        if dashboard_path.exists():
-            try:
-                with open(dashboard_path, "r") as f:
-                    for line in f:
-                        if "Baseline" in line:
-                            result["baseline"] = line.strip().split("`")[1] if "`" in line else line.strip()
-                            break
-            except (OSError, IOError):
-                pass
-        print(_json.dumps(result, indent=2))
-    else:
-        lines = [
-            "=" * 40,
-            "  \U0001f4ca Project Dashboard",
-            "=" * 40,
-            "",
-            "  Dashboard: docs/PROJECT_DASHBOARD.md",
-        ]
-        if dashboard_path.exists():
-            try:
-                with open(dashboard_path, "r") as f:
-                    content = f.read()
-                # Extract key metrics
-                for line in content.split("\n"):
-                    if "Baseline" in line and "`" in line:
-                        lines.append("  Baseline:  %s" % line.strip().split("`")[1])
-                    elif "Total PRs" in line:
-                        lines.append("  %s" % line.strip().replace("**", ""))
-                    elif "System Status" in line:
-                        lines.append("  Status:    %s" % line.split(":")[1].strip() if ":" in line else "")
-                    elif "Smoke Suite" in line and "PASS" in line:
-                        lines.append("  Smoke:     PASS")
-                    elif "Health Check" in line and "PASS" in line:
-                        lines.append("  Health:    PASS")
-                    elif "Queue" in line and "Clean" in line:
-                        lines.append("  Queue:     Clean")
-            except (OSError, IOError):
-                lines.append("  (cannot read dashboard)")
-        else:
-            lines.append("  (dashboard not found)")
-        lines.extend([
-            "",
-            "  Run: python scripts/vibe_command_router.py dashboard --json",
-            "  Full: cat docs/PROJECT_DASHBOARD.md",
-            "=" * 40,
-        ])
-        print("\n".join(lines))
-    return 0
-
-
-
-def _run_preflight(requirement_text, output_json=False):
-    """Run intake -> validate -> package chain."""
-    import json as _json
-    import tempfile
-    script_dir = Path(__file__).parent
-
-    # Step 1: Intake
-    intake_path = script_dir / "vibe_workorder_intake.py"
-    if not intake_path.exists():
-        print("ERROR: intake script not found", file=sys.stderr)
-        return 1
-
+def _run_dashboard(args):
+    """Built-in dashboard command (lightweight, no subprocess)."""
     try:
-        cmd = [sys.executable, str(intake_path), requirement_text, "--json"]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            print("ERROR: intake failed: %s" % result.stderr[:200], file=sys.stderr)
-            return 1
-        draft = _json.loads(result.stdout)
-    except (subprocess.TimeoutExpired, _json.JSONDecodeError, OSError) as e:
-        print("ERROR: intake error: %s" % e, file=sys.stderr)
+        from pathlib import Path
+        import json
+
+        # Find repo root
+        script_dir = Path(__file__).parent
+        repo_root = script_dir.parent
+
+        # Read router version
+        router_version = VERSION
+
+        # Count scripts
+        scripts_dir = script_dir
+        script_count = len([f for f in scripts_dir.glob("vibe_*.py") if not f.name.startswith("__")])
+
+        # Count smoke tests
+        smoke_file = scripts_dir / "test_toolchain_smoke.py"
+        smoke_count = 0
+        if smoke_file.exists():
+            content = smoke_file.read_text()
+            smoke_count = content.count("def _test_")
+
+        # Output
+        output = {
+            "version": router_version,
+            "script_count": script_count,
+            "smoke_tests": smoke_count,
+            "commands": len(COMMAND_SCRIPTS),
+            "aliases": len(ALIASES),
+        }
+
+        if "--json" in args:
+            print(json.dumps(output, indent=2))
+        else:
+            print("Dashboard v%s" % router_version)
+            print("  Scripts: %d" % script_count)
+            print("  Smoke tests: %d" % smoke_count)
+            print("  Commands: %d" % len(COMMAND_SCRIPTS))
+            print("  Aliases: %d" % len(ALIASES))
+
+        return 0
+    except Exception as e:
+        print("ERROR: Dashboard failed: %s" % e, file=sys.stderr)
         return 1
 
-    # Step 2: Validate
-    validator_path = script_dir / "vibe_workorder_validator.py"
-    validation = {"overall": "SKIP"}
-    if validator_path.exists():
-        try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
-                _json.dump(draft, tf)
-                tf.flush()
-                cmd = [sys.executable, str(validator_path), tf.name, "--json"]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-                if result.returncode == 0:
-                    validation = _json.loads(result.stdout)
-            import os
-            os.unlink(tf.name)
-        except (subprocess.TimeoutExpired, _json.JSONDecodeError, OSError):
-            pass
 
-    # Step 3: Package
-    packager_path = script_dir / "vibe_workorder_packager.py"
-    package = {"total_chars": 0, "chunk_count": 0}
-    if packager_path.exists():
-        try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
-                _json.dump(draft, tf)
-                tf.flush()
-                cmd = [sys.executable, str(packager_path), tf.name, "--json", "--compact"]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-                if result.returncode == 0:
-                    package = _json.loads(result.stdout)
-            import os
-            os.unlink(tf.name)
-        except (subprocess.TimeoutExpired, _json.JSONDecodeError, OSError):
-            pass
+def _run_preflight(args):
+    """Built-in preflight command: intake → validate → package."""
+    try:
+        import tempfile
+        import json
 
-    result = {
-        "requirement": requirement_text,
-        "draft": {
-            "work_order_id": draft.get("work_order_id"),
-            "type": draft.get("type"),
-            "risk_level": draft.get("risk_level"),
-            "requires_human_approval": draft.get("requires_human_approval"),
-        },
-        "validation": {
-            "overall": validation.get("overall", "SKIP"),
-            "checks": len(validation.get("checks", [])),
-            "warnings": len(validation.get("warnings", [])),
-            "errors": len(validation.get("errors", [])),
-        },
-        "package": {
-            "total_chars": package.get("total_chars", 0),
-            "chunk_count": package.get("chunk_count", 0),
-        },
-        "preflight": "PASS" if validation.get("overall") in ("PASS", "WARN") else "FAIL",
-    }
+        if not args or args[0].startswith("--"):
+            print("ERROR: preflight requires a requirement string", file=sys.stderr)
+            print("Usage: preflight '<requirement>' [--json]", file=sys.stderr)
+            return 1
 
-    if output_json:
-        print(_json.dumps(result, indent=2))
-    else:
-        icon = {"PASS": "✓", "FAIL": "✗", "SKIP": "⊘"}[result["preflight"]]
-        print("=" * 40)
-        print("  Preflight Check")
-        print("=" * 40)
-        print("  Requirement: %s" % result["requirement"][:60])
-        print("  Draft ID:    %s" % result["draft"]["work_order_id"])
-        print("  Type:        %s" % result["draft"]["type"])
-        print("  Risk:        %s" % result["draft"]["risk_level"])
-        print("  Human:       %s" % result["draft"]["requires_human_approval"])
-        print("  Validation:  %s" % result["validation"]["overall"])
-        print("  Package:     %d chars, %d chunk(s)" % (result["package"]["total_chars"], result["package"]["chunk_count"]))
-        print("-" * 40)
-        print("  %s Preflight: %s" % (icon, result["preflight"]))
-        print("=" * 40)
+        requirement = args[0]
+        use_json = "--json" in args
 
-    return 0 if result["preflight"] != "FAIL" else 1
+        script_dir = Path(__file__).parent
+        tmpdir = tempfile.mkdtemp(prefix="preflight_")
+
+        # Step 1: intake
+        intake_out = os.path.join(tmpdir, "draft.json")
+        intake_cmd = [sys.executable, str(script_dir / "vibe_workorder_intake.py"),
+                      requirement, "--output", intake_out]
+        if use_json:
+            intake_cmd.append("--json")
+
+        result = subprocess.run(intake_cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            print("ERROR: intake failed: %s" % result.stderr, file=sys.stderr)
+            return 1
+
+        # Step 2: validate
+        validate_cmd = [sys.executable, str(script_dir / "vibe_workorder_validator.py"),
+                        intake_out]
+        if use_json:
+            validate_cmd.append("--json")
+
+        result = subprocess.run(validate_cmd, capture_output=True, text=True, timeout=30)
+        validate_pass = result.returncode == 0
+
+        # Step 3: package
+        package_out = os.path.join(tmpdir, "package.txt")
+        package_cmd = [sys.executable, str(script_dir / "vibe_workorder_packager.py"),
+                       intake_out, "--output", package_out]
+        if use_json:
+            package_cmd.append("--json")
+
+        result = subprocess.run(package_cmd, capture_output=True, text=True, timeout=30)
+        package_ok = result.returncode == 0
+
+        # Output
+        if use_json:
+            output = {
+                "requirement": requirement,
+                "intake": {"exit_code": 0, "draft_file": intake_out},
+                "validate": {"exit_code": 0 if validate_pass else 1},
+                "package": {"exit_code": 0 if package_ok else 1, "package_file": package_out},
+                "preflight": "PASS" if (validate_pass and package_ok) else "FAIL",
+            }
+            print(json.dumps(output, indent=2))
+        else:
+            print("Preflight Check")
+            print("  Requirement: %s" % requirement[:80])
+            print("  Intake: %s" % ("OK" if True else "FAIL"))
+            print("  Validate: %s" % ("PASS" if validate_pass else "FAIL"))
+            print("  Package: %s" % ("OK" if package_ok else "FAIL"))
+            print("  Overall: %s" % ("PASS" if (validate_pass and package_ok) else "FAIL"))
+
+        return 0 if (validate_pass and package_ok) else 1
+    except Exception as e:
+        print("ERROR: Preflight failed: %s" % e, file=sys.stderr)
+        return 1
 
 
 def main(argv=None):
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    """Main entry point."""
+    if argv is None:
+        argv = sys.argv[1:]
 
-    raw_command = args.command
-
-    # Handle help
-    if raw_command in ("help", "--help", "-h", "?"):
+    if not argv:
         _show_help()
         return 0
 
-    # Handle version
-    if raw_command in ("version", "--version", "-V", "v"):
+    raw = argv[0]
+    args = argv[1:]
+
+    # Handle --help/-h before command resolution
+    if raw in ("--help", "-h"):
+        _show_help()
+        return 0
+
+    # Handle --version
+    if raw == "--version":
         _show_version()
         return 0
 
-    # Resolve command (alias + close match)
-    command = _resolve_command(raw_command)
-    if command is None:
+    cmd = _resolve_command(raw)
+    if cmd is None:
         return 1
 
-    # Handle help/version after alias resolution
-    if command == "help":
+    if cmd == "help":
         _show_help()
         return 0
-    if command == "version":
+
+    if cmd == "version":
         _show_version()
         return 0
 
-    # Handle preflight (no script, built-in)
-    if command == "preflight":
-        req_text = " ".join(args.args) if args.args else ""
-        if not req_text:
-            print("ERROR: preflight requires requirement text", file=sys.stderr)
-            print("Usage: vibe_command_router.py preflight 'your requirement here'", file=sys.stderr)
-            return 1
-        return _run_preflight(req_text, "--json" in args.args)
+    # Built-in commands
+    if cmd == "dashboard":
+        return _run_dashboard(args)
 
-    # Handle dashboard (no script, built-in)
-    if command == "dashboard":
-        return _show_dashboard(args.output_json if hasattr(args, "output_json") else "--json" in args.args)
+    if cmd == "preflight":
+        return _run_preflight(args)
 
-    # Get script path
-    script_name = COMMAND_SCRIPTS[command]
-    script_dir = Path(__file__).parent
-    script_path = script_dir / script_name
+    # Route to script
+    script_name = COMMAND_SCRIPTS.get(cmd)
+    if script_name is None:
+        print("ERROR: Command '%s' has no script mapping" % cmd, file=sys.stderr)
+        return 1
 
-    # Check if script exists
+    script_path = Path(__file__).parent / script_name
     if not script_path.exists():
         print("ERROR: Script not found: %s" % script_path, file=sys.stderr)
         return 1
 
-    # Run the script with remaining arguments
-    return _run_script(script_path, args.args)
+    return _run_script(script_path, args)
 
 
 if __name__ == "__main__":

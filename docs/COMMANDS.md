@@ -838,3 +838,24 @@ python3 scripts/vibe_workorder_registry.py register --registry-dir /tmp/registry
 python3 scripts/vibe_workorder_registry.py list --registry-dir /tmp/registry --json
 python3 scripts/vibe_workorder_registry.py show --registry-dir /tmp/registry --id my-wo
 ```
+
+
+### `registry` / `reg` / `wo-list` / `wo-show` (Work Order Registry)
+Register, list, and show work order entries in a local registry directory.
+
+**Subcommands:**
+- `register --id ID [--title TITLE] [--risk-level low|medium|high|critical] [--status draft|validated|packaged|approved|executed|blocked]` — Register new entry
+- `list [--filter-status STATUS]` — List all entries
+- `show --id ID` — Show entry details
+
+**Options:**
+- `--registry-dir DIR` — Registry directory (default: VIBEDEV_REGISTRY_DIR env)
+- `--json` — JSON output
+
+**Examples:**
+```
+python3 scripts/vibe_command_router.py reg register --id my-wo --title "Add feature X"
+python3 scripts/vibe_command_router.py reg list --json
+python3 scripts/vibe_command_router.py reg show --id my-wo
+python3 scripts/vibe_command_router.py wo-list --registry-dir /tmp/registry
+```
