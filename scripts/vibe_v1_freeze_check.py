@@ -227,11 +227,28 @@ def main(argv=None):
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.compact:
-        checks_str = " ".join(
-            "%s:%s" % (c["name"].replace("_", "-"), c["result"])
-            for c in result["checks"]
-        )
-        print("%s | %s" % (result["verdict"], checks_str))
+        # QQ-friendly compact: one-line summary with key indicators
+        verdict = result["verdict"]
+        checks_map = {c["name"]: c["result"] for c in result["checks"]}
+
+        smoke = checks_map.get("smoke_count", "?")
+        qg = checks_map.get("quality_gate", "?")
+        rr = checks_map.get("run_report", "?")
+        audit = checks_map.get("audit_lock", "?")
+        level5 = checks_map.get("level5_not_activated", "?")
+
+        audit_short = {"PASS": "tainted-intact"}.get(audit, audit)
+        level5_short = {"PASS": "off"}.get(level5, level5)
+
+        # Get smoke count from detail
+        smoke_detail = ""
+        for c in result["checks"]:
+            if c["name"] == "smoke_count":
+                smoke_detail = c.get("detail", "")
+                break
+
+        print("V1 %s | Smoke %s | QG %s | RR %s | Audit %s | Level5 %s" % (
+            verdict, smoke_detail or smoke, qg, rr, audit_short, level5_short))
         print(result["operator_summary"])
     else:
         print("=" * 50)
