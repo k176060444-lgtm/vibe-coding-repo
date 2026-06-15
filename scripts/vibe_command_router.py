@@ -70,6 +70,7 @@ COMMAND_SCRIPTS = {
     "exec-gate": "vibe_execution_gate.py",
     "safe-executor": "vibe_safe_executor.py",
     "adapter": "vibe_executor_adapter.py",
+    "transcript": "vibe_execution_transcript.py",
 }
 
 # Short aliases
@@ -105,6 +106,8 @@ ALIASES = {
     "se": "safe-executor",
     "plan": "safe-executor",
     "ac": "adapter",
+    "txn": "transcript",
+    "exec-txn": "transcript",
     "adapter-cap": "adapter",
     "?": "help",
     "v": "version",
@@ -131,6 +134,7 @@ COMMAND_DESCRIPTIONS = {
     "exec-gate": "Execution Gate - pre-execution admission check (ALLOW/REVIEW/BLOCK)",
     "safe-executor": "Safe Executor - generate execution plans (no real execution)",
     "adapter": "Executor Adapter Contract - query and validate adapter capabilities",
+    "transcript": "Execution Transcript - append-only record of dry-run / noop sessions",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -150,6 +154,7 @@ COMMAND_FLAGS = {
     "exec-gate": ["--json", "--registry-dir"],
     "safe-executor": ["--json", "--registry-dir"],
     "adapter": ["--json", "--adapter"],
+    "transcript": ["--json", "--transcript-dir"],
 }
 
 

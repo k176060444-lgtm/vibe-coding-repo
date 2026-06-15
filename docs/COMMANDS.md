@@ -1080,3 +1080,17 @@ python3 scripts/vibe_command_router.py adapter validate-inputs --adapter dry-run
 
 **Adapters:** noop (1-step no-op), dry-run (8-step simulated execution)
 **Forbidden actions:** model_call, shell_exec, repo_write, git_push, git_merge, deploy, tag, file_delete
+
+### transcript / txn / exec-txn (Execution Transcript)
+Append-only record of executor dry-run / noop sessions. Captures gate verdict, adapter plan, receipt digest, base_sha, timestamp, status.
+
+**Usage:**
+```
+python3 scripts/vibe_execution_transcript.py create --id my-wo --adapter noop --base-sha abc123
+python3 scripts/vibe_execution_transcript.py list --json
+python3 scripts/vibe_execution_transcript.py show --transcript-id txn-001 --json
+python3 scripts/vibe_command_router.py txn create --id my-wo --adapter dry-run --base-sha abc123 --json
+python3 scripts/vibe_command_router.py txn list --transcript-dir /path --json
+```
+
+**Fields:** transcript_id, workorder_id, adapter, base_sha, gate_verdict, approval_receipt_digest, timestamp, status, digest (SHA256)
