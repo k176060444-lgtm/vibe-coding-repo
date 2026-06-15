@@ -9,6 +9,7 @@ Usage:
     python3 scripts/vibe_worker_resilience.py --checkpoint <file> [--json]
     python3 scripts/vibe_worker_resilience.py --resume <file> [--json] [--compact]
     python3 scripts/vibe_worker_resilience.py --status-report <file> [--json]
+    python3 scripts/vibe_worker_resilience.py --reconcile <file> [--json] [--compact]
 
 Constraints:
     - Read-only on repo; checkpoint file is the only write target.
@@ -25,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 RETRY_INTERVAL_MINUTES = 5
 MAX_WAIT_MINUTES = 75
@@ -69,6 +70,22 @@ def _check_worker_reachable():
     if "refused" in stderr.lower():
         return "unreachable_refused", "SSH connection refused (service not running)"
     return "unknown", f"rc={rc} stderr={stderr[:200]}"
+
+
+def _get_current_baseline():
+    """Get current git baseline SHA (read-only)."""
+    rc, stdout, stderr = _run_cmd(["git", "rev-parse", "HEAD"])
+    if rc == 0:
+        return stdout
+    return None
+
+
+def _check_worktree_clean():
+    """Check if worktree is clean (no uncommitted changes)."""
+    rc, stdout, stderr = _run_cmd(["git", "status", "--porcelain"])
+    if rc == 0 and not stdout:
+        return True
+    return False
 
 
 def _cmd_check(args):
@@ -159,9 +176,57 @@ def _cmd_checkpoint(args):
     return checkpoint, 0
 
 
+def _cmd_pause(args):
+    """Pause batch at safe point — writes PAUSED checkpoint."""
+    checkpoint_path = args.pause
+    now = time.time()
+
+    existing, err = _load_checkpoint(checkpoint_path)
+    if existing:
+        existing["status"] = "PAUSED"
+        existing["paused_at"] = now
+        existing["last_updated"] = now
+        existing["resume_allowed"] = True
+        err = _save_checkpoint(checkpoint_path, existing)
+        if err:
+            return {"error": err}, 1
+        return existing, 0
+
+    # Create new paused checkpoint
+    checkpoint = {
+        "batch_id": "pending",
+        "status": "PAUSED",
+        "current_wo": None,
+        "phase": "before_any_mutation",
+        "baseline_before": None,
+        "baseline_after": None,
+        "branch": None,
+        "pr": None,
+        "changed_paths": [],
+        "last_safe_point": now,
+        "paused_at": now,
+        "resume_allowed": True,
+        "worker_error": None,
+        "retry_count": 0,
+        "created_at": now,
+        "last_updated": now,
+    }
+    err = _save_checkpoint(checkpoint_path, checkpoint)
+    if err:
+        return {"error": err}, 1
+    return checkpoint, 0
+
+
 def _cmd_resume(args):
-    """Check if resume is allowed and what state we're in."""
-    checkpoint_path = args.checkpoint
+    """Check if resume is allowed and reconcile state.
+
+    Resume requires:
+    1. Worker reachable
+    2. Baseline matches checkpoint
+    3. Worktree clean
+    4. Status allows resume
+    """
+    checkpoint_path = args.resume
     checkpoint, err = _load_checkpoint(checkpoint_path)
     if err:
         return {"error": err}, 1
@@ -187,27 +252,63 @@ def _cmd_resume(args):
         result["reason"] = "needs_operator_intervention"
         return result, 1
 
-    if status == "WAITING_WORKER_RECOVERY":
-        # Check if worker is back
-        worker_status, worker_error = _check_worker_reachable()
-        result["worker_status"] = worker_status
-        if worker_status != "reachable":
-            result["reason"] = "worker_still_unreachable"
-            return result, 1
-        result["status"] = "RECONCILING"
-        result["note"] = "Worker reachable. Proceed with reconciliation."
-        return result, 0
+    # Reconcile: check worker
+    worker_status, worker_error = _check_worker_reachable()
+    result["worker_status"] = worker_status
+    if worker_status != "reachable":
+        result["reason"] = "worker_still_unreachable"
+        result["status"] = "BLOCKED_WORKER_UNREACHABLE"
+        return result, 1
 
-    if status == "RECONCILING":
-        result["note"] = "Reconciliation in progress. Verify baseline/worktree/remote."
-        return result, 0
+    # Reconcile: check baseline
+    current_baseline = _get_current_baseline()
+    result["current_baseline"] = current_baseline
+    expected_baseline = checkpoint.get("baseline_before") or checkpoint.get("baseline_after")
+    if expected_baseline and current_baseline and expected_baseline != current_baseline:
+        result["reason"] = "baseline_mismatch"
+        result["expected_baseline"] = expected_baseline
+        result["status"] = "BLOCKED_BASELINE_MISMATCH"
+        return result, 1
 
+    # Reconcile: check worktree clean
+    worktree_clean = _check_worktree_clean()
+    result["worktree_clean"] = worktree_clean
+    if not worktree_clean:
+        result["reason"] = "dirty_worktree"
+        result["status"] = "BLOCKED_DIRTY_WORKTREE"
+        return result, 1
+
+    # All checks passed
+    result["status"] = "RECONCILING"
+    result["note"] = "All reconcile checks passed. Ready to resume."
+    result["reconcile_checks"] = {
+        "worker": "PASS",
+        "baseline": "PASS",
+        "worktree": "PASS",
+    }
     return result, 0
+
+
+def _cmd_reconcile(args):
+    """Explicit reconciliation — same as resume but focused on state verification."""
+    # Temporarily set args.checkpoint so _cmd_resume can use it
+    args.resume = args.reconcile
+    result, rc = _cmd_resume(args)
+    if rc == 0:
+        result["reconcile_status"] = "PASS"
+    else:
+        result["reconcile_status"] = "FAIL"
+    return result, rc
+
+
+def _cmd_resume_legacy(args):
+    """Legacy resume from V1.5.1 — delegates to new resume."""
+    return _cmd_resume(args)
 
 
 def _cmd_status_report(args):
     """Generate a 15-minute status report."""
-    checkpoint_path = args.checkpoint
+    checkpoint_path = args.resume
     checkpoint, err = _load_checkpoint(checkpoint_path)
     if err:
         return {"error": err}, 1
@@ -253,7 +354,9 @@ def build_parser():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--check", action="store_true", help="Check worker reachability")
     group.add_argument("--checkpoint", metavar="FILE", help="Create/update checkpoint")
-    group.add_argument("--resume", metavar="FILE", help="Check resume conditions")
+    group.add_argument("--pause", metavar="FILE", help="Pause batch at safe point")
+    group.add_argument("--resume", metavar="FILE", help="Resume from checkpoint with reconcile")
+    group.add_argument("--reconcile", metavar="FILE", help="Reconcile state without resuming")
     group.add_argument("--status-report", metavar="FILE", help="Generate status report")
 
     return parser
@@ -276,8 +379,12 @@ def main(argv=None):
         result, rc = _cmd_check(args)
     elif args.checkpoint:
         result, rc = _cmd_checkpoint(args)
+    elif args.pause:
+        result, rc = _cmd_pause(args)
     elif args.resume:
         result, rc = _cmd_resume(args)
+    elif args.reconcile:
+        result, rc = _cmd_reconcile(args)
     elif args.status_report:
         result, rc = _cmd_status_report(args)
     else:

@@ -86,6 +86,8 @@ COMMAND_SCRIPTS = {
     "batch-runner": "vibe_batch_runner.py",
     "batch-status": "vibe_batch_runner.py",
     "batch-report": "vibe_batch_runner.py",
+    "batch-pause": "vibe_batch_runner.py",
+    "batch-resume": "vibe_batch_runner.py",
     "worker-resilience": "vibe_worker_resilience.py",
 }
 
@@ -150,6 +152,8 @@ ALIASES = {
     "br": "batch-runner",
     "bs": "batch-status",
     "breport": "batch-report",
+    "bp": "batch-pause",
+    "bresume": "batch-resume",
     "batch": "batch-runner",
     "wr": "worker-resilience",
     "worker": "worker-resilience",
@@ -222,6 +226,8 @@ COMMAND_FLAGS = {
     "batch-runner": ["--json", "--compact", "--batch", "--status", "--dry-run"],
     "batch-status": ["--json", "--compact", "--checkpoint"],
     "batch-report": ["--json", "--compact", "--checkpoint"],
+    "batch-pause": ["--json", "--compact", "--checkpoint"],
+    "batch-resume": ["--json", "--compact", "--checkpoint"],
     "worker-resilience": ["--json", "--compact", "--check", "--checkpoint", "--resume", "--status-report"],
 }
 
@@ -300,6 +306,8 @@ def _show_help():
     lines.append("  batch-runner (br, batch)  Trusted self-repo batch runner")
     lines.append("  batch-status (bs)  Current batch status (read-only)")
     lines.append("  batch-report (breport)  Detailed batch report (read-only)")
+    lines.append("  batch-pause (bp)  Pause batch at safe point")
+    lines.append("  batch-resume (bresume)  Resume batch with reconcile")
     lines.append("  worker-resilience (wr, worker, resilience)  Worker reachability & retry")
     lines.append("  snapshot                     Operator status snapshot")
     lines.append("")
@@ -535,6 +543,14 @@ def main(argv=None):
         args = ["--batch-status"] + [a for a in args if a not in ("--batch-status",)]
 
     # Special handling for batch-report command
+    # Special handling for batch-pause command
+    if cmd == "batch-pause":
+        args = ["--pause"] + [a for a in args if a not in ("--pause",)]
+
+    # Special handling for batch-resume command
+    if cmd == "batch-resume":
+        args = ["--resume"] + [a for a in args if a not in ("--resume",)]
+
     if cmd == "batch-report":
         args = ["--batch-report"] + [a for a in args if a not in ("--batch-report",)]
 
