@@ -3352,6 +3352,65 @@ def _test_worker_resilience_token_no_leak(script_dir):
     return {"passed": True, "message": "no token patterns"}
 
 
+
+
+def _test_batch_runner_report_fields(script_dir):
+    """Test batch runner status includes report fields."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--status", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if "batch_runner_version" not in data:
+        return {"passed": False, "message": "missing batch_runner_version"}
+    return {"passed": True, "message": "batch runner v%s" % data.get("batch_runner_version")}
+
+
+def _test_batch_runner_version(script_dir):
+    """Test batch runner version >= 1.2.0."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    content = path.read_text()
+    if 'VERSION = "1.2.0"' not in content:
+        return {"passed": False, "message": "expected version 1.2.0"}
+    return {"passed": True, "message": "batch runner v1.2.0"}
+
+
+def _test_batch_runner_checkpoint_status_field(script_dir):
+    """Test batch runner dry-run includes checkpoint_status."""
+    import tempfile, json as json_mod
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-rpt-")
+    batch_path = pathlib.Path(tmpdir) / "batch.json"
+    batch = {
+        "batch_id": "test-rpt",
+        "repo": "k176060444-lgtm/vibe-coding-repo",
+        "work_orders": [
+            {"wo_id": "wo-1", "branch": "v101/test", "changed_paths": ["docs/test.md"], "allowed_paths": ["docs/test.md"]}
+        ],
+    }
+    batch_path.write_text(json_mod.dumps(batch))
+    rc, stdout, stderr = _run_script(path, ["--batch", str(batch_path), "--dry-run", "--json"])
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if "checkpoint_status" not in data:
+        return {"passed": False, "message": "missing checkpoint_status"}
+    if "resume_status" not in data:
+        return {"passed": False, "message": "missing resume_status"}
+    return {"passed": True, "message": "checkpoint_status=%s resume_status=%s" % (data.get("checkpoint_status"), data.get("resume_status"))}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
