@@ -731,3 +731,22 @@ Each transition requires:
 - Automatic timestamp and history digest
 
 Status history is append-only and includes SHA256 digest for integrity verification.
+
+
+### Approval Receipts
+
+Approval receipts record human approval decisions with cryptographic integrity:
+
+```
+requirement → intake → validate → registry.register → packager → approval-receipt.create → [human approval] → execute
+```
+
+Receipts include:
+- SHA256 digest of receipt data
+- Workorder ID, base SHA, package digest
+- Approver label and approval text
+- Requires_human_approval flag
+- Approved scope (from workorder)
+- Stop conditions (from workorder)
+
+Receipts are stored in `receipts/` subdirectory of the registry and do NOT execute Work Orders.
