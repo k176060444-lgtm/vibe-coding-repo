@@ -1985,6 +1985,94 @@ def _test_quality_gate_block_scenario(script_dir):
 
 
 
+
+def _test_run_report_json(script_dir):
+    """Test run report JSON output."""
+    path = script_dir / "vibe_run_report.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["--json", "--repo-root", str(script_dir.parent)])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    required = ["baseline", "quality_gate", "smoke_status", "audit_lock",
+                 "new_freeze_baseline", "next_recommended_action", "operator_summary"]
+    missing = [f for f in required if f not in data]
+    if missing:
+        return {"passed": False, "message": "missing: %s" % ", ".join(missing)}
+
+    return {"passed": True, "message": "verdict=%s pr=%s" % (
+        data.get("quality_gate", {}).get("verdict", "?"),
+        data.get("pr_summary", {}).get("number", "?"))}
+
+
+def _test_run_report_markdown(script_dir):
+    """Test run report Markdown output."""
+    path = script_dir / "vibe_run_report.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["--markdown", "--repo-root", str(script_dir.parent)])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    if "# Run Report" not in stdout:
+        return {"passed": False, "message": "missing header"}
+    if "## Quality Gate" not in stdout:
+        return {"passed": False, "message": "missing quality gate section"}
+    if "## Next Action" not in stdout:
+        return {"passed": False, "message": "missing next action"}
+
+    return {"passed": True, "message": "markdown OK (%d chars)" % len(stdout)}
+
+
+def _test_run_report_compact(script_dir):
+    """Test run report compact output."""
+    path = script_dir / "vibe_run_report.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["--compact", "--repo-root", str(script_dir.parent)])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    if "QG:" not in stdout:
+        return {"passed": False, "message": "missing QG indicator"}
+
+    return {"passed": True, "message": "compact: %s" % stdout.strip()[:60]}
+
+
+def _test_run_report_router(script_dir):
+    """Test run report router aliases (rr, handoff)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+
+    rc1, stdout1, stderr1 = _run_script(path, ["rr", "--json", "--repo-root", str(script_dir.parent)])
+    if rc1 != 0:
+        return {"passed": False, "message": "rr exit=%d" % rc1}
+
+    try:
+        data1 = json.loads(stdout1)
+        if "operator_summary" not in data1:
+            return {"passed": False, "message": "rr missing operator_summary"}
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "rr invalid JSON"}
+
+    rc2, stdout2, stderr2 = _run_script(path, ["handoff", "--compact", "--repo-root", str(script_dir.parent)])
+    if rc2 != 0:
+        return {"passed": False, "message": "handoff exit=%d" % rc2}
+
+    return {"passed": True, "message": "rr+handoff OK"}
+
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -2207,6 +2295,18 @@ def run_tests(jobs_dir=None):
 
     # Test 71: Quality gate BLOCK scenario
     tests.append(_run_test("quality_gate_block", lambda: _test_quality_gate_block_scenario(script_dir)))
+
+    # Test 72: Run report JSON
+    tests.append(_run_test("run_report_json", lambda: _test_run_report_json(script_dir)))
+
+    # Test 73: Run report Markdown
+    tests.append(_run_test("run_report_markdown", lambda: _test_run_report_markdown(script_dir)))
+
+    # Test 74: Run report compact
+    tests.append(_run_test("run_report_compact", lambda: _test_run_report_compact(script_dir)))
+
+    # Test 75: Run report router aliases
+    tests.append(_run_test("run_report_router", lambda: _test_run_report_router(script_dir)))
 
     return tests
 

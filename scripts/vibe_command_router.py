@@ -48,7 +48,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.9.0"
+VERSION = "2.10.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -78,6 +78,7 @@ COMMAND_SCRIPTS = {
     "unfreeze-checklist": "vibe_executor_unfreeze_checklist.py",
     "transcript": "vibe_execution_transcript.py",
     "quality-gate": "vibe_quality_gate.py",
+    "run-report": "vibe_run_report.py",
 }
 
 # Short aliases
@@ -127,6 +128,8 @@ ALIASES = {
     "adapter-cap": "adapter",
     "qg": "quality-gate",
     "go-no-go": "quality-gate",
+    "rr": "run-report",
+    "handoff": "run-report",
     "?": "help",
     "v": "version",
 }
@@ -159,6 +162,7 @@ COMMAND_DESCRIPTIONS = {
     "unfreeze-checklist": "Executor Unfreeze Checklist - machine-readable unfreeze readiness check",
     "transcript": "Execution Transcript - append-only record of dry-run / noop sessions",
     "quality-gate": "Workflow Quality Gate - aggregated pre/post-execution health check",
+    "run-report": "Run Report / Session Handoff - execution summary for QQ/mobile",
     "help": "Show this help message",
     "version": "Show version",
 }

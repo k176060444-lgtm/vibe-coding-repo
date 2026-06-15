@@ -1029,3 +1029,48 @@ Pre-execution:  quality-gate → if PASS/WARN → proceed
 Post-execution: quality-gate → verify no regressions
 ```
 
+## Run Report / Session Handoff
+
+The **run report** (`scripts/vibe_run_report.py`) generates a summary of the current
+system state after each Work Order execution. Use it to quickly判断是否继续、暂停、升级审批或回滚。
+
+### Usage
+
+```bash
+# Markdown (default, QQ-friendly)
+python3 scripts/vibe_run_report.py
+
+# JSON for automation
+python3 scripts/vibe_run_report.py --json
+
+# Compact one-liner
+python3 scripts/vibe_run_report.py --compact
+
+# Via router
+python scripts/vibe_command_router.py rr --json
+python scripts/vibe_command_router.py handoff --compact
+```
+
+### Report Fields
+
+| Field | Description |
+|-------|-------------|
+| `baseline` | Current origin/main SHA |
+| `quality_gate` | Aggregated health check verdict |
+| `smoke_status` | Smoke suite result |
+| `loop_summary` | Component count and health |
+| `audit_lock` | wo-code-repo-status-001 status |
+| `pr_summary` | Latest merged PR info |
+| `new_freeze_baseline` | Post-merge SHA |
+| `next_recommended_action` | What to do next |
+| `operator_summary` | Human-readable summary |
+
+### Decision Guide
+
+| Run Report Says | Action |
+|-----------------|--------|
+| QG:PASS, Audit:intact, Next:READY | Proceed with next Work Order |
+| QG:WARN, Audit:intact, Next:REVIEW | Review warnings, then proceed if justified |
+| QG:BLOCK, Next:HALT | Investigate and fix before any execution |
+| Audit lock missing | STOP — critical security issue |
+
