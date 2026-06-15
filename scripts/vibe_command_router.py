@@ -254,6 +254,13 @@ def _show_help():
         lines.append("  %s → %s" % (aliases, target))
 
     lines.append("")
+    lines.append("Key Commands:")
+    lines.append("  quality-gate (qg, go-no-go)  Pre/post execution health check")
+    lines.append("  run-report (rr, handoff)     Session handoff / execution summary")
+    lines.append("  smoke                        Full smoke suite (75 tests)")
+    lines.append("  health                       Quick health check")
+    lines.append("  snapshot                     Operator status snapshot")
+    lines.append("")
     lines.append("Options:")
     lines.append("  --help, -h    Show this help message")
     lines.append("  --version     Show version")
@@ -270,6 +277,12 @@ def _show_help():
     lines.append("  python scripts/vibe_command_router.py ar create --id my-wo --base-sha abc123 ...")
     lines.append("  python scripts/vibe_command_router.py ev create --id my-wo --base-sha abc123 --result-sha def456 ...")
     lines.append("  python scripts/vibe_command_router.py gate --id my-wo --current-main-sha abc123")
+    lines.append("")
+    lines.append("  # Quality Gate & Run Report (new)")
+    lines.append("  python scripts/vibe_command_router.py qg --json")
+    lines.append("  python scripts/vibe_command_router.py go-no-go --compact")
+    lines.append("  python scripts/vibe_command_router.py rr --json")
+    lines.append("  python scripts/vibe_command_router.py handoff --compact")
 
     print("\n".join(lines))
 
