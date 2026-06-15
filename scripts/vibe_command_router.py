@@ -48,7 +48,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.11.0"
+VERSION = "2.12.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -82,6 +82,7 @@ COMMAND_SCRIPTS = {
     "v1-freeze": "vibe_v1_freeze_check.py",
     "priv-approval": "vibe_privileged_approval.py",
     "priv-push": "vibe_privileged_push.py",
+    "trusted-loop": "vibe_trusted_self_loop.py",
 }
 
 # Short aliases
@@ -139,6 +140,9 @@ ALIASES = {
     "approval": "priv-approval",
     "pp": "priv-push",
     "push-approved": "priv-push",
+    "tl": "trusted-loop",
+    "auto-loop": "trusted-loop",
+    "loop": "trusted-loop",
     "?": "help",
     "v": "version",
 }
@@ -203,6 +207,7 @@ COMMAND_FLAGS = {
     "quality-gate": ["--json", "--compact", "--repo-root", "--jobs-dir"],
     "priv-approval": ["--json", "--approval-dir"],
     "priv-push": ["--json", "--compact", "--approval-dir", "--action-id", "--list-approved"],
+    "trusted-loop": ["--json", "--compact", "--check", "--contract"],
 }
 
 
@@ -276,6 +281,7 @@ def _show_help():
     lines.append("  v1-freeze (v1, freeze-check)  V1 freeze verification")
     lines.append("  priv-approval (priv-appr, approval)  Privileged approval workflow")
     lines.append("  priv-push (pp, push-approved)  Privileged push dry-run")
+    lines.append("  trusted-loop (tl, auto-loop, loop)  Trusted self-repo auto-loop")
     lines.append("  snapshot                     Operator status snapshot")
     lines.append("")
     lines.append("Options:")
@@ -498,6 +504,12 @@ def main(argv=None):
     if cmd == "priv-push":
         if not args:
             args = ["--list-approved"]
+
+    # Special handling for trusted-loop command (default to --check)
+    if cmd == "trusted-loop":
+        if not args or args[0].startswith("-"):
+            if not any(a in ("--check", "--contract", "--validate") for a in args):
+                args = ["--check"] + args
 
     return _run_script(script_path, args)
 
