@@ -101,4 +101,38 @@ fetch origin 确认基线。运行 qg。创建 branch。实现改动。运行 sm
 
 ---
 
+## 受控推送审批 (Privileged Approval)
+
+### 发起审批
+```
+创建推送审批：priv-approval create --action-id <id> --repo <repo> --branch <branch> --action push --base-sha <sha>
+```
+
+### 短授权
+```
+批准
+确认
+同意
+可以执行
+approve
+```
+**规则：** 只有恰好 1 个未过期 pending 时才生效。多个 pending / 无 pending / 已过期 → BLOCK。
+
+### 查看审批
+```
+查看审批列表：priv-approval list
+查看审批详情：priv-approval show --action-id <id>
+```
+
+### 推送检查（dry-run）
+```
+检查推送：priv-push --action-id <id>
+列出已批准：priv-push --list-approved
+```
+
+### 决策流程
+```
+发起审批 → 人工确认（批准/确认/approve）→ priv-push dry-run → 等待真实推送授权
+```
+
 *V1 Operational Freeze — 2026-06-15*
