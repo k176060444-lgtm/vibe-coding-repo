@@ -618,3 +618,20 @@ Daily report smoke coverage added:
 - 25: Daily Report JSON with all required fields
 
 Run: `python scripts/test_toolchain_smoke.py`
+
+
+## Work Order Validator (v1)
+
+Validate intake drafts before execution:
+
+```
+python scripts/vibe_workorder_intake.py 'requirement' --json > draft.json
+python scripts/vibe_workorder_validator.py draft.json
+python scripts/vibe_workorder_validator.py draft.json --json
+```
+
+Checks: required fields, type, risk_level, human approval consistency,
+allowed_paths safety, forbidden_actions, goal, acceptance_tests,
+stop_conditions, draft_only flag, ID format.
+
+Verdict: PASS (all checks) / WARN (warnings only) / FAIL (errors).

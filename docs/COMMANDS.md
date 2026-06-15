@@ -703,3 +703,31 @@ $ python scripts/vibe_daily_report.py --compact
   Next: queue_clean
 ========================================
 ```
+
+
+## Work Order Validator
+
+Validate intake drafts for execution readiness.
+
+```
+$ python scripts/vibe_workorder_validator.py draft.json
+========================================
+  Work Order Validation: ✓ PASS
+========================================
+  ✓ All required fields present (11)
+  ✓ Valid type: code
+  ✓ Valid risk_level: low
+  ✓ Human approval: False (matches risk)
+  ✓ allowed_paths valid (2 paths)
+  ✓ forbidden_actions defined (6 rules)
+  ✓ Goal present (45 chars)
+  ✓ acceptance_tests defined (5 criteria)
+  ✓ stop_conditions defined (7 conditions)
+  ✓ work_order_id format valid: wo-code-add-summary-001
+========================================
+```
+
+```
+$ python scripts/vibe_workorder_validator.py draft.json --json
+{ "overall": "PASS", "checks": [...], "warnings": [], "errors": [] }
+```
