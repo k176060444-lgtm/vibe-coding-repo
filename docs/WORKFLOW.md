@@ -673,3 +673,28 @@ Preflight smoke coverage:
 - 26: Validator basic validation (intake → validate → PASS)
 - 27: Packager basic packaging (intake → package → chars > 0)
 - 28: Preflight router chain (preflight command via router)
+
+### Work Order Registry
+
+The registry stores work order metadata locally for tracking intake/validate/packager outputs:
+
+```
+intake → validate → registry.register → packager → [human approval] → execute
+```
+
+Registry entries track: workorder_id, title, risk_level, status (draft→validated→packaged→approved→executed→blocked), base_sha, source, requires_human_approval.
+
+The registry is read-only by default. Only  subcommand with explicit  writes to the registry.
+
+
+### Work Order Registry
+
+The registry stores work order metadata locally for tracking intake/validate/packager outputs:
+
+```
+intake → validate → registry.register → packager → [human approval] → execute
+```
+
+Registry entries track: workorder_id, title, risk_level, status (draft/validated/packaged/approved/executed/blocked), base_sha, source, requires_human_approval.
+
+The registry is read-only by default. Only `register` subcommand with explicit `--registry-dir` writes to the registry.

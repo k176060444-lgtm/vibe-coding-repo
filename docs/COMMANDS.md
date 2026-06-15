@@ -799,3 +799,42 @@ $ python scripts/vibe_command_router.py preflight 'Add --verbose flag to health 
   ✓ Preflight: PASS
 ========================================
 ```
+
+###  /  (Work Order Registry)
+Register, list, and show work order entries in a local registry directory.
+
+**Subcommands:**
+-  — Register new entry
+-  — List all entries
+-  — Show entry details
+
+**Options:**
+-  — Registry directory (default: VIBEDEV_REGISTRY_DIR env)
+-  — JSON output
+
+**Examples:**
+```
+python3 scripts/vibe_workorder_registry.py register --registry-dir /tmp/registry --id my-wo --title Add feature X
+python3 scripts/vibe_workorder_registry.py list --registry-dir /tmp/registry --json
+python3 scripts/vibe_workorder_registry.py show --registry-dir /tmp/registry --id my-wo
+```
+
+
+### `registry` / `reg` (Work Order Registry)
+Register, list, and show work order entries in a local registry directory.
+
+**Subcommands:**
+- `register --id ID [--title TITLE] [--risk-level low|medium|high|critical] [--status draft|validated|packaged|approved|executed|blocked] [--base-sha SHA] [--source SRC] [--requires-human-approval]` — Register new entry
+- `list [--filter-status STATUS]` — List all entries
+- `show --id ID` — Show entry details
+
+**Options:**
+- `--registry-dir DIR` — Registry directory (default: VIBEDEV_REGISTRY_DIR env)
+- `--json` — JSON output
+
+**Examples:**
+```
+python3 scripts/vibe_workorder_registry.py register --registry-dir /tmp/registry --id my-wo --title "Add feature X"
+python3 scripts/vibe_workorder_registry.py list --registry-dir /tmp/registry --json
+python3 scripts/vibe_workorder_registry.py show --registry-dir /tmp/registry --id my-wo
+```
