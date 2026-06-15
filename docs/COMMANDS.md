@@ -1094,3 +1094,16 @@ python3 scripts/vibe_command_router.py txn list --transcript-dir /path --json
 ```
 
 **Fields:** transcript_id, workorder_id, adapter, base_sha, gate_verdict, approval_receipt_digest, timestamp, status, digest (SHA256)
+
+### sandbox / sb (Executor Sandbox Contract)
+Verify sandbox constraints for future real execution. Read-only checks; never creates worktrees or writes repos.
+
+**Usage:**
+```
+python3 scripts/vibe_executor_sandbox.py check --base-sha abc123 --json
+python3 scripts/vibe_executor_sandbox.py plan --id my-wo --base-sha abc123 --json
+python3 scripts/vibe_command_router.py sb check --json
+python3 scripts/vibe_command_router.py sb plan --id my-wo --base-sha abc123
+```
+
+**Checks:** constraints_defined, forbidden_actions, base_sha, artifact_dirs, network/model/write isolation, forbidden/allowed paths, execution_timeout, destructive_blocked, shell_blocked

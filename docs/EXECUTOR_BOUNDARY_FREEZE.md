@@ -131,3 +131,6 @@ To unfreeze the executor boundary and enable real execution:
 - `scripts/vibe_executor_adapter.py` — adapter contract definition
 - `scripts/vibe_execution_gate.py` — execution gate implementation
 - `scripts/vibe_safe_executor.py` — safe executor stub
+
+## Sandbox Contract
+Sandbox readiness is verified by vibe_executor_sandbox.py before any future real execution.
