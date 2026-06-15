@@ -12,22 +12,8 @@ Usage:
     python3 scripts/vibe_batch_runner.py --status [--json]
     python3 scripts/vibe_batch_runner.py --batch-status [--checkpoint <file>] [--json] [--compact]
     python3 scripts/vibe_batch_runner.py --batch-report [--checkpoint <file>] [--json] [--compact]
-
-Batch JSON format:
-    {
-        "batch_id": "batch-001",
-        "repo": "k176060444-lgtm/vibe-coding-repo",
-        "work_orders": [
-            {
-                "wo_id": "wo-001",
-                "branch": "v101/feature-001",
-                "title": "feat: description",
-                "body": "PR body",
-                "changed_paths": ["scripts/x.py"],
-                "allowed_paths": ["scripts/x.py"]
-            }
-        ]
-    }
+    python3 scripts/vibe_batch_runner.py --pause [--checkpoint <file>] [--json] [--compact]
+    python3 scripts/vibe_batch_runner.py --resume [--checkpoint <file>] [--json] [--compact]
 
 Constraints:
     - Self-repo only (k176060444-lgtm/vibe-coding-repo).
@@ -47,11 +33,10 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
 
-# Stop conditions
 STOP_CONDITIONS = [
     "smoke_fail",
     "qg_fail",
@@ -86,10 +71,7 @@ def _run_script(script_path, args, timeout=120, cwd=None):
 
 
 def _check_policy_gate(changed_paths, allowed_paths):
-    """Verify changed_paths are subset of allowed_paths.
-
-    Returns (ok: bool, violations: list).
-    """
+    """Verify changed_paths are subset of allowed_paths."""
     violations = []
     for cp in changed_paths:
         if cp not in allowed_paths:
@@ -104,14 +86,10 @@ def _check_policy_gate(changed_paths, allowed_paths):
 
 
 def _run_post_merge_checks(script_dir, repo_root, wo_id):
-    """Run smoke, QG, V1-freeze after a WO merge.
-
-    Returns (passed: bool, results: dict, stop_reason: str|None).
-    """
+    """Run smoke, QG, V1-freeze after a WO merge."""
     results = {}
     jobs_dir = os.path.expanduser("~/vibedev/jobs")
 
-    # Smoke
     smoke_path = script_dir / "test_toolchain_smoke.py"
     if smoke_path.exists():
         rc, stdout, stderr = _run_script(
@@ -132,7 +110,6 @@ def _run_post_merge_checks(script_dir, repo_root, wo_id):
     else:
         results["smoke"] = {"status": "SKIP"}
 
-    # Quality gate
     qg_path = script_dir / "vibe_quality_gate.py"
     if qg_path.exists():
         rc, stdout, stderr = _run_script(
@@ -148,7 +125,6 @@ def _run_post_merge_checks(script_dir, repo_root, wo_id):
             results["quality_gate"] = {"status": "ERROR"}
             return False, results, "qg_fail"
 
-    # V1 freeze
     v1_path = script_dir / "vibe_v1_freeze_check.py"
     if v1_path.exists():
         rc, stdout, stderr = _run_script(
@@ -167,10 +143,7 @@ def _run_post_merge_checks(script_dir, repo_root, wo_id):
 
 
 def _check_worker_and_wait(script_dir, checkpoint_path):
-    """Check worker reachability; if unreachable, create checkpoint.
-
-    Returns (reachable: bool, info: dict).
-    """
+    """Check worker reachability; if unreachable, create checkpoint."""
     resilience_path = script_dir / "vibe_worker_resilience.py"
     if not resilience_path.exists():
         return True, {}
@@ -182,7 +155,6 @@ def _check_worker_and_wait(script_dir, checkpoint_path):
         return True, {}
     if data.get("reachable"):
         return True, data
-    # Unreachable — create checkpoint
     cp_cmd = [sys.executable, str(resilience_path), "--checkpoint", str(checkpoint_path), "--json"]
     try:
         subprocess.run(cp_cmd, capture_output=True, text=True, timeout=10)
@@ -239,16 +211,16 @@ def _find_latest_checkpoint():
     return None
 
 
-def _cmd_batch_status(args):
-    """Show batch status — read-only snapshot of current batch state.
+def _resolve_checkpoint_path(args):
+    """Resolve checkpoint path from args or auto-detect."""
+    if hasattr(args, "checkpoint") and args.checkpoint:
+        return args.checkpoint
+    return _find_latest_checkpoint()
 
-    Reads checkpoint file and git state. No mutation, no token read.
-    """
-    checkpoint_path = None
-    if args.checkpoint:
-        checkpoint_path = args.checkpoint
-    else:
-        checkpoint_path = _find_latest_checkpoint()
+
+def _cmd_batch_status(args):
+    """Show batch status — read-only snapshot of current batch state."""
+    checkpoint_path = _resolve_checkpoint_path(args)
 
     result = {
         "batch_id": None,
@@ -287,7 +259,6 @@ def _cmd_batch_status(args):
             result["completed_count"] = current_idx
             result["remaining_count"] = max(0, len(wo_list) - current_idx)
 
-    # Check worker status (read-only)
     script_dir = Path(__file__).parent
     resilience_path = script_dir / "vibe_worker_resilience.py"
     if resilience_path.exists():
@@ -302,10 +273,7 @@ def _cmd_batch_status(args):
 
 
 def _cmd_batch_report(args):
-    """Show detailed batch report — read-only, extended status with per-WO breakdown.
-
-    Reads checkpoint file, git state, and worker status. No mutation, no token read.
-    """
+    """Show detailed batch report — read-only, extended status."""
     status_result, rc = _cmd_batch_status(args)
 
     report = dict(status_result)
@@ -315,10 +283,7 @@ def _cmd_batch_report(args):
     report["repo"] = SELF_REPO
     report["repo_trust_level"] = "trusted-self"
 
-    # Add per-WO details from checkpoint
-    checkpoint_path = args.checkpoint
-    if not checkpoint_path:
-        checkpoint_path = _find_latest_checkpoint()
+    checkpoint_path = _resolve_checkpoint_path(args)
     if checkpoint_path:
         cp = _load_checkpoint(checkpoint_path)
         if cp:
@@ -327,7 +292,6 @@ def _cmd_batch_report(args):
             report["last_successful_baseline"] = cp.get("last_successful_baseline")
             report["final_baseline"] = cp.get("final_baseline")
 
-    # Add worker resilience details
     script_dir = Path(__file__).parent
     resilience_path = script_dir / "vibe_worker_resilience.py"
     if resilience_path.exists():
@@ -342,15 +306,101 @@ def _cmd_batch_report(args):
     return report, 0
 
 
-def _execute_wo(wo, script_dir, repo_dir, repo_root, dry_run=False):
-    """Execute a single Work Order.
+def _cmd_pause(args):
+    """Pause batch at safe point.
 
-    Returns (success: bool, result: dict, stop_reason: str|None).
+    Writes PAUSED status to checkpoint. Does not interrupt in-flight git operations.
+    The batch runner will check this flag at the next safe point (between WOs).
     """
+    checkpoint_path = _resolve_checkpoint_path(args)
+    script_dir = Path(__file__).parent
+    resilience_path = script_dir / "vibe_worker_resilience.py"
+
+    if not resilience_path.exists():
+        return {"error": "vibe_worker_resilience.py not found"}, 1
+
+    if not checkpoint_path:
+        checkpoint_path = str(Path(tempfile.gettempdir()) / "batch-pause-checkpoint.json")
+
+    # Ensure checkpoint exists by creating it if needed
+    if not Path(checkpoint_path).exists():
+        cp_data = {
+            "batch_id": "paused",
+            "status": "PAUSED",
+            "current_wo": None,
+            "phase": "before_any_mutation",
+            "baseline_before": _get_current_baseline(),
+            "last_safe_point": time.time(),
+            "paused_at": time.time(),
+            "resume_allowed": True,
+            "retry_count": 0,
+            "created_at": time.time(),
+            "last_updated": time.time(),
+        }
+        tmp = Path(checkpoint_path).with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cp_data, f, indent=2, ensure_ascii=False)
+        tmp.replace(Path(checkpoint_path))
+
+    # Delegate to resilience script
+    rc, stdout, stderr = _run_script(
+        resilience_path, ["--pause", checkpoint_path, "--json"], timeout=10
+    )
+    try:
+        result = json.loads(stdout)
+    except (json.JSONDecodeError, KeyError):
+        result = {"error": f"Failed to pause: {stderr}", "stdout": stdout}
+
+    result["pause_command"] = "batch-runner --pause"
+    result["note"] = "Batch paused. Will stop at next safe point. Use --resume to continue."
+    return result, rc
+
+
+def _cmd_resume(args):
+    """Resume batch from paused/checkpoint state.
+
+    Resume requires:
+    1. Worker reachable
+    2. Baseline matches checkpoint
+    3. Worktree clean
+    4. Status allows resume (PAUSED or WAITING_WORKER_RECOVERY)
+    """
+    checkpoint_path = _resolve_checkpoint_path(args)
+    script_dir = Path(__file__).parent
+    resilience_path = script_dir / "vibe_worker_resilience.py"
+
+    if not resilience_path.exists():
+        return {"error": "vibe_worker_resilience.py not found"}, 1
+
+    if not checkpoint_path:
+        return {"error": "No checkpoint found. Cannot resume without checkpoint."}, 1
+
+    # Delegate to resilience script for reconciliation
+    rc, stdout, stderr = _run_script(
+        resilience_path, ["--resume", checkpoint_path, "--json"], timeout=30
+    )
+    try:
+        result = json.loads(stdout)
+    except (json.JSONDecodeError, KeyError):
+        return {"error": f"Failed to resume: {stderr}", "stdout": stdout}, 1
+
+    result["resume_command"] = "batch-runner --resume"
+
+    if rc == 0:
+        result["note"] = "Reconcile passed. Ready to resume batch execution."
+        result["status"] = "READY_TO_RESUME"
+    else:
+        reason = result.get("reason", "unknown")
+        result["note"] = f"Resume blocked: {reason}"
+        result["status"] = f"BLOCKED_{reason.upper()}"
+
+    return result, rc
+
+
+def _execute_wo(wo, script_dir, repo_dir, repo_root, dry_run=False):
+    """Execute a single Work Order."""
     wo_id = wo.get("wo_id", "unknown")
     branch = wo.get("branch", "")
-    title = wo.get("title", f"batch: {wo_id}")
-    body = wo.get("body", "")
     changed_paths = wo.get("changed_paths", [])
     allowed_paths = wo.get("allowed_paths", changed_paths)
 
@@ -364,7 +414,6 @@ def _execute_wo(wo, script_dir, repo_dir, repo_root, dry_run=False):
         "blockers": [],
     }
 
-    # Policy gate: check changed_paths
     gate_ok, violations = _check_policy_gate(changed_paths, allowed_paths)
     if not gate_ok:
         result["status"] = "blocked"
@@ -397,7 +446,6 @@ def _cmd_run(args):
     repo = batch.get("repo", "")
     work_orders = batch.get("work_orders", [])
 
-    # Validate repo trust
     if repo != SELF_REPO:
         return {
             "error": f"Batch runner only supports self-repo ({SELF_REPO}), got: {repo}",
@@ -415,7 +463,6 @@ def _cmd_run(args):
     repo_root = script_dir.parent
     repo_dir = repo_root / ".git"
 
-    # Pre-flight worker reachability check
     script_dir = Path(__file__).parent
     cp_path = Path(tempfile.gettempdir()) / f"batch-{batch_id}-checkpoint.json"
     worker_ok, worker_info = _check_worker_and_wait(script_dir, cp_path)
@@ -429,6 +476,16 @@ def _cmd_run(args):
             "retry_interval_minutes": 5,
             "max_wait_minutes": 75,
             "recommendation": "Wait for worker recovery. Do not restart batch.",
+        }, 1
+
+    # Check if batch is paused
+    existing_cp = _load_checkpoint(str(cp_path))
+    if existing_cp and existing_cp.get("status") == "PAUSED":
+        return {
+            "batch_id": batch_id,
+            "status": "PAUSED",
+            "note": "Batch is paused. Use --resume to continue.",
+            "checkpoint": str(cp_path),
         }, 1
 
     batch_result = {
@@ -445,6 +502,14 @@ def _cmd_run(args):
     }
 
     for i, wo in enumerate(work_orders):
+        # Check pause flag at safe point (between WOs)
+        cp = _load_checkpoint(str(cp_path))
+        if cp and cp.get("status") == "PAUSED":
+            batch_result["status"] = "PAUSED"
+            batch_result["pause_at_wo"] = i
+            batch_result["note"] = "Batch paused at safe point"
+            break
+
         wo_id = wo.get("wo_id", f"wo-{i+1}")
         success, result, stop_reason = _execute_wo(
             wo, script_dir, repo_dir, repo_root, dry_run=args.dry_run
@@ -464,7 +529,6 @@ def _cmd_run(args):
     if batch_result["status"] == "running":
         batch_result["status"] = "completed"
 
-    # Enhanced report fields
     batch_result["work_order_count"] = len(work_orders)
     batch_result["completed_count"] = batch_result["completed"]
     batch_result["stopped_count"] = batch_result["failed"]
@@ -494,8 +558,9 @@ def _cmd_status(args):
         "repo_trust_level": "trusted-self",
         "max_batch_size": 5,
         "stop_conditions": STOP_CONDITIONS,
-        "supported_commands": ["run", "status", "batch-status", "batch-report"],
+        "supported_commands": ["run", "status", "batch-status", "batch-report", "pause", "resume"],
         "dry_run_supported": True,
+        "pause_resume_supported": True,
     }, 0
 
 
@@ -509,13 +574,15 @@ def build_parser():
     parser.add_argument("--json", action="store_true", dest="output_json", help="JSON output")
     parser.add_argument("--compact", action="store_true", help="Compact output")
     parser.add_argument("--dry-run", action="store_true", help="Validate only, no execution")
-    parser.add_argument("--checkpoint", metavar="FILE", help="Checkpoint file for status/report")
+    parser.add_argument("--checkpoint", metavar="FILE", help="Checkpoint file for status/report/pause/resume")
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--batch", metavar="FILE", help="Batch plan JSON file")
     group.add_argument("--status", action="store_true", help="Show runner status")
     group.add_argument("--batch-status", action="store_true", help="Show current batch status (read-only)")
     group.add_argument("--batch-report", action="store_true", help="Show detailed batch report (read-only)")
+    group.add_argument("--pause", action="store_true", help="Pause batch at safe point")
+    group.add_argument("--resume", action="store_true", help="Resume batch with reconcile")
 
     return parser
 
@@ -549,6 +616,10 @@ def main(argv=None):
         result, rc = _cmd_batch_status(args)
     elif args.batch_report:
         result, rc = _cmd_batch_report(args)
+    elif args.pause:
+        result, rc = _cmd_pause(args)
+    elif args.resume:
+        result, rc = _cmd_resume(args)
     else:
         parser.print_help()
         return 1

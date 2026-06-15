@@ -3514,6 +3514,196 @@ def _test_batch_status_with_checkpoint(script_dir):
     return {"passed": True, "message": "batch-status checkpoint read ok, batch_id=%s" % data.get("batch_id")}
 
 
+
+
+def _test_batch_pause_help(script_dir):
+    """Test batch-runner --help shows --pause option."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--help"])
+    combined = stdout + stderr
+    if "--pause" not in combined:
+        return {"passed": False, "message": "--pause not in help"}
+    if "--resume" not in combined:
+        return {"passed": False, "message": "--resume not in help"}
+    return {"passed": True, "message": "pause/resume in help"}
+
+
+def _test_batch_pause_creates_checkpoint(script_dir):
+    """Test --pause creates checkpoint with PAUSED status."""
+    import tempfile, json as json_mod, shutil
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-pause-")
+    cp_path = Path(tmpdir) / "pause-cp.json"
+    rc, stdout, stderr = _run_script(path, ["--pause", "--checkpoint", str(cp_path), "--json"])
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON: %s" % stdout[:100]}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    if data.get("status") != "PAUSED":
+        return {"passed": False, "message": "expected PAUSED, got %s" % data.get("status")}
+    if data.get("resume_allowed") is not True:
+        return {"passed": False, "message": "expected resume_allowed=True"}
+    return {"passed": True, "message": "pause creates PAUSED checkpoint"}
+
+
+def _test_batch_resume_checks_reconcile(script_dir):
+    """Test --resume performs reconciliation checks."""
+    import tempfile, json as json_mod, shutil
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-resume-")
+    cp_path = Path(tmpdir) / "resume-cp.json"
+    # Create a PAUSED checkpoint
+    cp_data = {
+        "batch_id": "test-resume",
+        "status": "PAUSED",
+        "current_wo": None,
+        "phase": "before_any_mutation",
+        "baseline_before": "nonexistent_sha_for_test",
+        "resume_allowed": True,
+        "retry_count": 0,
+    }
+    cp_path.write_text(json_mod.dumps(cp_data))
+    rc, stdout, stderr = _run_script(path, ["--resume", "--checkpoint", str(cp_path), "--json"])
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON: %s" % stdout[:100]}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    # Resume should fail because baseline doesn't match or worker unreachable
+    if rc == 0:
+        return {"passed": False, "message": "expected resume to fail (mismatch), got rc=0"}
+    if "BLOCKED" not in data.get("status", ""):
+        return {"passed": False, "message": "expected BLOCKED status, got %s" % data.get("status")}
+    return {"passed": True, "message": "resume correctly blocked: %s" % data.get("reason", "unknown")}
+
+
+def _test_batch_pause_router_bp(script_dir):
+    """Test batch-pause router alias (bp)."""
+    import tempfile, shutil
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-bp-")
+    cp_path = Path(tmpdir) / "bp-cp.json"
+    rc, stdout, stderr = _run_script(path, ["bp", "--checkpoint", str(cp_path), "--json"])
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from router"}
+    if data.get("status") != "PAUSED":
+        return {"passed": False, "message": "expected PAUSED, got %s" % data.get("status")}
+    return {"passed": True, "message": "bp->batch-pause ok"}
+
+
+def _test_batch_resume_router_bresume(script_dir):
+    """Test batch-resume router alias (bresume)."""
+    import tempfile, json as json_mod, shutil
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-br-")
+    cp_path = Path(tmpdir) / "br-cp.json"
+    cp_data = {
+        "batch_id": "test-bresume",
+        "status": "PAUSED",
+        "resume_allowed": True,
+        "phase": "before_any_mutation",
+        "baseline_before": "nonexistent_sha",
+    }
+    cp_path.write_text(json_mod.dumps(cp_data))
+    rc, stdout, stderr = _run_script(path, ["bresume", "--checkpoint", str(cp_path), "--json"])
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from router"}
+    if "resume_command" not in data:
+        return {"passed": False, "message": "missing resume_command field"}
+    return {"passed": True, "message": "bresume->batch-resume ok"}
+
+
+def _test_worker_resilience_pause(script_dir):
+    """Test worker resilience --pause creates PAUSED checkpoint."""
+    import tempfile, json as json_mod, shutil
+    path = script_dir / "vibe_worker_resilience.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-wr-pause-")
+    cp_path = Path(tmpdir) / "wr-pause-cp.json"
+    rc, stdout, stderr = _run_script(path, ["--pause", str(cp_path), "--json"])
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"passed": False, "message": "invalid JSON"}
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    if data.get("status") != "PAUSED":
+        return {"passed": False, "message": "expected PAUSED, got %s" % data.get("status")}
+    return {"passed": True, "message": "worker resilience pause ok"}
+
+
+def _test_worker_resilience_reconcile(script_dir):
+    """Test worker resilience --reconcile checks state."""
+    import tempfile, json as json_mod, shutil
+    path = script_dir / "vibe_worker_resilience.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-wr-recon-")
+    cp_path = Path(tmpdir) / "wr-recon-cp.json"
+    cp_data = {
+        "batch_id": "test-reconcile",
+        "status": "PAUSED",
+        "resume_allowed": True,
+        "phase": "before_any_mutation",
+        "baseline_before": "nonexistent",
+    }
+    cp_path.write_text(json_mod.dumps(cp_data))
+    rc, stdout, stderr = _run_script(path, ["--reconcile", str(cp_path), "--json"])
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if "reconcile_status" not in data:
+        return {"passed": False, "message": "missing reconcile_status"}
+    return {"passed": True, "message": "reconcile status=%s" % data.get("reconcile_status")}
+
+
+def _test_batch_runner_version_140(script_dir):
+    """Test batch runner version >= 1.4.0."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    content = path.read_text()
+    if 'VERSION = "1.4.0"' not in content:
+        return {"passed": False, "message": "expected version 1.4.0"}
+    return {"passed": True, "message": "batch runner v1.4.0"}
+
+
+def _test_worker_resilience_version_110(script_dir):
+    """Test worker resilience version >= 1.1.0."""
+    path = script_dir / "vibe_worker_resilience.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    content = path.read_text()
+    if 'VERSION = "1.1.0"' not in content:
+        return {"passed": False, "message": "expected version 1.1.0"}
+    return {"passed": True, "message": "worker resilience v1.1.0"}
+
+
 def _test_batch_runner_checkpoint_status_field(script_dir):
     """Test batch runner dry-run includes checkpoint_status."""
     import tempfile, json as json_mod
@@ -3803,6 +3993,32 @@ def run_tests(jobs_dir=None):
 
     # Test 83: batch-status with checkpoint
     tests.append(_run_test("batch_status_with_checkpoint", lambda: _test_batch_status_with_checkpoint(script_dir)))
+
+
+
+    # Test 84: batch-pause creates checkpoint
+    tests.append(_run_test("batch_pause_creates_checkpoint", lambda: _test_batch_pause_creates_checkpoint(script_dir)))
+
+    # Test 85: batch-resume reconciliation
+    tests.append(_run_test("batch_resume_checks_reconcile", lambda: _test_batch_resume_checks_reconcile(script_dir)))
+
+    # Test 86: batch-pause router alias (bp)
+    tests.append(_run_test("batch_pause_router_bp", lambda: _test_batch_pause_router_bp(script_dir)))
+
+    # Test 87: batch-resume router alias (bresume)
+    tests.append(_run_test("batch_resume_router_bresume", lambda: _test_batch_resume_router_bresume(script_dir)))
+
+    # Test 88: worker resilience pause
+    tests.append(_run_test("worker_resilience_pause", lambda: _test_worker_resilience_pause(script_dir)))
+
+    # Test 89: worker resilience reconcile
+    tests.append(_run_test("worker_resilience_reconcile", lambda: _test_worker_resilience_reconcile(script_dir)))
+
+    # Test 90: batch runner version 1.4.0
+    tests.append(_run_test("batch_runner_version_140", lambda: _test_batch_runner_version_140(script_dir)))
+
+    # Test 91: worker resilience version 1.1.0
+    tests.append(_run_test("worker_resilience_version_110", lambda: _test_worker_resilience_version_110(script_dir)))
 
     return tests
 
