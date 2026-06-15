@@ -70,6 +70,7 @@ COMMAND_SCRIPTS = {
     "exec-gate": "vibe_execution_gate.py",
     "safe-executor": "vibe_safe_executor.py",
     "adapter": "vibe_executor_adapter.py",
+    "loop-summary": "vibe_loop_summary.py",
     "transcript": "vibe_execution_transcript.py",
 }
 
@@ -106,6 +107,8 @@ ALIASES = {
     "se": "safe-executor",
     "plan": "safe-executor",
     "ac": "adapter",
+    "ls": "loop-summary",
+    "summary": "loop-summary",
     "txn": "transcript",
     "exec-txn": "transcript",
     "adapter-cap": "adapter",
@@ -134,6 +137,7 @@ COMMAND_DESCRIPTIONS = {
     "exec-gate": "Execution Gate - pre-execution admission check (ALLOW/REVIEW/BLOCK)",
     "safe-executor": "Safe Executor - generate execution plans (no real execution)",
     "adapter": "Executor Adapter Contract - query and validate adapter capabilities",
+    "loop-summary": "Autonomous Loop Summary - complete chain capability overview",
     "transcript": "Execution Transcript - append-only record of dry-run / noop sessions",
     "help": "Show this help message",
     "version": "Show version",
@@ -154,6 +158,7 @@ COMMAND_FLAGS = {
     "exec-gate": ["--json", "--registry-dir"],
     "safe-executor": ["--json", "--registry-dir"],
     "adapter": ["--json", "--adapter"],
+    "loop-summary": ["--json", "--compact"],
     "transcript": ["--json", "--transcript-dir"],
 }
 
