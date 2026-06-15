@@ -1030,3 +1030,24 @@ python3 scripts/test_golden_path_e2e.py --verbose
 ```
 
 All tests use temporary directories, no repo modifications.
+
+###  /  (Evidence Verifier)
+Verify execution evidence bundle integrity and consistency.
+
+**Usage:**
+```
+python3 scripts/vibe_evidence_verifier.py verify --evidence-dir /path --registry-dir /path --evidence-id ev-001
+python3 scripts/vibe_evidence_verifier.py verify --evidence-dir /path --registry-dir /path --evidence-id ev-001 --json
+```
+
+**Checks:**
+- Required fields present
+- Digest matches recomputed
+- Registry entry exists
+- Approval receipt exists
+- SHAs present
+- Smoke result
+- Job/audit status
+- Changed paths within scope
+
+**Verdicts:** PASS / WARN / FAIL
