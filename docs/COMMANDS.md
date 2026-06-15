@@ -1133,3 +1133,16 @@ python3 scripts/vibe_command_router.py rc plan --id my-wo --failure-type timeout
 ```
 
 **Failure types:** model_error, timeout, dirty_worktree, gate_blocked, wrapper_blocked, test_failed, partial_artifacts, evidence_mismatch
+
+### unfreeze-checklist / uc / unfreeze (Executor Unfreeze Checklist)
+Machine-readable unfreeze readiness check for levels 1-4. Read-only; does NOT unfreeze executor.
+
+**Usage:**
+```
+python3 scripts/vibe_executor_unfreeze_checklist.py --level 1 --json
+python3 scripts/vibe_executor_unfreeze_checklist.py --level 2 --compact
+python3 scripts/vibe_command_router.py uc --level 3 --json
+python3 scripts/vibe_command_router.py unfreeze --level 4 --compact
+```
+
+**Output:** required_approvals, required_green_checks, forbidden_actions, evidence_required, rollback_required, go_no_go

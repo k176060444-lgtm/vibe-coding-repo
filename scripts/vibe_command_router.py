@@ -74,6 +74,7 @@ COMMAND_SCRIPTS = {
     "sandbox": "vibe_executor_sandbox.py",
     "exec-control": "vibe_executor_control.py",
     "recovery": "vibe_executor_recovery.py",
+    "unfreeze-checklist": "vibe_executor_unfreeze_checklist.py",
     "transcript": "vibe_execution_transcript.py",
 }
 
@@ -114,6 +115,8 @@ ALIASES = {
     "sb": "sandbox",
     "ec": "exec-control",
     "rc": "recovery",
+    "uc": "unfreeze-checklist",
+    "unfreeze": "unfreeze-checklist",
     "recover": "recovery",
     "ctrl": "exec-control",
     "summary": "loop-summary",
@@ -149,6 +152,7 @@ COMMAND_DESCRIPTIONS = {
     "sandbox": "Executor Sandbox Contract - verify sandbox constraints",
     "exec-control": "Executor Control - timeout, cancel, and lifecycle management",
     "recovery": "Executor Recovery Plan - failure recovery/rollback plan generator",
+    "unfreeze-checklist": "Executor Unfreeze Checklist - machine-readable unfreeze readiness check",
     "transcript": "Execution Transcript - append-only record of dry-run / noop sessions",
     "help": "Show this help message",
     "version": "Show version",
@@ -173,6 +177,7 @@ COMMAND_FLAGS = {
     "sandbox": ["--json", "--base-sha"],
     "exec-control": ["--json"],
     "recovery": ["--json"],
+    "unfreeze-checklist": ["--json", "--compact", "--level"],
     "transcript": ["--json", "--transcript-dir"],
 }
 
