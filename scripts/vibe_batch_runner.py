@@ -38,13 +38,14 @@ Constraints:
 
 import argparse
 import json
+import tempfile
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
 
@@ -164,6 +165,46 @@ def _run_post_merge_checks(script_dir, repo_root, wo_id):
     return True, results, None
 
 
+
+
+def _check_worker_and_wait(script_dir, checkpoint_path):
+    """Check worker reachability; if unreachable, create checkpoint.
+
+    Returns (reachable: bool, info: dict).
+    """
+    resilience_path = script_dir / "vibe_worker_resilience.py"
+    if not resilience_path.exists():
+        return True, {}
+    cmd = [sys.executable, str(resilience_path), "--check", "--json"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+        data = json.loads(result.stdout)
+    except Exception:
+        return True, {}
+    if data.get("reachable"):
+        return True, data
+    # Unreachable — create checkpoint
+    cp_cmd = [sys.executable, str(resilience_path), "--checkpoint", str(checkpoint_path), "--json"]
+    try:
+        subprocess.run(cp_cmd, capture_output=True, text=True, timeout=10)
+    except Exception:
+        pass
+    return False, data
+
+
+def _generate_status_report(script_dir, checkpoint_path):
+    """Generate a 15-minute status report."""
+    resilience_path = script_dir / "vibe_worker_resilience.py"
+    if not resilience_path.exists():
+        return None
+    cmd = [sys.executable, str(resilience_path), "--status-report", str(checkpoint_path), "--json"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        return json.loads(result.stdout)
+    except Exception:
+        return None
+
+
 def _execute_wo(wo, script_dir, repo_dir, repo_root, dry_run=False):
     """Execute a single Work Order.
 
@@ -248,6 +289,22 @@ def _cmd_run(args):
     repo_root = script_dir.parent
     repo_dir = repo_root / ".git"
 
+    # Pre-flight worker reachability check
+    script_dir = Path(__file__).parent
+    cp_path = Path(tempfile.gettempdir()) / f"batch-{batch_id}-checkpoint.json"
+    worker_ok, worker_info = _check_worker_and_wait(script_dir, cp_path)
+    if not worker_ok:
+        return {
+            "batch_id": batch_id,
+            "status": "WAITING_WORKER_RECOVERY",
+            "worker_status": worker_info.get("worker_status", "unknown"),
+            "worker_error": worker_info.get("worker_error"),
+            "checkpoint": str(cp_path),
+            "retry_interval_minutes": 5,
+            "max_wait_minutes": 75,
+            "recommendation": "Wait for worker recovery. Do not restart batch.",
+        }, 1
+
     batch_result = {
         "batch_id": batch_id,
         "repo": repo,
@@ -258,6 +315,7 @@ def _cmd_run(args):
         "stop_reason": None,
         "completed": 0,
         "failed": 0,
+        "worker_status": worker_info.get("worker_status", "reachable"),
     }
 
     for i, wo in enumerate(work_orders):
