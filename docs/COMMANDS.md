@@ -969,3 +969,28 @@ python3 scripts/vibe_command_router.py ev create --id my-wo --base-sha abc123 --
 python3 scripts/vibe_command_router.py evidence list --json
 python3 scripts/vibe_command_router.py ev show --evidence-id ev-001
 ```
+
+
+### `execution-gate` / `gate` / `ready-run` (Execution Gate)
+Pre-execution admission check for Work Orders.
+
+**Usage:**
+```
+python3 scripts/vibe_execution_gate.py check --id my-wo --current-main-sha abc123
+python3 scripts/vibe_execution_gate.py check --id my-wo --current-main-sha abc123 --json
+```
+
+**Checks:**
+- Registry status is approved
+- Approval receipt exists
+- Base SHA matches current main
+- Risk level and human approval
+- Stop conditions
+- Allowed paths not empty
+- Forbidden actions (high-risk detection)
+- Audit tainted lock
+
+**Verdicts:**
+- **ALLOW** — all checks passed, safe to execute
+- **REVIEW** — warnings found, human review recommended
+- **BLOCK** — critical issues found, must not execute
