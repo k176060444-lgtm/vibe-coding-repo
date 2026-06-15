@@ -522,6 +522,8 @@ The smoke suite now covers 16 tests:
 - 21: Dashboard - text output
 - 22: Dashboard - JSON output
 - 23: Dashboard - aliases (dash, status-page)
+- 24: Daily Report - text
+- 25: Daily Report - JSON
 
 
 ## Release Notes / Progress Report
@@ -674,3 +676,30 @@ $ python scripts/vibe_report_export.py --kind all --output-dir /tmp/reports --js
 | `--output-dir` | Directory to write report files |
 | `--json` | JSON output |
 | `--dry-run` | Preview without writing |
+
+
+## Operator Daily Report
+
+One-command daily status summary.
+
+```
+$ python scripts/vibe_daily_report.py --compact
+========================================
+  Daily Report — 2026-06-15
+========================================
+  Main:       69385eb90b86
+  Router:     v2.3
+  Smoke:      PASS (23/23)
+  Health:     PASS
+  Queue:      queue_clean (jobs=26, actions=0, warnings=0)
+----------------------------------------
+  Recent PRs:
+    #45 wo-code-report-export-001
+    #44 wo-code-demo-scenario-pack-001
+    ...
+----------------------------------------
+  Audit Lock: audit_tainted (push_allowed=False)
+----------------------------------------
+  Next: queue_clean
+========================================
+```

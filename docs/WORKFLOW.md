@@ -598,3 +598,23 @@ python scripts/vibe_report_export.py --kind dashboard --dry-run
 ```
 
 Writes only to --output-dir. Never modifies repo source. Never exports secrets.
+
+
+## Operator Daily Report (v1)
+
+One-command daily status:
+
+```
+python scripts/vibe_daily_report.py --compact
+python scripts/vibe_daily_report.py --json
+```
+
+Includes: main SHA, router version, smoke/health status, queue status, recent PRs, audit lock, next action.
+
+## Smoke Suite v5 (25 tests)
+
+Daily report smoke coverage added:
+- 24: Daily Report text output
+- 25: Daily Report JSON with all required fields
+
+Run: `python scripts/test_toolchain_smoke.py`
