@@ -2828,6 +2828,195 @@ def _test_repo_trust_compact_output(script_dir):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+
+
+def _test_trusted_loop_check(script_dir):
+    """Test trusted self-loop --check returns PASS."""
+    path = script_dir / "vibe_trusted_self_loop.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--check", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON: %s" % stdout[:100]}
+    if data.get("repo_trust_level") != "trusted-self":
+        return {"passed": False, "message": "expected trusted-self, got %s" % data.get("repo_trust_level")}
+    if data.get("requires_human_approval"):
+        return {"passed": False, "message": "should not require human approval"}
+    return {"passed": True, "message": "trusted-loop check verdict=%s" % data.get("policy_verdict")}
+
+
+def _test_trusted_loop_contract(script_dir):
+    """Test trusted self-loop --contract outputs spec."""
+    path = script_dir / "vibe_trusted_self_loop.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--contract", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data.get("repo_trust_level") != "trusted-self":
+        return {"passed": False, "message": "expected trusted-self"}
+    if "auto_loop_steps" not in data:
+        return {"passed": False, "message": "missing auto_loop_steps"}
+    if len(data["auto_loop_steps"]) < 8:
+        return {"passed": False, "message": "too few steps: %d" % len(data["auto_loop_steps"])}
+    return {"passed": True, "message": "contract has %d steps" % len(data["auto_loop_steps"])}
+
+
+def _test_trusted_loop_validate_self_repo(script_dir):
+    """Test trusted self-loop validates self-repo work order as PASS."""
+    import tempfile, json as json_mod
+    path = script_dir / "vibe_trusted_self_loop.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-loop-")
+    wo_path = pathlib.Path(tmpdir) / "wo.json"
+    wo = {
+        "repo": "k176060444-lgtm/vibe-coding-repo",
+        "branch": "main",
+        "action": "push",
+        "changed_paths": ["scripts/test.py", "docs/README.md"],
+    }
+    wo_path.write_text(json_mod.dumps(wo))
+    rc, stdout, stderr = _run_script(path, ["--validate", str(wo_path), "--json"])
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data.get("policy_verdict") != "PASS":
+        return {"passed": False, "message": "expected PASS, got %s: %s" % (data.get("policy_verdict"), data.get("blockers"))}
+    return {"passed": True, "message": "self-repo validate PASS"}
+
+
+def _test_trusted_loop_validate_external_block(script_dir):
+    """Test trusted self-loop blocks external repo without approval."""
+    import tempfile, json as json_mod
+    path = script_dir / "vibe_trusted_self_loop.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-loop-")
+    wo_path = pathlib.Path(tmpdir) / "wo.json"
+    wo = {
+        "repo": "other-org/other-repo",
+        "branch": "main",
+        "action": "push",
+        "changed_paths": ["src/main.py"],
+        "status": "pending",
+    }
+    wo_path.write_text(json_mod.dumps(wo))
+    rc, stdout, stderr = _run_script(path, ["--validate", str(wo_path), "--json"])
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data.get("policy_verdict") != "BLOCK":
+        return {"passed": False, "message": "expected BLOCK, got %s" % data.get("policy_verdict")}
+    return {"passed": True, "message": "external repo correctly blocked"}
+
+
+def _test_trusted_loop_forbidden_path_block(script_dir):
+    """Test trusted self-loop blocks forbidden paths."""
+    import tempfile, json as json_mod
+    path = script_dir / "vibe_trusted_self_loop.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-loop-")
+    wo_path = pathlib.Path(tmpdir) / "wo.json"
+    wo = {
+        "repo": "k176060444-lgtm/vibe-coding-repo",
+        "branch": "main",
+        "action": "push",
+        "changed_paths": [".github/workflows/deploy.yml"],
+    }
+    wo_path.write_text(json_mod.dumps(wo))
+    rc, stdout, stderr = _run_script(path, ["--validate", str(wo_path), "--json"])
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data.get("policy_verdict") != "BLOCK":
+        return {"passed": False, "message": "expected BLOCK for forbidden path"}
+    return {"passed": True, "message": "forbidden path correctly blocked"}
+
+
+def _test_trusted_loop_force_block(script_dir):
+    """Test trusted self-loop blocks force push."""
+    import tempfile, json as json_mod
+    path = script_dir / "vibe_trusted_self_loop.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-loop-")
+    wo_path = pathlib.Path(tmpdir) / "wo.json"
+    wo = {
+        "repo": "k176060444-lgtm/vibe-coding-repo",
+        "branch": "main",
+        "action": "push --force",
+        "changed_paths": ["scripts/test.py"],
+    }
+    wo_path.write_text(json_mod.dumps(wo))
+    rc, stdout, stderr = _run_script(path, ["--validate", str(wo_path), "--json"])
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data.get("policy_verdict") != "BLOCK":
+        return {"passed": False, "message": "expected BLOCK for force push"}
+    return {"passed": True, "message": "force push correctly blocked"}
+
+
+def _test_trusted_loop_router(script_dir):
+    """Test trusted-loop router alias (tl, auto-loop, loop)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+    rc, stdout, stderr = _run_script(path, ["tl", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from router"}
+    if "repo_trust_level" not in data:
+        return {"passed": False, "message": "missing repo_trust_level"}
+    return {"passed": True, "message": "tl->trusted-loop ok"}
+
+
+def _test_wrapper_merge_required(script_dir):
+    """Test that vibe_autonomous_merge.py exists and is the only merge path."""
+    path = script_dir / "vibe_autonomous_merge.py"
+    if not path.exists():
+        return {"passed": False, "message": "wrapper not found"}
+    # Check it has merge logic
+    content = path.read_text()
+    if "merge" not in content.lower():
+        return {"passed": False, "message": "wrapper missing merge logic"}
+    return {"passed": True, "message": "wrapper merge available"}
+
+
+def _test_bare_gh_merge_forbidden(script_dir):
+    """Test that docs enforce wrapper-only merge (no bare gh pr merge)."""
+    workflow = script_dir.parent / "docs" / "WORKFLOW.md"
+    if not workflow.exists():
+        return {"passed": False, "message": "WORKFLOW.md not found"}
+    content = workflow.read_text()
+    # Should mention wrapper requirement
+    if "wrapper" not in content.lower() and "vibe_autonomous_merge" not in content:
+        return {"passed": False, "message": "WORKFLOW.md does not mention wrapper"}
+    return {"passed": True, "message": "wrapper merge documented"}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
