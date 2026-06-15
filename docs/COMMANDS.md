@@ -883,3 +883,28 @@ python3 scripts/vibe_workorder_registry.py update-status --id my-wo --status pac
 - Requires --reason for audit trail
 - Append-only history with SHA256 digest
 - JSON output with --json flag
+
+
+### `approval-receipt` / `receipt` (Approval Receipt)
+Generate local approval receipts for Work Orders.
+
+**Subcommands:**
+- `create --id ID --base-sha SHA --package-digest DIGEST --approver LABEL --approval-text TEXT` — Create receipt
+- `list` — List all receipts
+- `show --receipt-id ID` — Show receipt details
+
+**Options:**
+- `--registry-dir DIR` — Registry directory (default: VIBEDEV_REGISTRY_DIR env)
+- `--json` — JSON output
+
+**Examples:**
+```
+python3 scripts/vibe_approval_receipt.py create --id my-wo --base-sha abc123 --package-digest def456 --approver "human" --approval-text "Approved"
+python3 scripts/vibe_approval_receipt.py list --json
+python3 scripts/vibe_approval_receipt.py show --receipt-id receipt-001
+```
+
+**Features:**
+- SHA256 digest of receipt data
+- Includes requires_human_approval, approved_scope, stop_conditions from workorder
+- Does NOT execute Work Orders
