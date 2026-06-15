@@ -1713,6 +1713,35 @@ def _test_recovery_classify(script_dir):
         return {"passed": False, "message": "wrong type: %s" % data.get("classified_type")}
     return {"passed": True, "message": "classify OK: %s" % data["classified_type"]}
 
+
+def _test_unfreeze_checklist(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_executor_unfreeze_checklist.py", ["--level", "1", "--compact"])
+    if rc != 0:
+        return {"passed": False, "message": "exit %d" % rc}
+    if "Level 1" not in out:
+        return {"passed": False, "message": "missing Level 1"}
+    return {"passed": True, "message": "unfreeze checklist level 1 OK"}
+
+def _test_unfreeze_checklist_json(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_executor_unfreeze_checklist.py", ["--level", "1", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit %d" % rc}
+    data = json.loads(out)
+    if data.get("level") != 1:
+        return {"passed": False, "message": "wrong level"}
+    if "required_approvals" not in data:
+        return {"passed": False, "message": "missing required_approvals"}
+    return {"passed": True, "message": "unfreeze checklist JSON OK"}
+
+def _test_unfreeze_checklist_router(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_command_router.py", ["uc", "--level", "2", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit %d" % rc}
+    data = json.loads(out)
+    if data.get("level") != 2:
+        return {"passed": False, "message": "wrong level"}
+    return {"passed": True, "message": "router unfreeze-checklist OK"}
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -1905,6 +1934,15 @@ def run_tests(jobs_dir=None):
 
     # Test 61: Recovery classify
     tests.append(_run_test("recovery_classify", lambda: _test_recovery_classify(script_dir)))
+
+    # Test 62: Unfreeze checklist
+    tests.append(_run_test("unfreeze_checklist", lambda: _test_unfreeze_checklist(script_dir)))
+
+    # Test 63: Unfreeze checklist JSON
+    tests.append(_run_test("unfreeze_checklist_json", lambda: _test_unfreeze_checklist_json(script_dir)))
+
+    # Test 64: Unfreeze checklist router
+    tests.append(_run_test("unfreeze_checklist_router", lambda: _test_unfreeze_checklist_router(script_dir)))
     return tests
 
 
