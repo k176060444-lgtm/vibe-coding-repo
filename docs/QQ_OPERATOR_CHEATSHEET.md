@@ -277,3 +277,27 @@ babort --checkpoint cp.json --json   # 立即终止（不做 destructive cleanup
 **trusted self repo 可安全暂停/恢复；cancel 仅 mutation 前；abort 不做 destructive cleanup；external repo 写操作必须 approve。**
 
 *V1.6 Operator Control Plane — 2026-06-16*
+
+## V1.7 Fast Batch Validation
+
+### 使用 fast 模式
+```
+br --batch plan.json --validation-mode fast --json   # 快速模式
+br --batch plan.json --validation-mode full --json    # 完整模式
+br --status --json                                     # 查看支持的模式
+```
+
+### Fast 模式说明
+- 每个 WO 后运行 7 项快速检查（安全边界不可省略）
+- 完整 smoke/QG/v1-freeze 延后到 batch 末尾
+- 最终验证失败 → BLOCK，不允许 freeze
+
+### 禁止 fast 模式的场景
+- 外部仓库（必须 full）
+- 高风险操作（必须 full）
+- PR #40457（必须 full + 人工 approve）
+
+### V1.7 一句话原则
+**质量验证可合并，安全边界检查不可合并。fast 模式：每 WO 快速检查，batch 末尾完整验证。**
+
+*V1.7 Fast Batch Validation Mode — 2026-06-16*

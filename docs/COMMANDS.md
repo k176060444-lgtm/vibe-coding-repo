@@ -1320,3 +1320,21 @@ Enhanced batch report includes:
 - `stop_reason`, `per_wo_prs`, `per_wo_changed_paths`
 - `checkpoint_status`, `resume_status`
 - `pause_resume_supported`, `cancel_abort_supported`
+
+### batch-runner v1.6.0 — Fast Validation Mode
+
+```bash
+python3 scripts/vibe_batch_runner.py --batch plan.json --validation-mode fast --json
+python3 scripts/vibe_batch_runner.py --batch plan.json --validation-mode full --json
+python3 scripts/vibe_batch_runner.py --status --json  # shows validation_modes, quick_checks
+```
+
+**Validation modes:** full, fast, final-only (default: auto-detect)
+
+**Quick checks (per-WO in fast mode):**
+- git_status_clean, changed_paths_allowlist, forbidden_paths
+- wrapper_merge_result, baseline_refresh, pr_changed_paths, token_redaction_scan
+
+**Output fields:** validation_mode, per_wo_quick_checks, deferred_checks, final_full_validation_required, final_full_validation_result
+
+**Safety rule:** Quick checks fail → stop batch. Final full validation fail → BLOCK, no freeze.
