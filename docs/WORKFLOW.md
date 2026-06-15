@@ -937,3 +937,6 @@ See docs/EXECUTOR_BOUNDARY_FREEZE.md for frozen executor boundaries and unfreeze
 
 ## Real Feature Demo
 See docs/REAL_FEATURE_DEMO.md for a complete walkthrough from natural language to verified execution.
+
+## Executor Unfreeze Plan
+See docs/EXECUTOR_UNFREEZE_PLAN.md for graduated unfreeze levels (0-4).
