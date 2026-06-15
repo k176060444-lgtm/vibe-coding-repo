@@ -659,6 +659,185 @@ def _test_preflight_router(script_dir):
     return {"passed": True, "message": "preflight chain works"}
 
 
+
+def _test_registry_basic(script_dir):
+    """Test registry basic operations: register, list, show."""
+    import subprocess
+    import tempfile
+    import shutil
+
+    registry_script = script_dir / "vibe_workorder_registry.py"
+    if not registry_script.exists():
+        return {"passed": False, "message": "registry script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="registry_smoke_")
+
+    try:
+        # Test register
+        cmd = [sys.executable, str(registry_script), "register",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-001",
+               "--title", "Test Work Order",
+               "--risk-level", "low",
+               "--base-sha", "abc123"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "register failed: %s" % result.stderr}
+
+        # Test list
+        cmd = [sys.executable, str(registry_script), "list",
+               "--registry-dir", tmpdir]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "list failed: %s" % result.stderr}
+
+        if "test-wo-001" not in result.stdout:
+            return {"passed": False, "message": "registered entry not in list output"}
+
+        # Test show
+        cmd = [sys.executable, str(registry_script), "show",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-001"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "show failed: %s" % result.stderr}
+
+        if "Test Work Order" not in result.stdout:
+            return {"passed": False, "message": "title not in show output"}
+
+        return {"passed": True, "message": "register/list/show work"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_registry_json(script_dir):
+    """Test registry JSON output."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    registry_script = script_dir / "vibe_workorder_registry.py"
+    if not registry_script.exists():
+        return {"passed": False, "message": "registry script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="registry_smoke_")
+
+    try:
+        # Register entry
+        cmd = [sys.executable, str(registry_script), "register",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-json",
+               "--title", "JSON Test",
+               "--risk-level", "medium",
+               "--status", "validated"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "register failed"}
+
+        # Test list --json
+        cmd = [sys.executable, str(registry_script), "list",
+               "--registry-dir", tmpdir, "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "list --json failed"}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON output"}
+
+        if "entries" not in data:
+            return {"passed": False, "message": "missing entries field"}
+
+        if len(data["entries"]) != 1:
+            return {"passed": False, "message": "expected 1 entry, got %d" % len(data["entries"])}
+
+        entry = data["entries"][0]
+        if entry.get("workorder_id") != "test-wo-json":
+            return {"passed": False, "message": "wrong workorder_id"}
+        if entry.get("risk_level") != "medium":
+            return {"passed": False, "message": "wrong risk_level"}
+        if entry.get("status") != "validated":
+            return {"passed": False, "message": "wrong status"}
+
+        return {"passed": True, "message": "JSON output valid, fields correct"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_registry_router(script_dir):
+    """Test registry via command router."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    router_script = script_dir / "vibe_command_router.py"
+    if not router_script.exists():
+        return {"passed": False, "message": "router script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="registry_smoke_")
+
+    try:
+        # Register via router
+        cmd = [sys.executable, str(router_script), "reg", "register",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-router",
+               "--title", "Router Test"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "router register failed: %s" % result.stderr}
+
+        # List via router
+        cmd = [sys.executable, str(router_script), "reg", "list",
+               "--registry-dir", tmpdir, "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "router list failed"}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON from router"}
+
+        if len(data.get("entries", [])) != 1:
+            return {"passed": False, "message": "expected 1 entry via router"}
+
+        # Show via router alias wo-show
+        cmd = [sys.executable, str(router_script), "reg", "show",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-router", "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "wo-show failed"}
+
+        return {"passed": True, "message": "reg/wo-show aliases work"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_registry_readonly(script_dir):
+    """Test registry is read-only by default."""
+    import subprocess
+
+    registry_script = script_dir / "vibe_workorder_registry.py"
+    if not registry_script.exists():
+        return {"passed": False, "message": "registry script not found"}
+
+    # Try list without --registry-dir (should fail gracefully)
+    cmd = [sys.executable, str(registry_script), "list"]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+    if result.returncode == 0:
+        return {"passed": False, "message": "list without --registry-dir should fail"}
+
+    if "ERROR" not in result.stderr and "ERROR" not in result.stdout:
+        return {"passed": False, "message": "missing error message"}
+
+    return {"passed": True, "message": "graceful failure without registry dir"}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -752,6 +931,18 @@ def run_tests(jobs_dir=None):
     # Test 28: Preflight - router
     tests.append(_run_test("preflight_router", lambda: _test_preflight_router(script_dir)))
     
+
+    # Test 29: Registry - basic operations
+    tests.append(_run_test("registry_basic", lambda: _test_registry_basic(script_dir)))
+    
+    # Test 30: Registry - JSON output
+    tests.append(_run_test("registry_json", lambda: _test_registry_json(script_dir)))
+    
+    # Test 31: Registry - router integration
+    tests.append(_run_test("registry_router", lambda: _test_registry_router(script_dir)))
+    
+    # Test 32: Registry - read-only behavior
+    tests.append(_run_test("registry_readonly", lambda: _test_registry_readonly(script_dir)))
     return tests
 
 

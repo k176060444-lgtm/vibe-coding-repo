@@ -29,7 +29,7 @@ VALID_STATUSES = {"draft", "validated", "packaged", "approved", "executed", "blo
 
 def _registry_dir_path(args):
     """Resolve registry directory from args or environment."""
-    if args.registry_dir:
+    if hasattr(args, 'registry_dir') and args.registry_dir:
         return Path(args.registry_dir)
     env_dir = os.environ.get("VIBEDEV_REGISTRY_DIR")
     if env_dir:
@@ -116,7 +116,8 @@ def cmd_register(args):
 
     _save_entry(registry_dir, entry)
 
-    if args.json:
+    use_json = getattr(args, 'json', False)
+    if use_json:
         print(json.dumps({"action": "register", "entry": entry}, indent=2, ensure_ascii=False))
     else:
         print(f"Registered: {workorder_id}")
@@ -136,10 +137,11 @@ def cmd_list(args):
     entries = _list_entries(registry_dir)
 
     # Filter by status if specified
-    if args.filter_status:
+    if hasattr(args, 'filter_status') and args.filter_status:
         entries = [e for e in entries if e.get("status") == args.filter_status]
 
-    if args.json:
+    use_json = getattr(args, 'json', False)
+    if use_json:
         output = {
             "action": "list",
             "registry_dir": str(registry_dir),
@@ -177,7 +179,8 @@ def cmd_show(args):
         print(f"ERROR: Entry '{workorder_id}' not found", file=sys.stderr)
         return 1
 
-    if args.json:
+    use_json = getattr(args, 'json', False)
+    if use_json:
         output = {
             "action": "show",
             "entry": entry,
@@ -206,7 +209,6 @@ def build_parser():
                "Env: VIBEDEV_REGISTRY_DIR sets default registry directory"
     )
     parser.add_argument("--version", action="version", version=f"vibe_workorder_registry {VERSION}")
-    parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     sub = parser.add_subparsers(dest="command")
 
@@ -220,16 +222,19 @@ def build_parser():
     reg.add_argument("--source", help="Source of the work order")
     reg.add_argument("--requires-human-approval", action="store_true", default=False)
     reg.add_argument("--registry-dir", help="Registry directory")
+    reg.add_argument("--json", action="store_true", help="Output as JSON")
 
     # list
     ls = sub.add_parser("list", help="List all registry entries")
     ls.add_argument("--filter-status", choices=sorted(VALID_STATUSES), help="Filter by status")
     ls.add_argument("--registry-dir", help="Registry directory")
+    ls.add_argument("--json", action="store_true", help="Output as JSON")
 
     # show
     sh = sub.add_parser("show", help="Show details of a specific entry")
     sh.add_argument("--id", required=True, help="Work order ID")
     sh.add_argument("--registry-dir", help="Registry directory")
+    sh.add_argument("--json", action="store_true", help="Output as JSON")
 
     return parser
 
@@ -241,14 +246,6 @@ def main(argv=None):
     if not args.command:
         parser.print_help()
         return 0
-
-    # Resolve registry_dir from args
-    registry_dir = getattr(args, "registry_dir", None)
-    if registry_dir:
-        registry_dir = Path(registry_dir)
-
-    # Also set on args for subcommands
-    args.registry_dir = registry_dir
 
     if args.command == "register":
         return cmd_register(args)
