@@ -3,21 +3,25 @@
 
 Reads an approved action from the approval directory, validates all
 constraints, and performs token-aware preflight before push.
-Current phase: PREFLIGHT + DRY-RUN + REAL PUSH (to test branches only).
+
+Repo Trust Policy:
+  - Self-repo (k176060444-lgtm/vibe-coding-repo): low-risk push allowed
+    WITHOUT human approval, subject to policy gate (forbidden paths,
+    no force push, no secrets/CI/workflow/provider/SSH).
+  - External repos: push REQUIRES human approval via privileged action.
+    Fetch/diff/merge dry-run allowed without token or approval.
 
 Usage:
     python3 scripts/vibe_privileged_push.py \\
         --action-id <id> [--approval-dir <dir>] [--json] [--compact]
-
     python3 scripts/vibe_privileged_push.py --list-approved [--json]
+    python3 scripts/vibe_privileged_push.py --token-preflight [--json]
     python3 scripts/vibe_privileged_push.py --action-id <id> --push [--json]
+    python3 scripts/vibe_privileged_push.py --action-id <id> --dry-run-push [--json]
 
 Constraints:
-    - Token only read after action is approved.
+    - Token only read when policy allows push/PR-write.
     - Token NEVER output to stdout/stderr/log/report.
-    - Validates: repo, branch, changed_paths, forbidden_actions,
-      no_force_push, no_pr_merge, no_secrets/CI/workflow/provider/SSH.
-    - Real push only to self-repo test branches.
     - Standard library only, no external dependencies.
     - No IO on import.
 """
@@ -31,13 +35,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
-# Self-repo: the only repo allowed for real privileged push
+# ── Repo Trust Policy ──────────────────────────────────────────────────
+# Self-repo: VibeCoding dedicated work repo — low-risk push auto-allowed
 SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
 
-# Test branch prefix: only branches matching this prefix are allowed
-TEST_BRANCH_PREFIX = "privileged-smoke/"
+# Self-repo: any branch allowed for push (not just test prefix)
+# External repos: all branches require human approval
+# ────────────────────────────────────────────────────────────────────────
 
 # Token file path
 DEFAULT_TOKEN_FILE = "/home/vibeworker/.vibedev/secrets/github_privileged_token"
@@ -125,20 +131,17 @@ def _check_token_file(token_path):
         details["error"] = f"stat failed: {e}"
         return False, details
 
-    # Check size > 20
     details["size"] = st.st_size
     if st.st_size <= 20:
         details["error"] = "token file too small (size <= 20)"
         return False, details
 
-    # Check mode is 600 (owner read/write only)
     mode = stat.S_IMODE(st.st_mode)
     details["mode"] = oct(mode)
     if mode != 0o600:
         details["error"] = f"token file mode {oct(mode)}, expected 0o600"
         return False, details
 
-    # Check owner (on Linux, st_uid)
     try:
         import pwd
         owner_info = pwd.getpwuid(st.st_uid)
@@ -147,64 +150,93 @@ def _check_token_file(token_path):
             details["error"] = f"token file owner={owner_info.pw_name}, expected=vibeworker"
             return False, details
     except (ImportError, KeyError):
-        # pwd module not available (Windows) or uid not found
         details["owner_check"] = "skipped (pwd unavailable)"
 
     details["error"] = None
     return True, details
 
 
+def _classify_repo_trust(repo):
+    """Classify repo trust level.
+
+    Returns:
+        trust_level: "trusted-self" or "protected-external"
+        requires_human_approval: bool
+    """
+    if repo == SELF_REPO:
+        return "trusted-self", False
+    return "protected-external", True
+
+
 def _validate_push(record):
     """Validate all constraints for a privileged push.
+
+    Applies repo trust policy:
+    - Self-repo: low-risk push allowed without human approval
+    - External repos: require human approval (status=approved)
 
     Returns (would_push: bool, blockers: list, warnings: list).
     """
     blockers = []
     warnings = []
 
-    # 1. Status must be approved
-    if record.get("status") != "approved":
-        blockers.append(f"status={record.get('status')}, expected=approved")
+    repo = record.get("repo", "")
+    trust_level, requires_human_approval = _classify_repo_trust(repo)
+
+    # 1. For external repos: status must be approved
+    if requires_human_approval:
+        if record.get("status") != "approved":
+            blockers.append(
+                f"external repo '{repo}' requires human approval "
+                f"(status={record.get('status')}, expected=approved)"
+            )
+    else:
+        # Self-repo: status can be pending (auto-allow) or approved
+        status = record.get("status")
+        if status not in ("pending", "approved"):
+            blockers.append(f"status={status}, expected=pending or approved")
 
     # 2. Required fields completeness
-    required = ["action_id", "repo", "branch", "action", "base_sha", "digest"]
+    required = ["action_id", "repo", "branch", "action", "base_sha"]
     missing = [f for f in required if not record.get(f)]
     if missing:
         blockers.append(f"incomplete fields: {missing}")
+    # digest only required for external repos
+    if requires_human_approval and not record.get("digest"):
+        blockers.append("incomplete fields: ['digest']")
 
-    # 3. no_force_push invariant
+    # 3. no_force_push invariant (always enforced)
     if not record.get("no_force_push", True):
         blockers.append("no_force_push=false (force push is forbidden)")
 
-    # 4. no_pr_merge invariant
+    # 4. no_pr_merge invariant (always enforced)
     if not record.get("no_pr_merge", True):
         blockers.append("no_pr_merge=false (PR merge via privileged push is forbidden)")
 
-    # 5. no_secrets_ci_workflow_provider_ssh
+    # 5. no_secrets_ci_workflow_provider_ssh (always enforced)
     if not record.get("no_secrets_ci_workflow_provider_ssh", True):
         blockers.append("no_secrets_ci_workflow_provider_ssh=false")
 
-    # 6. Check changed_paths against forbidden paths
+    # 6. Check changed_paths against forbidden paths (always enforced)
     changed_paths = record.get("changed_paths", [])
     for cp in changed_paths:
         is_forbidden, reason = _check_path_forbidden(cp)
         if is_forbidden:
             blockers.append(f"changed_path '{cp}': {reason}")
 
-    # 7. Check forbidden_actions
+    # 7. Check forbidden_actions (always enforced)
     is_forbidden, reason = _check_forbidden_actions(record)
     if is_forbidden:
         blockers.append(f"forbidden_action: {reason}")
 
-    # 8. Repo restriction: only self-repo for real push
-    repo = record.get("repo", "")
-    if repo != SELF_REPO:
-        blockers.append(f"repo '{repo}' is not self-repo ({SELF_REPO}); only self-repo privileged push allowed")
+    # 8. No branch restriction for self-repo (any branch allowed)
+    # External repos: no branch restriction (but require approval)
 
-    # 9. Branch restriction: only test branch prefix for real push
-    branch = record.get("branch", "")
-    if not branch.startswith(TEST_BRANCH_PREFIX):
-        blockers.append(f"branch '{branch}' does not start with '{TEST_BRANCH_PREFIX}'; only test branches allowed")
+    # 9. Add trust info to warnings
+    if trust_level == "trusted-self":
+        warnings.append(f"repo trust: {trust_level} — push auto-allowed (no human approval required)")
+    else:
+        warnings.append(f"repo trust: {trust_level} — push requires human approval")
 
     would_push = len(blockers) == 0
     return would_push, blockers, warnings
@@ -227,6 +259,8 @@ def _execute_push(record, token_path, dry_run=False):
     result["would_push"] = would_push
     result["blockers"] = blockers
     result["warnings"] = warnings
+    result["repo_trust_level"], result["requires_human_approval"] = _classify_repo_trust(record.get("repo", ""))
+
     if not would_push:
         result["push_executed"] = False
         return False, result
@@ -256,7 +290,6 @@ def _execute_push(record, token_path, dry_run=False):
 
     # 4. Execute real push via gh
     try:
-        # Set up gh auth with token (via stdin, never as argument)
         proc = subprocess.run(
             ["gh", "auth", "login", "--with-token"],
             input=token, capture_output=True, text=True, timeout=30,
@@ -266,20 +299,17 @@ def _execute_push(record, token_path, dry_run=False):
             result["blockers"].append(f"gh auth login failed: rc={proc.returncode}")
             return False, result
 
-        # Configure git to use gh credential helper
         subprocess.run(
             ["gh", "auth", "setup-git"],
             capture_output=True, text=True, timeout=15,
         )
 
-        # Push
         push_result = subprocess.run(
             ["git", "push", "origin", f"HEAD:{record['branch']}"],
             capture_output=True, text=True, timeout=60,
         )
         result["push_executed"] = True
         result["push_rc"] = push_result.returncode
-        # Sanitize stderr: remove any potential token-like strings
         stderr_clean = push_result.stderr
         if token in stderr_clean:
             stderr_clean = stderr_clean.replace(token, "[REDACTED]")
@@ -309,10 +339,14 @@ def _cmd_check(args):
         return {"error": err, "would_push": False}, 1
 
     would_push, blockers, warnings = _validate_push(record)
+    trust_level, requires_human_approval = _classify_repo_trust(record.get("repo", ""))
 
     result = {
         "action_id": record.get("action_id"),
+        "repo_trust_level": trust_level,
+        "requires_human_approval": requires_human_approval,
         "would_push": would_push,
+        "would_read_token": would_push,
         "dry_run": True,
         "repo": record.get("repo"),
         "branch": record.get("branch"),
@@ -322,12 +356,6 @@ def _cmd_check(args):
         "warnings": warnings,
         "status": record.get("status"),
     }
-
-    if would_push:
-        result["push_command_preview"] = (
-            f"git push {record.get('repo')} {record.get('branch')}  "
-            f"# DRY-RUN ONLY — not executed"
-        )
 
     return result, 0 if would_push else 1
 
@@ -339,7 +367,7 @@ def _cmd_push(args):
         return {"error": err, "would_push": False}, 1
 
     token_path = args.token_file or DEFAULT_TOKEN_FILE
-    dry_run = args.dry_run if hasattr(args, "dry_run") else False
+    dry_run = getattr(args, "dry_run", False)
 
     success, result = _execute_push(record, token_path, dry_run=dry_run)
     return result, 0 if success else 1
@@ -358,11 +386,15 @@ def _cmd_list_approved(args):
     results = []
     for record in approved:
         would_push, blockers, warnings = _validate_push(record)
+        trust_level, requires_human_approval = _classify_repo_trust(record.get("repo", ""))
         results.append({
             "action_id": record.get("action_id"),
             "repo": record.get("repo"),
+            "repo_trust_level": trust_level,
+            "requires_human_approval": requires_human_approval,
             "branch": record.get("branch"),
             "would_push": would_push,
+            "would_read_token": would_push,
             "blockers": blockers,
             "warnings": warnings,
         })
@@ -380,7 +412,7 @@ def build_parser():
     """Build argument parser. Used by router for help generation."""
     parser = argparse.ArgumentParser(
         prog="vibe_privileged_push",
-        description="Privileged Push Wrapper — controlled push with token-aware preflight",
+        description="Privileged Push Wrapper — controlled push with repo trust policy",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--json", action="store_true", dest="output_json", help="JSON output")
@@ -393,20 +425,12 @@ def build_parser():
     parser.add_argument(
         "--token-file",
         default=None,
-        help="Path to privileged token file (default: ~/.vibedev/secrets/github_privileged_token)",
+        help="Path to privileged token file",
     )
-
-    # Default mode: check a specific action
     parser.add_argument("--action-id", help="Action ID to check/push")
-
-    # Push mode
-    parser.add_argument("--push", action="store_true", help="Execute real push (requires approved action)")
-    parser.add_argument("--dry-run-push", action="store_true", help="Push dry-run (validate + token preflight, no push)")
-
-    # Token preflight
-    parser.add_argument("--token-preflight", action="store_true", help="Check token file without reading content")
-
-    # List approved
+    parser.add_argument("--push", action="store_true", help="Execute real push")
+    parser.add_argument("--dry-run-push", action="store_true", help="Push dry-run")
+    parser.add_argument("--token-preflight", action="store_true", help="Check token file")
     parser.add_argument("--list-approved", action="store_true", help="List approved actions")
 
     return parser
@@ -417,10 +441,12 @@ def _format_compact(result):
     if "error" in result:
         return f"PP ERROR | {result['error']}"
     if result.get("push_executed"):
-        return f"PP PUSHED | {result.get('repo')}:{result.get('branch')} | rc={result.get('push_rc')}"
+        trust = result.get("repo_trust_level", "?")
+        return f"PP PUSHED | {result.get('repo')}:{result.get('branch')} | trust={trust} | rc={result.get('push_rc')}"
     if result.get("would_push"):
+        trust = result.get("repo_trust_level", "?")
         cp_count = len(result.get("changed_paths", []))
-        return f"PP READY | {result.get('repo')}:{result.get('branch')} | {cp_count} paths | dry-run"
+        return f"PP READY | {result.get('repo')}:{result.get('branch')} | trust={trust} | {cp_count} paths | dry-run"
     if result.get("token_preflight"):
         ok = result.get("ok", False)
         return f"PP TOKEN {'OK' if ok else 'FAIL'} | {result['token_preflight'].get('error', 'ok')}"
@@ -460,7 +486,7 @@ def main(argv=None):
                   f"{result['would_push_count']} ready, {result['blocked_count']} blocked")
             for a in result["actions"]:
                 icon = "✓" if a["would_push"] else "✗"
-                print(f"  {icon} {a['action_id']}: {a['repo']}:{a['branch']}")
+                print(f"  {icon} {a['action_id']}: {a['repo']}:{a['branch']} (trust={a['repo_trust_level']})")
         elif args.token_preflight:
             ok = result.get("ok", False)
             print(f"Token preflight: {'OK' if ok else 'FAIL'}")

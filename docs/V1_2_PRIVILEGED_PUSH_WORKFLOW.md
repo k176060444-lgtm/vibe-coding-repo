@@ -66,6 +66,24 @@ python3 scripts/vibe_privileged_push.py --json \
 
 ## 安全约束
 
+
+## Repo Trust Policy
+
+| 仓库类型 | trust_level | push 是否需人工批准 | Token 读取 |
+|---------|-------------|-------------------|-----------|
+| self-repo (`k176060444-lgtm/vibe-coding-repo`) | `trusted-self` | ❌ 不需要（policy gate 自动检查） | ✅ policy 通过后自动读取 |
+| external repo（所有其他仓库） | `protected-external` | ✅ 必须先创建 + 批准 privileged action | ✅ 批准后才读取 |
+
+**一句话原则：VibeCoding 自己仓库自动化优先；其他仓库授权优先。**
+
+### Policy Gate（所有 push 都必须通过）
+- Forbidden paths: `.github/workflows/`, `secrets/`, `.env`, `ssh/`
+- No force push
+- No PR merge
+- No secrets/CI/workflow/provider/SSH
+- Changed paths 验证
+
+
 | 约束 | 说明 |
 |------|------|
 | **Token 输出** | 严禁。Token 永远不会出现在 stdout/stderr/log/report |
