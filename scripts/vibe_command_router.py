@@ -48,7 +48,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.13.0"
+VERSION = "2.14.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -84,6 +84,7 @@ COMMAND_SCRIPTS = {
     "priv-push": "vibe_privileged_push.py",
     "trusted-loop": "vibe_trusted_self_loop.py",
     "batch-runner": "vibe_batch_runner.py",
+    "worker-resilience": "vibe_worker_resilience.py",
 }
 
 # Short aliases
@@ -146,6 +147,9 @@ ALIASES = {
     "loop": "trusted-loop",
     "br": "batch-runner",
     "batch": "batch-runner",
+    "wr": "worker-resilience",
+    "worker": "worker-resilience",
+    "resilience": "worker-resilience",
     "?": "help",
     "v": "version",
 }
@@ -212,6 +216,7 @@ COMMAND_FLAGS = {
     "priv-push": ["--json", "--compact", "--approval-dir", "--action-id", "--list-approved"],
     "trusted-loop": ["--json", "--compact", "--check", "--contract"],
     "batch-runner": ["--json", "--compact", "--batch", "--status", "--dry-run"],
+    "worker-resilience": ["--json", "--compact", "--check", "--checkpoint", "--resume", "--status-report"],
 }
 
 
@@ -287,6 +292,7 @@ def _show_help():
     lines.append("  priv-push (pp, push-approved)  Privileged push dry-run")
     lines.append("  trusted-loop (tl, auto-loop, loop)  Trusted self-repo auto-loop")
     lines.append("  batch-runner (br, batch)  Trusted self-repo batch runner")
+    lines.append("  worker-resilience (wr, worker, resilience)  Worker reachability & retry")
     lines.append("  snapshot                     Operator status snapshot")
     lines.append("")
     lines.append("Options:")
@@ -520,6 +526,11 @@ def main(argv=None):
     if cmd == "batch-runner":
         if not args:
             args = ["--status"]
+
+    # Special handling for worker-resilience command (default to --check)
+    if cmd == "worker-resilience":
+        if not args:
+            args = ["--check"]
 
     return _run_script(script_path, args)
 
