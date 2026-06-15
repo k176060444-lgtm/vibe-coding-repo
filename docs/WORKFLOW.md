@@ -1105,6 +1105,24 @@ High-privilege GitHub keys are controlled via a two-stage approval workflow:
 
 
 
+
+
+## V1.5.2 Resilient Trusted Self Batch Canary
+
+**Principle: trusted self repo can batch auto-execute; external repo writes require approval; worker unreachable enters recovery wait, not business failure.**
+
+### Canary Execution
+```
+worker preflight → batch plan → [WO1 → WO2 → WO3] → batch report
+Each WO: branch → commit → push → PR → wrapper merge → smoke/qg → baseline refresh
+```
+
+### Recovery on Worker Failure
+- Worker unreachable → WAITING_WORKER_RECOVERY (not failure)
+- 5-min retry, 75-min max, 15 retries, 15-min status reports
+- Worker back → RECONCILING → verify baseline/worktree → resume
+
+
 ## V1.5.1 Worker Resilience & Resume
 
 **When worker is temporarily unreachable, do NOT restart the batch. Wait for auto-retry.**
