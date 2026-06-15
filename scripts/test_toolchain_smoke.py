@@ -2576,6 +2576,258 @@ def _test_privileged_approval_router(script_dir):
     return {"passed": True, "message": "priv-appr->priv-approval ok"}
 
 
+
+
+def _test_repo_trust_self_repo_allow(script_dir):
+    """Test self-repo push policy allows without human approval."""
+    import tempfile, shutil
+    appr_path = script_dir / "vibe_privileged_approval.py"
+    push_path = script_dir / "vibe_privileged_push.py"
+    if not appr_path.exists() or not push_path.exists():
+        return {"passed": False, "message": "scripts not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-trust-")
+    try:
+        _run_script(appr_path, [
+            "--json", "create", "--action-id", "test-trust-self",
+            "--repo", "k176060444-lgtm/vibe-coding-repo",
+            "--branch", "main",
+            "--action", "push", "--base-sha", "abc123",
+            "--changed-path", "scripts/test.py",
+            "--approval-dir", tmpdir
+        ])
+        rc, stdout, stderr = _run_script(push_path, [
+            "--json", "--action-id", "test-trust-self",
+            "--approval-dir", tmpdir, "--dry-run-push"
+        ])
+        import json
+        data = json.loads(stdout)
+        if not data.get("would_push"):
+            return {"passed": False, "message": "self-repo should allow: %s" % data.get("blockers")}
+        if data.get("repo_trust_level") != "trusted-self":
+            return {"passed": False, "message": "expected trusted-self, got %s" % data.get("repo_trust_level")}
+        return {"passed": True, "message": "self-repo allows push without approval"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_repo_trust_external_block_without_approve(script_dir):
+    """Test external repo push blocks without human approval."""
+    import tempfile, shutil
+    appr_path = script_dir / "vibe_privileged_approval.py"
+    push_path = script_dir / "vibe_privileged_push.py"
+    if not appr_path.exists() or not push_path.exists():
+        return {"passed": False, "message": "scripts not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-ext-")
+    try:
+        _run_script(appr_path, [
+            "--json", "create", "--action-id", "test-ext-block",
+            "--repo", "other-org/other-repo",
+            "--branch", "main",
+            "--action", "push", "--base-sha", "abc123",
+            "--changed-path", "src/main.py",
+            "--approval-dir", tmpdir
+        ])
+        rc, stdout, stderr = _run_script(push_path, [
+            "--json", "--action-id", "test-ext-block",
+            "--approval-dir", tmpdir, "--dry-run-push"
+        ])
+        import json
+        data = json.loads(stdout)
+        if data.get("would_push"):
+            return {"passed": False, "message": "external repo should block without approval"}
+        if data.get("repo_trust_level") != "protected-external":
+            return {"passed": False, "message": "expected protected-external, got %s" % data.get("repo_trust_level")}
+        return {"passed": True, "message": "external repo correctly blocked without approval"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_repo_trust_external_approved_passes_policy(script_dir):
+    """Test approved external repo passes policy check."""
+    import tempfile, shutil
+    appr_path = script_dir / "vibe_privileged_approval.py"
+    push_path = script_dir / "vibe_privileged_push.py"
+    if not appr_path.exists() or not push_path.exists():
+        return {"passed": False, "message": "scripts not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-extok-")
+    try:
+        _run_script(appr_path, [
+            "--json", "create", "--action-id", "test-ext-ok",
+            "--repo", "other-org/other-repo",
+            "--branch", "main",
+            "--action", "push", "--base-sha", "abc123",
+            "--changed-path", "src/main.py",
+            "--approval-dir", tmpdir
+        ])
+        _run_script(appr_path, [
+            "--json", "short-approve", "--approval-dir", tmpdir
+        ])
+        rc, stdout, stderr = _run_script(push_path, [
+            "--json", "--action-id", "test-ext-ok",
+            "--approval-dir", tmpdir, "--dry-run-push"
+        ])
+        import json
+        data = json.loads(stdout)
+        blockers = data.get("blockers", [])
+        has_policy_blocker = any("requires human approval" in b for b in blockers)
+        if has_policy_blocker:
+            return {"passed": False, "message": "approved external should pass policy"}
+        return {"passed": True, "message": "approved external passes policy check"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_repo_trust_forbidden_path_all_repos(script_dir):
+    """Test forbidden path blocks for all repos."""
+    import tempfile, shutil
+    appr_path = script_dir / "vibe_privileged_approval.py"
+    push_path = script_dir / "vibe_privileged_push.py"
+    if not appr_path.exists() or not push_path.exists():
+        return {"passed": False, "message": "scripts not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-forbid-")
+    try:
+        _run_script(appr_path, [
+            "--json", "create", "--action-id", "test-forbid-self",
+            "--repo", "k176060444-lgtm/vibe-coding-repo",
+            "--branch", "main",
+            "--action", "push", "--base-sha", "abc123",
+            "--changed-path", ".github/workflows/deploy.yml",
+            "--approval-dir", tmpdir
+        ])
+        rc, stdout, stderr = _run_script(push_path, [
+            "--json", "--action-id", "test-forbid-self",
+            "--approval-dir", tmpdir, "--dry-run-push"
+        ])
+        import json
+        data = json.loads(stdout)
+        if data.get("would_push"):
+            return {"passed": False, "message": "forbidden path should block even for self-repo"}
+        return {"passed": True, "message": "forbidden path blocks for all repos"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_token_redaction_enforced(script_dir):
+    """Test that token patterns are not in privileged push output."""
+    import tempfile, shutil
+    appr_path = script_dir / "vibe_privileged_approval.py"
+    push_path = script_dir / "vibe_privileged_push.py"
+    if not appr_path.exists() or not push_path.exists():
+        return {"passed": False, "message": "scripts not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-redact-")
+    try:
+        _run_script(appr_path, [
+            "--json", "create", "--action-id", "test-redact",
+            "--repo", "k176060444-lgtm/vibe-coding-repo",
+            "--branch", "privileged-smoke/test",
+            "--action", "push", "--base-sha", "abc123",
+            "--changed-path", "docs/test.md",
+            "--approval-dir", tmpdir
+        ])
+        _run_script(appr_path, [
+            "--json", "short-approve", "--approval-dir", tmpdir
+        ])
+        rc, stdout, stderr = _run_script(push_path, [
+            "--json", "--action-id", "test-redact",
+            "--approval-dir", tmpdir, "--dry-run-push"
+        ])
+        combined = stdout + stderr
+        suspicious = ["ghp_", "gho_", "github_pat_", "Bearer ", "Basic "]
+        for pat in suspicious:
+            if pat in combined:
+                return {"passed": False, "message": "token pattern found: %s" % pat}
+        return {"passed": True, "message": "no token patterns in output"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_token_only_read_when_policy_allows(script_dir):
+    """Test token preflight works independently."""
+    push_path = script_dir / "vibe_privileged_push.py"
+    if not push_path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(push_path, ["--token-preflight", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": "token preflight failed: %s" % stderr[:80]}
+    import json
+    data = json.loads(stdout)
+    if not data.get("ok"):
+        return {"passed": False, "message": "token preflight should pass"}
+    return {"passed": True, "message": "token preflight works independently"}
+
+
+def _test_force_delete_tag_block(script_dir):
+    """Test force push action blocks."""
+    import tempfile, shutil
+    appr_path = script_dir / "vibe_privileged_approval.py"
+    push_path = script_dir / "vibe_privileged_push.py"
+    if not appr_path.exists() or not push_path.exists():
+        return {"passed": False, "message": "scripts not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-fdt-")
+    try:
+        _run_script(appr_path, [
+            "--json", "create", "--action-id", "test-force",
+            "--repo", "k176060444-lgtm/vibe-coding-repo",
+            "--branch", "privileged-smoke/test",
+            "--action", "push --force",
+            "--base-sha", "abc123",
+            "--changed-path", "docs/test.md",
+            "--approval-dir", tmpdir
+        ])
+        rc, stdout, stderr = _run_script(push_path, [
+            "--json", "--action-id", "test-force",
+            "--approval-dir", tmpdir, "--dry-run-push"
+        ])
+        import json
+        data = json.loads(stdout)
+        if data.get("would_push"):
+            return {"passed": False, "message": "should block force push action"}
+        return {"passed": True, "message": "force/delete/tag blocked"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_privileged_push_v12_parser(script_dir):
+    """Test privileged push v1.2 CLI with trust policy fields."""
+    path = script_dir / "vibe_privileged_push.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--help"])
+    if rc != 0:
+        return {"passed": False, "message": "help exit=%d" % rc}
+    if "token-preflight" not in stdout:
+        return {"passed": False, "message": "missing token-preflight"}
+    return {"passed": True, "message": "v1.2 push CLI ok"}
+
+
+def _test_repo_trust_compact_output(script_dir):
+    """Test compact output includes trust level."""
+    import tempfile, shutil
+    appr_path = script_dir / "vibe_privileged_approval.py"
+    push_path = script_dir / "vibe_privileged_push.py"
+    if not appr_path.exists() or not push_path.exists():
+        return {"passed": False, "message": "scripts not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-compact-")
+    try:
+        _run_script(appr_path, [
+            "--json", "create", "--action-id", "test-compact",
+            "--repo", "k176060444-lgtm/vibe-coding-repo",
+            "--branch", "main",
+            "--action", "push", "--base-sha", "abc123",
+            "--changed-path", "scripts/test.py",
+            "--approval-dir", tmpdir
+        ])
+        rc, stdout, stderr = _run_script(push_path, [
+            "--compact", "--action-id", "test-compact",
+            "--approval-dir", tmpdir, "--dry-run-push"
+        ])
+        if "trusted-self" not in stdout:
+            return {"passed": False, "message": "compact missing trust level: %s" % stdout[:100]}
+        return {"passed": True, "message": "compact includes trust level"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
