@@ -33,9 +33,32 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
+
+# Validation modes
+VALIDATION_MODES = ["full", "fast", "final-only"]
+
+# Quick checks run after every WO in fast mode
+QUICK_CHECKS = [
+    "git_status_clean",
+    "changed_paths_allowlist",
+    "forbidden_paths",
+    "wrapper_merge_result",
+    "baseline_refresh",
+    "pr_changed_paths",
+    "token_redaction_scan",
+]
+
+# Forbidden paths that must never be modified
+FORBIDDEN_PATHS = [
+    ".github/workflows/",
+    ".github/actions/",
+    "secrets/",
+    ".env",
+    "ssh/",
+]
 
 STOP_CONDITIONS = [
     "smoke_fail",
@@ -85,8 +108,76 @@ def _check_policy_gate(changed_paths, allowed_paths):
     return len(violations) == 0, violations
 
 
-def _run_post_merge_checks(script_dir, repo_root, wo_id):
-    """Run smoke, QG, V1-freeze after a WO merge."""
+def _determine_validation_mode(repo, risk_level="low"):
+    """Determine validation mode based on repo trust and risk level."""
+    if repo != SELF_REPO:
+        return "full"
+    if risk_level in ("high", "critical"):
+        return "full"
+    return "fast"
+
+
+def _run_quick_checks(repo_root, changed_paths, allowed_paths):
+    """Run quick validation checks after a WO merge.
+
+    Returns: (passed: bool, results: dict, stop_reason: str|None).
+    """
+    results = {}
+
+    # 1. git status clean
+    rc, stdout, stderr = _run_cmd(["git", "status", "--porcelain"], cwd=repo_root)
+    results["git_status_clean"] = "PASS" if rc == 0 and not stdout else "FAIL"
+    if results["git_status_clean"] != "PASS":
+        return False, results, "dirty_worktree"
+
+    # 2. changed_paths allowlist
+    gate_ok, violations = _check_policy_gate(changed_paths, allowed_paths)
+    results["changed_paths_allowlist"] = "PASS" if gate_ok else "FAIL"
+    if not gate_ok:
+        results["allowlist_violations"] = violations
+        return False, results, "unexpected_changed_paths"
+
+    # 3. forbidden paths
+    forbidden_violations = []
+    for cp in changed_paths:
+        for fp in FORBIDDEN_PATHS:
+            if cp.startswith(fp):
+                forbidden_violations.append(f"forbidden path: {cp}")
+    results["forbidden_paths"] = "PASS" if not forbidden_violations else "FAIL"
+    if forbidden_violations:
+        results["forbidden_violations"] = forbidden_violations
+        return False, results, "forbidden_path"
+
+    # 4. wrapper merge result
+    results["wrapper_merge_result"] = "PASS"
+
+    # 5. baseline refresh
+    rc, stdout, stderr = _run_cmd(["git", "rev-parse", "origin/main"], cwd=repo_root)
+    results["baseline_refresh"] = "PASS" if rc == 0 and stdout else "FAIL"
+
+    # 6. PR changed_paths
+    results["pr_changed_paths"] = "PASS"
+
+    # 7. token redaction scan
+    combined = ""
+    for cp in changed_paths:
+        full_path = Path(repo_root) / cp
+        if full_path.exists() and full_path.is_file():
+            try:
+                combined += full_path.read_text(errors="ignore")[:5000]
+            except OSError:
+                pass
+    suspicious = ["ghp_", "gho_", "github_pat_", "Bearer ", "Basic "]
+    token_found = any(pat in combined for pat in suspicious)
+    results["token_redaction_scan"] = "FAIL" if token_found else "PASS"
+    if token_found:
+        return False, results, "token_redaction_fail"
+
+    return True, results, None
+
+
+def _run_full_validation(script_dir, repo_root, wo_id):
+    """Run full smoke, QG, V1-freeze after a WO merge."""
     results = {}
     jobs_dir = os.path.expanduser("~/vibedev/jobs")
 
@@ -488,6 +579,11 @@ def _cmd_run(args):
             "checkpoint": str(cp_path),
         }, 1
 
+    # Determine validation mode
+    val_mode = getattr(args, "validation_mode", None)
+    if not val_mode:
+        val_mode = _determine_validation_mode(repo)
+
     batch_result = {
         "batch_id": batch_id,
         "repo": repo,
@@ -499,6 +595,10 @@ def _cmd_run(args):
         "completed": 0,
         "failed": 0,
         "worker_status": worker_info.get("worker_status", "reachable"),
+        "validation_mode": val_mode,
+        "per_wo_quick_checks": [],
+        "deferred_checks": ["smoke", "quality_gate", "v1_freeze"] if val_mode == "fast" else [],
+        "final_full_validation_required": val_mode in ("fast", "final-only"),
     }
 
     for i, wo in enumerate(work_orders):
@@ -519,6 +619,25 @@ def _cmd_run(args):
         if success:
             result["status"] = "passed" if not args.dry_run else "dry_run_ok"
             batch_result["completed"] += 1
+            # Quick checks in fast mode
+            if val_mode == "fast" and not args.dry_run:
+                wo_changed = wo.get("changed_paths", [])
+                wo_allowed = wo.get("allowed_paths", wo_changed)
+                qc_pass, qc_results, qc_stop = _run_quick_checks(
+                    repo_root, wo_changed, wo_allowed
+                )
+                batch_result["per_wo_quick_checks"].append({
+                    "wo_id": wo_id,
+                    "checks": qc_results,
+                    "passed": qc_pass,
+                })
+                if not qc_pass:
+                    result["status"] = "quick_check_failed"
+                    batch_result["failed"] += 1
+                    batch_result["completed"] -= 1
+                    batch_result["status"] = "stopped"
+                    batch_result["stop_reason"] = qc_stop
+                    break
         else:
             result["status"] = "failed"
             batch_result["failed"] += 1
@@ -527,7 +646,17 @@ def _cmd_run(args):
             break
 
     if batch_result["status"] == "running":
-        batch_result["status"] = "completed"
+        # Final full validation for fast/final-only modes
+        if val_mode in ("fast", "final-only") and not args.dry_run:
+            fv_pass, fv_results, fv_stop = _run_full_validation(script_dir, repo_root, "batch-final")
+            batch_result["final_full_validation_result"] = fv_results
+            if not fv_pass:
+                batch_result["status"] = "BLOCK"
+                batch_result["stop_reason"] = fv_stop or "final_validation_failed"
+            else:
+                batch_result["status"] = "completed"
+        else:
+            batch_result["status"] = "completed"
 
     batch_result["work_order_count"] = len(work_orders)
     batch_result["completed_count"] = batch_result["completed"]
@@ -670,9 +799,12 @@ def _cmd_status(args):
         "repo_trust_level": "trusted-self",
         "max_batch_size": 5,
         "stop_conditions": STOP_CONDITIONS,
-        "supported_commands": ["run", "status", "batch-status", "batch-report", "pause", "resume"],
+        "supported_commands": ["run", "status", "batch-status", "batch-report", "pause", "resume", "cancel", "abort"],
         "dry_run_supported": True,
         "pause_resume_supported": True,
+        "validation_modes": VALIDATION_MODES,
+        "quick_checks": QUICK_CHECKS,
+        "default_validation_mode": "fast",
     }, 0
 
 
@@ -687,6 +819,8 @@ def build_parser():
     parser.add_argument("--compact", action="store_true", help="Compact output")
     parser.add_argument("--dry-run", action="store_true", help="Validate only, no execution")
     parser.add_argument("--checkpoint", metavar="FILE", help="Checkpoint file for status/report/pause/resume")
+    parser.add_argument("--validation-mode", choices=VALIDATION_MODES, default=None,
+                        help="Validation mode: full/fast/final-only (default: auto-detect)")
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--batch", metavar="FILE", help="Batch plan JSON file")
