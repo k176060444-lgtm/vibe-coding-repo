@@ -242,3 +242,25 @@ The system is operationally ready for:
 - ✅ Autonomous documentation and toolchain maintenance
 - ⚠️ Gated code implementation (wrapper approval required)
 - 🛑 Human required for secrets/CI/deploy/force operations
+
+## Executor Boundary Freeze
+
+The executor subsystem is currently frozen at noop/dry-run level. No real execution is permitted.
+
+**Frozen Components:**
+- vibe_executor_adapter.py -- noop and dry-run adapters only
+- vibe_execution_gate.py -- 8-condition admission check
+- vibe_safe_executor.py -- plan generator (no execution)
+- vibe_execution_transcript.py -- append-only records
+
+**Forbidden Actions:** model_call, shell_exec, repo_write, git_push, git_merge, deploy, tag, file_delete
+
+**Unfreeze Requirements:**
+1. Document the change in docs/EXECUTOR_BOUNDARY_FREEZE.md
+2. Update gate conditions with any new safety checks
+3. Human must explicitly approve the unfreeze
+4. All existing smoke tests must pass (currently 54/54)
+5. Add tests for new executor capabilities
+6. Record decision in transcript
+
+For full details, see [EXECUTOR_BOUNDARY_FREEZE.md](EXECUTOR_BOUNDARY_FREEZE.md).
