@@ -202,14 +202,12 @@ def _show_version():
 
 
 def _run_dashboard(args):
-    """Built-in dashboard command (lightweight, no subprocess)."""
+    """Built-in dashboard command."""
     try:
-        from pathlib import Path
-        import json
-
         # Find repo root
         script_dir = Path(__file__).parent
         repo_root = script_dir.parent
+        dashboard_path = repo_root / "docs" / "PROJECT_DASHBOARD.md"
 
         # Read router version
         router_version = VERSION
@@ -225,19 +223,22 @@ def _run_dashboard(args):
             content = smoke_file.read_text()
             smoke_count = content.count("def _test_")
 
-        # Output
-        output = {
-            "version": router_version,
-            "script_count": script_count,
-            "smoke_tests": smoke_count,
-            "commands": len(COMMAND_SCRIPTS),
-            "aliases": len(ALIASES),
-        }
+        use_json = "--json" in args
 
-        if "--json" in args:
+        if use_json:
+            output = {
+                "dashboard_path": str(dashboard_path),
+                "exists": dashboard_path.exists(),
+                "version": router_version,
+                "script_count": script_count,
+                "smoke_tests": smoke_count,
+                "commands": len(COMMAND_SCRIPTS),
+                "aliases": len(ALIASES),
+            }
             print(json.dumps(output, indent=2))
         else:
             print("Dashboard v%s" % router_version)
+            print("  Dashboard file: %s" % dashboard_path)
             print("  Scripts: %d" % script_count)
             print("  Smoke tests: %d" % smoke_count)
             print("  Commands: %d" % len(COMMAND_SCRIPTS))
@@ -253,7 +254,6 @@ def _run_preflight(args):
     """Built-in preflight command: intake → validate → package."""
     try:
         import tempfile
-        import json
 
         if not args or args[0].startswith("--"):
             print("ERROR: preflight requires a requirement string", file=sys.stderr)
@@ -266,12 +266,10 @@ def _run_preflight(args):
         script_dir = Path(__file__).parent
         tmpdir = tempfile.mkdtemp(prefix="preflight_")
 
-        # Step 1: intake
+        # Step 1: intake with --json to get structured output
         intake_out = os.path.join(tmpdir, "draft.json")
         intake_cmd = [sys.executable, str(script_dir / "vibe_workorder_intake.py"),
-                      requirement, "--output", intake_out]
-        if use_json:
-            intake_cmd.append("--json")
+                      requirement, "--json", "--output", intake_out]
 
         result = subprocess.run(intake_cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
@@ -287,10 +285,9 @@ def _run_preflight(args):
         result = subprocess.run(validate_cmd, capture_output=True, text=True, timeout=30)
         validate_pass = result.returncode == 0
 
-        # Step 3: package
-        package_out = os.path.join(tmpdir, "package.txt")
+        # Step 3: package (outputs to stdout, no --output flag)
         package_cmd = [sys.executable, str(script_dir / "vibe_workorder_packager.py"),
-                       intake_out, "--output", package_out]
+                       intake_out]
         if use_json:
             package_cmd.append("--json")
 
@@ -303,7 +300,7 @@ def _run_preflight(args):
                 "requirement": requirement,
                 "intake": {"exit_code": 0, "draft_file": intake_out},
                 "validate": {"exit_code": 0 if validate_pass else 1},
-                "package": {"exit_code": 0 if package_ok else 1, "package_file": package_out},
+                "package": {"exit_code": 0 if package_ok else 1},
                 "preflight": "PASS" if (validate_pass and package_ok) else "FAIL",
             }
             print(json.dumps(output, indent=2))
