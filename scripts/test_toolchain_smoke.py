@@ -1594,6 +1594,57 @@ def _test_safe_executor_router(script_dir):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+
+# --- Adapter and Transcript Tests (added for replay smoke) ---
+
+def _test_adapter_capabilities(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_executor_adapter.py", ["capabilities", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": f"exit {rc}"}
+    data = json.loads(out)
+    if "adapters" not in data or "noop" not in data["adapters"]:
+        return {"passed": False, "message": "missing adapters"}
+    return {"passed": True, "message": f"adapters: {', '.join(data['adapters'].keys())}"}
+
+def _test_adapter_plan_json(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_executor_adapter.py",
+        ["plan", "--adapter", "dry-run", "--id", "smoke-test", "--base-sha", "abc", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": f"exit {rc}"}
+    data = json.loads(out)
+    if data["adapter_name"] != "dry-run":
+        return {"passed": False, "message": "wrong adapter"}
+    return {"passed": True, "message": f"dry-run plan {len(data['execution_plan']['steps'])} steps"}
+
+def _test_adapter_router(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_command_router.py", ["adapter", "capabilities", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": f"exit {rc}"}
+    data = json.loads(out)
+    if "adapters" not in data:
+        return {"passed": False, "message": "missing adapters"}
+    return {"passed": True, "message": "router adapter OK"}
+
+def _test_transcript_create_list(script_dir):
+    import tempfile
+    txn_dir = tempfile.mkdtemp(prefix="smoke_txn_")
+    rc, out, err = _run_script(script_dir / "vibe_execution_transcript.py",
+        ["create", "--id", "smoke-test", "--adapter", "noop", "--base-sha", "abc",
+         "--transcript-dir", txn_dir, "--json"])
+    if rc != 0:
+        return {"passed": False, "message": f"create exit {rc}"}
+    data = json.loads(out)
+    if "digest" not in data:
+        return {"passed": False, "message": "missing digest"}
+    rc2, out2, err2 = _run_script(script_dir / "vibe_execution_transcript.py",
+        ["list", "--transcript-dir", txn_dir, "--json"])
+    if rc2 != 0:
+        return {"passed": False, "message": f"list exit {rc2}"}
+    data2 = json.loads(out2)
+    if data2["count"] < 1:
+        return {"passed": False, "message": "count < 1"}
+    return {"passed": True, "message": f"create+list OK: {data['transcript_id']}"}
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -1741,6 +1792,30 @@ def run_tests(jobs_dir=None):
     
     # Test 32: Registry - read-only behavior
     tests.append(_run_test("registry_readonly", lambda: _test_registry_readonly(script_dir)))
+
+    # Test 47: Adapter - capabilities JSON
+    tests.append(_run_test("adapter_capabilities", lambda: _test_adapter_capabilities(script_dir)))
+
+    # Test 48: Adapter - plan JSON
+    tests.append(_run_test("adapter_plan_json", lambda: _test_adapter_plan_json(script_dir)))
+
+    # Test 49: Adapter - router integration
+    tests.append(_run_test("adapter_router", lambda: _test_adapter_router(script_dir)))
+
+    # Test 50: Transcript - create and list
+    tests.append(_run_test("transcript_create_list", lambda: _test_transcript_create_list(script_dir)))
+    # Test 47: Adapter - capabilities JSON
+    tests.append(_run_test("adapter_capabilities", lambda: _test_adapter_capabilities(script_dir)))
+
+    # Test 48: Adapter - plan JSON
+    tests.append(_run_test("adapter_plan_json", lambda: _test_adapter_plan_json(script_dir)))
+
+    # Test 49: Adapter - router integration
+    tests.append(_run_test("adapter_router", lambda: _test_adapter_router(script_dir)))
+
+    # Test 50: Transcript - create and list
+    tests.append(_run_test("transcript_create_list", lambda: _test_transcript_create_list(script_dir)))
+
     return tests
 
 
