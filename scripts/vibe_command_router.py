@@ -48,7 +48,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.10.0"
+VERSION = "2.11.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -80,6 +80,8 @@ COMMAND_SCRIPTS = {
     "quality-gate": "vibe_quality_gate.py",
     "run-report": "vibe_run_report.py",
     "v1-freeze": "vibe_v1_freeze_check.py",
+    "priv-approval": "vibe_privileged_approval.py",
+    "priv-push": "vibe_privileged_push.py",
 }
 
 # Short aliases
@@ -133,6 +135,10 @@ ALIASES = {
     "handoff": "run-report",
     "v1": "v1-freeze",
     "freeze-check": "v1-freeze",
+    "priv-appr": "priv-approval",
+    "approval": "priv-approval",
+    "pp": "priv-push",
+    "push-approved": "priv-push",
     "?": "help",
     "v": "version",
 }
@@ -167,6 +173,8 @@ COMMAND_DESCRIPTIONS = {
     "quality-gate": "Workflow Quality Gate - aggregated pre/post-execution health check",
     "run-report": "Run Report / Session Handoff - execution summary for QQ/mobile",
     "v1-freeze": "V1 Freeze Check - verify operational freeze is healthy",
+    "priv-approval": "Privileged Approval - controlled approval for high-privilege actions",
+    "priv-push": "Privileged Push Wrapper - dry-run controlled push for approved actions",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -193,6 +201,8 @@ COMMAND_FLAGS = {
     "unfreeze-checklist": ["--json", "--compact", "--level"],
     "transcript": ["--json", "--transcript-dir"],
     "quality-gate": ["--json", "--compact", "--repo-root", "--jobs-dir"],
+    "priv-approval": ["--json", "--approval-dir"],
+    "priv-push": ["--json", "--compact", "--approval-dir", "--action-id", "--list-approved"],
 }
 
 
@@ -264,6 +274,8 @@ def _show_help():
     lines.append("  smoke                        Full smoke suite (75 tests)")
     lines.append("  health                       Quick health check")
     lines.append("  v1-freeze (v1, freeze-check)  V1 freeze verification")
+    lines.append("  priv-approval (priv-appr, approval)  Privileged approval workflow")
+    lines.append("  priv-push (pp, push-approved)  Privileged push dry-run")
     lines.append("  snapshot                     Operator status snapshot")
     lines.append("")
     lines.append("Options:")
@@ -476,6 +488,16 @@ def main(argv=None):
         # Inject 'check' as first argument if not already present
         if not args or args[0] != "check":
             args = ["check"] + args
+
+    # Special handling for priv-approval command (inject list if no subcommand)
+    if cmd == "priv-approval":
+        if not args or args[0].startswith("-"):
+            args = ["list"] + args
+
+    # Special handling for priv-push command (inject --list-approved if no args)
+    if cmd == "priv-push":
+        if not args:
+            args = ["--list-approved"]
 
     return _run_script(script_path, args)
 
