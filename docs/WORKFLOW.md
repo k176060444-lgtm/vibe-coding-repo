@@ -635,3 +635,18 @@ allowed_paths safety, forbidden_actions, goal, acceptance_tests,
 stop_conditions, draft_only flag, ID format.
 
 Verdict: PASS (all checks) / WARN (warnings only) / FAIL (errors).
+
+
+## Work Order Packager (v1)
+
+Package validated drafts into execution prompts:
+
+```
+python scripts/vibe_workorder_intake.py 'requirement' --json > draft.json
+python scripts/vibe_workorder_validator.py draft.json
+python scripts/vibe_workorder_packager.py draft.json --compact
+python scripts/vibe_workorder_packager.py draft.json --json --max-chars 2000
+```
+
+Includes: draft fields, baseline SHA, router version, smoke count, safety rules, execution pipeline.
+Supports chunking with --max-chars for large prompts.

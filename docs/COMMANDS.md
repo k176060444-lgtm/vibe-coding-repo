@@ -731,3 +731,45 @@ $ python scripts/vibe_workorder_validator.py draft.json
 $ python scripts/vibe_workorder_validator.py draft.json --json
 { "overall": "PASS", "checks": [...], "warnings": [], "errors": [] }
 ```
+
+
+## Work Order Packager
+
+Package validated drafts into execution prompts for Hermes.
+
+```
+$ python scripts/vibe_workorder_intake.py 'Add --verbose flag' --json > draft.json
+$ python scripts/vibe_workorder_validator.py draft.json
+$ python scripts/vibe_workorder_packager.py draft.json
+Execute Work Order: wo-code-add-verbose-flag-001
+
+## Task
+Title: Add --verbose flag
+Type: code
+Risk: low
+...
+
+## Baseline
+origin/main: df6735711d46...
+Router: v2.3
+Smoke: 25 tests
+...
+
+## Scope
+Allowed paths:
+  - scripts/
+...
+```
+
+```
+$ python scripts/vibe_workorder_packager.py draft.json --json
+{ "work_order_id": "...", "chunks": [...], "chunk_count": 1, "total_chars": 1234 }
+```
+
+```
+$ python scripts/vibe_workorder_packager.py draft.json --max-chars 500
+=== Chunk 1/3 ===
+...
+=== Chunk 2/3 ===
+...
+```
