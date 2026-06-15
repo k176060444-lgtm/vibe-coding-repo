@@ -928,3 +928,33 @@ python3 scripts/vibe_command_router.py ar create --id my-wo --base-sha abc123 --
 python3 scripts/vibe_command_router.py receipt list --json
 python3 scripts/vibe_command_router.py ar show --receipt-id receipt-001
 ```
+
+
+### `execution-evidence` / `ev` / `exec-log` (Execution Evidence)
+Bundle execution evidence for Work Orders.
+
+**Subcommands:**
+- `create --id ID --base-sha SHA --result-sha SHA [options]` — Create evidence bundle
+- `list` — List all evidence bundles
+- `show --evidence-id ID` — Show evidence details
+
+**Create Options:**
+- `--pr-url URL` — PR URL
+- `--pr-number NUM` — PR number
+- `--post-merge-sha SHA` — Post-merge main SHA
+- `--wrapper-dry-run RESULT` — Wrapper dry-run result
+- `--wrapper-merge RESULT` — Wrapper merge result
+- `--smoke-result RESULT` — Smoke test result
+- `--health-result RESULT` — Health check result
+- `--implementer-model MODEL` — Implementer model
+- `--reviewer-model MODEL` — Reviewer model
+- `--job-status STATUS` — Job status
+- `--audit-status STATUS` — Audit status
+- `--changed-paths PATHS` — Changed paths (comma-separated)
+
+**Examples:**
+```
+python3 scripts/vibe_execution_evidence.py create --id my-wo --base-sha abc123 --result-sha def456 --smoke-result "36/36 PASS"
+python3 scripts/vibe_execution_evidence.py list --json
+python3 scripts/vibe_execution_evidence.py show --evidence-id ev-001
+```
