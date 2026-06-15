@@ -474,3 +474,19 @@ Bot:
   Validation: PASS | Package: 2278 chars
   ✓ Preflight: PASS
 ```
+
+
+### Registry Commands
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `registry` | `reg`, `wo-list`, `wo-show` | Work Order 注册表：注册/列出/查看 |
+| `registry list` | `reg list`, `wo-list` | 列出所有注册条目 |
+| `registry show --id X` | `reg show --id X`, `wo-show --id X` | 查看指定条目 |
+| `registry register --id X` | `reg register --id X` | 注册新条目 |
+
+**示例:**
+```
+/reg list
+/reg show --id my-wo --json
+/wo-list --registry-dir /tmp/registry
+```
