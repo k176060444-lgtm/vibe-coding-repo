@@ -2122,6 +2122,234 @@ def _test_v1_freeze_router(script_dir):
 
 
 
+
+
+def _test_privileged_approval_help(script_dir):
+    """Test privileged approval script --help."""
+    path = script_dir / "vibe_privileged_approval.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--help"])
+    if rc != 0:
+        return {"passed": False, "message": "help exit=%d" % rc}
+    if "short-approve" not in stdout and "short-approve" not in stderr:
+        return {"passed": False, "message": "missing short-approve in help"}
+    return {"passed": True, "message": "help has short-approve"}
+
+
+def _test_privileged_approval_create_list(script_dir):
+    """Test privileged approval create + list cycle."""
+    import tempfile, shutil
+    path = script_dir / "vibe_privileged_approval.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-appr-")
+    try:
+        rc, stdout, stderr = _run_script(path, [
+            "create", "--action-id", "test-001",
+            "--repo", "test/repo", "--branch", "main",
+            "--action", "push", "--base-sha", "abc123",
+            "--approval-dir", tmpdir, "--json"
+        ])
+        if rc != 0:
+            return {"passed": False, "message": "create exit=%d stderr=%s" % (rc, stderr[:100])}
+        import json
+        data = json.loads(stdout)
+        if data.get("status") != "created":
+            return {"passed": False, "message": "create status=%s" % data.get("status")}
+        rc, stdout, stderr = _run_script(path, [
+            "list", "--approval-dir", tmpdir, "--json"
+        ])
+        if rc != 0:
+            return {"passed": False, "message": "list exit=%d" % rc}
+        data = json.loads(stdout)
+        if data.get("pending") != 1:
+            return {"passed": False, "message": "list pending=%d" % data.get("pending")}
+        return {"passed": True, "message": "create+list ok pending=1"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_privileged_approval_short_approve(script_dir):
+    """Test short-approve with exactly 1 pending action."""
+    import tempfile, shutil
+    path = script_dir / "vibe_privileged_approval.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-appr-")
+    try:
+        _run_script(path, [
+            "create", "--action-id", "test-sa",
+            "--repo", "test/repo", "--branch", "main",
+            "--action", "push", "--base-sha", "abc123",
+            "--approval-dir", tmpdir, "--json"
+        ])
+        rc, stdout, stderr = _run_script(path, [
+            "short-approve", "--approval-dir", tmpdir, "--json"
+        ])
+        if rc != 0:
+            return {"passed": False, "message": "short-approve exit=%d" % rc}
+        import json
+        data = json.loads(stdout)
+        if data.get("status") != "approved":
+            return {"passed": False, "message": "short-approve status=%s" % data.get("status")}
+        return {"passed": True, "message": "short-approve ok"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_privileged_approval_short_approve_multi_pending(script_dir):
+    """Test short-approve BLOCKS when multiple pending actions exist."""
+    import tempfile, shutil
+    path = script_dir / "vibe_privileged_approval.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-appr-")
+    try:
+        _run_script(path, [
+            "create", "--action-id", "test-m1",
+            "--repo", "test/repo", "--branch", "main",
+            "--action", "push", "--base-sha", "abc123",
+            "--approval-dir", tmpdir, "--json"
+        ])
+        _run_script(path, [
+            "create", "--action-id", "test-m2",
+            "--repo", "test/repo", "--branch", "dev",
+            "--action", "push", "--base-sha", "def456",
+            "--approval-dir", tmpdir, "--json"
+        ])
+        rc, stdout, stderr = _run_script(path, [
+            "short-approve", "--approval-dir", tmpdir, "--json"
+        ])
+        if rc == 0:
+            return {"passed": False, "message": "should have failed with multi pending"}
+        import json
+        data = json.loads(stdout)
+        if data.get("status") != "blocked":
+            return {"passed": False, "message": "expected blocked, got %s" % data.get("status")}
+        return {"passed": True, "message": "multi-pending correctly blocked"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_privileged_approval_short_approve_no_pending(script_dir):
+    """Test short-approve BLOCKS when no pending actions exist."""
+    import tempfile, shutil
+    path = script_dir / "vibe_privileged_approval.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-appr-")
+    try:
+        rc, stdout, stderr = _run_script(path, [
+            "short-approve", "--approval-dir", tmpdir, "--json"
+        ])
+        if rc == 0:
+            return {"passed": False, "message": "should have failed with no pending"}
+        import json
+        data = json.loads(stdout)
+        if data.get("status") != "blocked":
+            return {"passed": False, "message": "expected blocked, got %s" % data.get("status")}
+        return {"passed": True, "message": "no-pending correctly blocked"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_privileged_push_help(script_dir):
+    """Test privileged push script --help."""
+    path = script_dir / "vibe_privileged_push.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--help"])
+    if rc != 0:
+        return {"passed": False, "message": "help exit=%d" % rc}
+    if "dry-run" not in stdout.lower() and "dry_run" not in stdout.lower():
+        return {"passed": False, "message": "missing dry-run in help"}
+    return {"passed": True, "message": "push help has dry-run"}
+
+
+def _test_privileged_push_dryrun(script_dir):
+    """Test privileged push dry-run with an approved action."""
+    import tempfile, shutil
+    appr_path = script_dir / "vibe_privileged_approval.py"
+    push_path = script_dir / "vibe_privileged_push.py"
+    if not appr_path.exists() or not push_path.exists():
+        return {"passed": False, "message": "scripts not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-push-")
+    try:
+        _run_script(appr_path, [
+            "create", "--action-id", "test-push",
+            "--repo", "test/repo", "--branch", "main",
+            "--action", "push", "--base-sha", "abc123",
+            "--changed-path", "scripts/x.py",
+            "--approval-dir", tmpdir, "--json"
+        ])
+        _run_script(appr_path, [
+            "approve", "--action-id", "test-push",
+            "--approval-dir", tmpdir, "--json"
+        ])
+        rc, stdout, stderr = _run_script(push_path, [
+            "--action-id", "test-push",
+            "--approval-dir", tmpdir, "--json"
+        ])
+        if rc != 0:
+            return {"passed": False, "message": "push dry-run exit=%d" % rc}
+        import json
+        data = json.loads(stdout)
+        if not data.get("would_push"):
+            return {"passed": False, "message": "would_push=%s" % data.get("would_push")}
+        if not data.get("dry_run"):
+            return {"passed": False, "message": "dry_run=%s" % data.get("dry_run")}
+        return {"passed": True, "message": "push dry-run would_push=true dry_run=true"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_privileged_push_blocked_forbidden_path(script_dir):
+    """Test privileged push BLOCKS when changed_paths contain forbidden paths."""
+    import tempfile, shutil
+    appr_path = script_dir / "vibe_privileged_approval.py"
+    push_path = script_dir / "vibe_privileged_push.py"
+    if not appr_path.exists() or not push_path.exists():
+        return {"passed": False, "message": "scripts not found"}
+    tmpdir = tempfile.mkdtemp(prefix="vibedev-test-push-")
+    try:
+        _run_script(appr_path, [
+            "create", "--action-id", "test-forbidden",
+            "--repo", "test/repo", "--branch", "main",
+            "--action", "push", "--base-sha", "abc123",
+            "--changed-path", ".github/workflows/deploy.yml",
+            "--approval-dir", tmpdir, "--json"
+        ])
+        _run_script(appr_path, [
+            "approve", "--action-id", "test-forbidden",
+            "--approval-dir", tmpdir, "--json"
+        ])
+        rc, stdout, stderr = _run_script(push_path, [
+            "--action-id", "test-forbidden",
+            "--approval-dir", tmpdir, "--json"
+        ])
+        if rc == 0:
+            return {"passed": False, "message": "should have blocked forbidden path"}
+        import json
+        data = json.loads(stdout)
+        if data.get("would_push"):
+            return {"passed": False, "message": "would_push should be false"}
+        return {"passed": True, "message": "forbidden path correctly blocked"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_privileged_push_router(script_dir):
+    """Test privileged push router command (pp, push-approved)."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "router not found"}
+    rc, stdout, stderr = _run_script(path, ["pp", "--help"])
+    if "Privileged Push" not in stdout and "privileged" not in stdout.lower():
+        return {"passed": False, "message": "pp not resolved to priv-push: %s" % stdout[:100]}
+    return {"passed": True, "message": "pp->priv-push ok"}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
