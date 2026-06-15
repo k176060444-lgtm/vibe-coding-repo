@@ -31,7 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -44,6 +44,9 @@ COMMAND_SCRIPTS = {
     "intake": "vibe_workorder_intake.py",
     "release-notes": "vibe_release_notes.py",
     "dashboard": None,
+    "validate-wo": "vibe_workorder_validator.py",
+    "pack-wo": "vibe_workorder_packager.py",
+    "preflight": None,
 }
 
 # Short aliases
@@ -61,6 +64,11 @@ ALIASES = {
     "progress": "release-notes",
     "dash": "dashboard",
     "status-page": "dashboard",
+    "validate": "validate-wo",
+    "vw": "validate-wo",
+    "pack": "pack-wo",
+    "pw": "pack-wo",
+    "pre": "preflight",
     "?": "help",
     "v": "version",
 }
@@ -76,6 +84,9 @@ COMMAND_DESCRIPTIONS = {
     "intake": "Work Order Intake - convert requirements to drafts",
     "release-notes": "Release Notes - progress report from git history",
     "dashboard": "Project Dashboard - system status overview",
+    "validate-wo": "Work Order Validator - validate intake drafts",
+    "pack-wo": "Work Order Packager - package drafts into prompts",
+    "preflight": "Preflight Check - intake + validate + package chain",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -255,6 +266,106 @@ def _show_dashboard(output_json=False):
     return 0
 
 
+
+def _run_preflight(requirement_text, output_json=False):
+    """Run intake -> validate -> package chain."""
+    import json as _json
+    import tempfile
+    script_dir = Path(__file__).parent
+
+    # Step 1: Intake
+    intake_path = script_dir / "vibe_workorder_intake.py"
+    if not intake_path.exists():
+        print("ERROR: intake script not found", file=sys.stderr)
+        return 1
+
+    try:
+        cmd = [sys.executable, str(intake_path), requirement_text, "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            print("ERROR: intake failed: %s" % result.stderr[:200], file=sys.stderr)
+            return 1
+        draft = _json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, _json.JSONDecodeError, OSError) as e:
+        print("ERROR: intake error: %s" % e, file=sys.stderr)
+        return 1
+
+    # Step 2: Validate
+    validator_path = script_dir / "vibe_workorder_validator.py"
+    validation = {"overall": "SKIP"}
+    if validator_path.exists():
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
+                _json.dump(draft, tf)
+                tf.flush()
+                cmd = [sys.executable, str(validator_path), tf.name, "--json"]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                if result.returncode == 0:
+                    validation = _json.loads(result.stdout)
+            import os
+            os.unlink(tf.name)
+        except (subprocess.TimeoutExpired, _json.JSONDecodeError, OSError):
+            pass
+
+    # Step 3: Package
+    packager_path = script_dir / "vibe_workorder_packager.py"
+    package = {"total_chars": 0, "chunk_count": 0}
+    if packager_path.exists():
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
+                _json.dump(draft, tf)
+                tf.flush()
+                cmd = [sys.executable, str(packager_path), tf.name, "--json", "--compact"]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                if result.returncode == 0:
+                    package = _json.loads(result.stdout)
+            import os
+            os.unlink(tf.name)
+        except (subprocess.TimeoutExpired, _json.JSONDecodeError, OSError):
+            pass
+
+    result = {
+        "requirement": requirement_text,
+        "draft": {
+            "work_order_id": draft.get("work_order_id"),
+            "type": draft.get("type"),
+            "risk_level": draft.get("risk_level"),
+            "requires_human_approval": draft.get("requires_human_approval"),
+        },
+        "validation": {
+            "overall": validation.get("overall", "SKIP"),
+            "checks": len(validation.get("checks", [])),
+            "warnings": len(validation.get("warnings", [])),
+            "errors": len(validation.get("errors", [])),
+        },
+        "package": {
+            "total_chars": package.get("total_chars", 0),
+            "chunk_count": package.get("chunk_count", 0),
+        },
+        "preflight": "PASS" if validation.get("overall") in ("PASS", "WARN") else "FAIL",
+    }
+
+    if output_json:
+        print(_json.dumps(result, indent=2))
+    else:
+        icon = {"PASS": "✓", "FAIL": "✗", "SKIP": "⊘"}[result["preflight"]]
+        print("=" * 40)
+        print("  Preflight Check")
+        print("=" * 40)
+        print("  Requirement: %s" % result["requirement"][:60])
+        print("  Draft ID:    %s" % result["draft"]["work_order_id"])
+        print("  Type:        %s" % result["draft"]["type"])
+        print("  Risk:        %s" % result["draft"]["risk_level"])
+        print("  Human:       %s" % result["draft"]["requires_human_approval"])
+        print("  Validation:  %s" % result["validation"]["overall"])
+        print("  Package:     %d chars, %d chunk(s)" % (result["package"]["total_chars"], result["package"]["chunk_count"]))
+        print("-" * 40)
+        print("  %s Preflight: %s" % (icon, result["preflight"]))
+        print("=" * 40)
+
+    return 0 if result["preflight"] != "FAIL" else 1
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -283,6 +394,15 @@ def main(argv=None):
     if command == "version":
         _show_version()
         return 0
+
+    # Handle preflight (no script, built-in)
+    if command == "preflight":
+        req_text = " ".join(args.args) if args.args else ""
+        if not req_text:
+            print("ERROR: preflight requires requirement text", file=sys.stderr)
+            print("Usage: vibe_command_router.py preflight 'your requirement here'", file=sys.stderr)
+            return 1
+        return _run_preflight(req_text, "--json" in args.args)
 
     # Handle dashboard (no script, built-in)
     if command == "dashboard":

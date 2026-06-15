@@ -650,3 +650,26 @@ python scripts/vibe_workorder_packager.py draft.json --json --max-chars 2000
 
 Includes: draft fields, baseline SHA, router version, smoke count, safety rules, execution pipeline.
 Supports chunking with --max-chars for large prompts.
+
+
+## Preflight Check (v1)
+
+End-to-end intake → validate → package chain:
+
+```
+python scripts/vibe_command_router.py preflight 'your requirement here'
+```
+
+Or step by step:
+```
+python scripts/vibe_workorder_intake.py 'requirement' --json > draft.json
+python scripts/vibe_workorder_validator.py draft.json
+python scripts/vibe_workorder_packager.py draft.json --compact
+```
+
+## Smoke Suite v6 (28 tests)
+
+Preflight smoke coverage:
+- 26: Validator basic validation (intake → validate → PASS)
+- 27: Packager basic packaging (intake → package → chars > 0)
+- 28: Preflight router chain (preflight command via router)

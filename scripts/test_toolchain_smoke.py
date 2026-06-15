@@ -570,6 +570,95 @@ def _test_daily_report_json(script_dir):
     return {"passed": True, "message": "smoke=%s health=%s" % (d["smoke"]["overall"], d["health"]["overall"])}
 
 
+
+def _test_validator_basic(script_dir):
+    """Test validator with valid draft."""
+    import json as _json
+    import tempfile
+    intake = script_dir / "vibe_workorder_intake.py"
+    validator = script_dir / "vibe_workorder_validator.py"
+    if not intake.exists() or not validator.exists():
+        return {"passed": False, "message": "scripts not found"}
+
+    # Generate draft
+    rc1, out1, _ = _run_script(intake, ["Add --verbose flag", "--json"])
+    if rc1 != 0:
+        return {"passed": False, "message": "intake failed"}
+
+    # Validate draft
+    try:
+        draft = _json.loads(out1)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
+            _json.dump(draft, tf)
+            tf.flush()
+            rc2, out2, _ = _run_script(validator, [tf.name, "--json"])
+        import os
+        os.unlink(tf.name)
+    except Exception as e:
+        return {"passed": False, "message": str(e)}
+
+    if rc2 != 0:
+        return {"passed": False, "message": "validator failed"}
+
+    try:
+        result = _json.loads(out2)
+        return {"passed": result["overall"] == "PASS", "message": "validation=%s" % result["overall"]}
+    except (_json.JSONDecodeError, KeyError):
+        return {"passed": False, "message": "invalid validator output"}
+
+
+def _test_packager_basic(script_dir):
+    """Test packager with valid draft."""
+    import json as _json
+    import tempfile
+    intake = script_dir / "vibe_workorder_intake.py"
+    packager = script_dir / "vibe_workorder_packager.py"
+    if not intake.exists() or not packager.exists():
+        return {"passed": False, "message": "scripts not found"}
+
+    # Generate draft
+    rc1, out1, _ = _run_script(intake, ["Update docs", "--type", "doc", "--json"])
+    if rc1 != 0:
+        return {"passed": False, "message": "intake failed"}
+
+    # Package draft
+    try:
+        draft = _json.loads(out1)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
+            _json.dump(draft, tf)
+            tf.flush()
+            rc2, out2, _ = _run_script(packager, [tf.name, "--json", "--compact"])
+        import os
+        os.unlink(tf.name)
+    except Exception as e:
+        return {"passed": False, "message": str(e)}
+
+    if rc2 != 0:
+        return {"passed": False, "message": "packager failed"}
+
+    try:
+        result = _json.loads(out2)
+        return {"passed": result["total_chars"] > 0, "message": "chars=%d chunks=%d" % (result["total_chars"], result["chunk_count"])}
+    except (_json.JSONDecodeError, KeyError):
+        return {"passed": False, "message": "invalid packager output"}
+
+
+def _test_preflight_router(script_dir):
+    """Test preflight command via router."""
+    path = script_dir / "vibe_command_router.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    rc, stdout, stderr = _run_script(path, ["preflight", "Add --summary flag to snapshot"])
+    if rc != 0:
+        return {"passed": False, "message": "exit code %d" % rc}
+
+    if "Preflight" not in stdout:
+        return {"passed": False, "message": "missing preflight output"}
+
+    return {"passed": True, "message": "preflight chain works"}
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -653,6 +742,15 @@ def run_tests(jobs_dir=None):
     
     # Test 25: Daily Report - JSON
     tests.append(_run_test("daily_report_json", lambda: _test_daily_report_json(script_dir)))
+    
+    # Test 26: Validator - basic
+    tests.append(_run_test("validator_basic", lambda: _test_validator_basic(script_dir)))
+    
+    # Test 27: Packager - basic
+    tests.append(_run_test("packager_basic", lambda: _test_packager_basic(script_dir)))
+    
+    # Test 28: Preflight - router
+    tests.append(_run_test("preflight_router", lambda: _test_preflight_router(script_dir)))
     
     return tests
 
