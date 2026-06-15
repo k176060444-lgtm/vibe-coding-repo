@@ -750,3 +750,20 @@ Receipts include:
 - Stop conditions (from workorder)
 
 Receipts are stored in `receipts/` subdirectory of the registry and do NOT execute Work Orders.
+
+
+### Router Integration
+
+Status update and approval receipt are now accessible via the Command Router:
+
+```
+router ws --id my-wo --status validated --reason "OK"     # Status update
+router ar create --id my-wo --base-sha abc123 ...          # Create receipt
+router ar list --json                                       # List receipts
+```
+
+Router v2.6 adds:
+- `wo-status` / `ws` → registry update-status
+- `receipt` / `ar` / `approve-receipt` → approval receipt
+
+Smoke suite now 36/36 PASS.
