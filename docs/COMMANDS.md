@@ -1236,3 +1236,13 @@ python3 scripts/vibe_command_router.py worker --check --compact
 ```
 
 Output: worker_status, worker_error, retry_interval_minutes, max_wait_minutes, resume_allowed.
+
+
+### batch-runner v1.2.0 report fields
+
+Enhanced batch report includes:
+- `work_order_count`, `completed_count`, `stopped_count`
+- `last_successful_baseline`, `final_baseline`
+- `stop_reason`, `per_wo_prs`, `per_wo_changed_paths`
+- `checkpoint_status`, `resume_status`
+

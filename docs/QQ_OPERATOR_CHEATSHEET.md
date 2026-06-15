@@ -219,4 +219,23 @@ wr --resume cp.json     # 从检查点恢复
 wr --status-report cp.json # 生成状态报告
 ```
 
+## V1.5.2 Batch Canary
+
+### 日常用法
+```
+br --batch plan.json --json       # 执行 batch
+br --status --json                # 查看 runner 状态
+wr --check --json                 # 检查 worker 可达性
+```
+
+### Worker 失联处理
+```
+WAITING_WORKER_RECOVERY → 等待自动恢复（5 分钟重试）
+RECONCILING → 校验状态后 resume
+BLOCKED_NEEDS_OPERATOR → 需要人工排障
+```
+
+### V1.5.2 原则
+**trusted self repo 可自动批量推进；任何 blocker 立即停止；worker 失联进入等待恢复，不算业务失败。**
+
 *V1 Operational Freeze — 2026-06-15*
