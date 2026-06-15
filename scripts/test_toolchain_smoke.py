@@ -1230,6 +1230,253 @@ def _test_evidence_readonly(script_dir):
     return {"passed": True, "message": "graceful failure without evidence dir"}
 
 
+
+def _test_gate_allow(script_dir):
+    """Test execution gate ALLOW scenario."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    gate_script = script_dir / "vibe_execution_gate.py"
+    if not gate_script.exists():
+        return {"passed": False, "message": "gate script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="gate_smoke_")
+
+    try:
+        # Create approved registry entry
+        entry_file = os.path.join(tmpdir, "test-wo-allow.json")
+        with open(entry_file, "w") as f:
+            json.dump({
+                "workorder_id": "test-wo-allow",
+                "title": "Allow Test",
+                "status": "approved",
+                "base_sha": "abc123",
+                "risk_level": "low",
+                "requires_human_approval": False,
+                "changed_paths": ["scripts/test.py"],
+                "forbidden_actions": ["push_to_main", "modify_secrets"],
+                "stop_conditions": [],
+                "allowed_paths": ["scripts/"],
+                "audit_status": "clean"
+            }, f)
+
+        # Create approval receipt
+        receipts_dir = os.path.join(tmpdir, "receipts")
+        os.makedirs(receipts_dir, exist_ok=True)
+        receipt_file = os.path.join(receipts_dir, "receipt-001.json")
+        with open(receipt_file, "w") as f:
+            json.dump({
+                "receipt_id": "receipt-001",
+                "workorder_id": "test-wo-allow",
+                "base_sha": "abc123",
+                "package_digest": "def456",
+                "approver": "human",
+                "approval_text": "Approved"
+            }, f)
+
+        # Run gate check
+        cmd = [sys.executable, str(gate_script), "check",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-allow",
+               "--current-main-sha", "abc123",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "gate check failed: %s" % result.stderr}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON output"}
+
+        if data.get("verdict") != "ALLOW":
+            return {"passed": False, "message": "expected ALLOW, got %s" % data.get("verdict")}
+
+        return {"passed": True, "message": "ALLOW verdict correct"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_gate_block(script_dir):
+    """Test execution gate BLOCK scenario (base_sha mismatch)."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    gate_script = script_dir / "vibe_execution_gate.py"
+    if not gate_script.exists():
+        return {"passed": False, "message": "gate script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="gate_smoke_")
+
+    try:
+        # Create approved registry entry
+        entry_file = os.path.join(tmpdir, "test-wo-block.json")
+        with open(entry_file, "w") as f:
+            json.dump({
+                "workorder_id": "test-wo-block",
+                "title": "Block Test",
+                "status": "approved",
+                "base_sha": "abc123",
+                "risk_level": "low",
+                "requires_human_approval": False,
+                "changed_paths": ["scripts/test.py"],
+                "forbidden_actions": ["push_to_main"],
+                "stop_conditions": [],
+                "allowed_paths": ["scripts/"],
+                "audit_status": "clean"
+            }, f)
+
+        # Run gate check with WRONG SHA
+        cmd = [sys.executable, str(gate_script), "check",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-block",
+               "--current-main-sha", "WRONG_SHA",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+        # Should fail with exit code 1 (BLOCK)
+        if result.returncode != 1:
+            return {"passed": False, "message": "expected exit code 1 for BLOCK, got %d" % result.returncode}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON output"}
+
+        if data.get("verdict") != "BLOCK":
+            return {"passed": False, "message": "expected BLOCK, got %s" % data.get("verdict")}
+
+        # Check that base_sha_match is BLOCK
+        checks = data.get("checks", [])
+        base_sha_check = next((c for c in checks if c["name"] == "base_sha_match"), None)
+        if not base_sha_check or base_sha_check["result"] != "BLOCK":
+            return {"passed": False, "message": "base_sha_match should be BLOCK"}
+
+        return {"passed": True, "message": "BLOCK verdict on SHA mismatch"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_gate_review(script_dir):
+    """Test execution gate REVIEW scenario (audit_tainted)."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    gate_script = script_dir / "vibe_execution_gate.py"
+    if not gate_script.exists():
+        return {"passed": False, "message": "gate script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="gate_smoke_")
+
+    try:
+        # Create audit_tainted registry entry
+        entry_file = os.path.join(tmpdir, "test-wo-review.json")
+        with open(entry_file, "w") as f:
+            json.dump({
+                "workorder_id": "test-wo-review",
+                "title": "Review Test",
+                "status": "approved",
+                "base_sha": "abc123",
+                "risk_level": "low",
+                "requires_human_approval": False,
+                "changed_paths": ["scripts/test.py"],
+                "forbidden_actions": ["push_to_main"],
+                "stop_conditions": ["py_compile fails"],
+                "allowed_paths": ["scripts/"],
+                "audit_status": "audit_tainted"
+            }, f)
+
+        # Run gate check
+        cmd = [sys.executable, str(gate_script), "check",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-review",
+               "--current-main-sha", "abc123",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+        # Should fail with exit code 1 (BLOCK due to audit_tainted)
+        if result.returncode != 1:
+            return {"passed": False, "message": "expected exit code 1 for BLOCK, got %d" % result.returncode}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON output"}
+
+        if data.get("verdict") != "BLOCK":
+            return {"passed": False, "message": "expected BLOCK, got %s" % data.get("verdict")}
+
+        # Check that audit_lock is BLOCK
+        checks = data.get("checks", [])
+        audit_check = next((c for c in checks if c["name"] == "audit_lock"), None)
+        if not audit_check or audit_check["result"] != "BLOCK":
+            return {"passed": False, "message": "audit_lock should be BLOCK"}
+
+        return {"passed": True, "message": "BLOCK verdict on audit_tainted"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_gate_router(script_dir):
+    """Test execution gate via command router."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    router_script = script_dir / "vibe_command_router.py"
+    if not router_script.exists():
+        return {"passed": False, "message": "router script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="gate_smoke_")
+
+    try:
+        # Create approved registry entry
+        entry_file = os.path.join(tmpdir, "test-wo-router-gate.json")
+        with open(entry_file, "w") as f:
+            json.dump({
+                "workorder_id": "test-wo-router-gate",
+                "title": "Router Gate Test",
+                "status": "approved",
+                "base_sha": "abc123",
+                "risk_level": "low",
+                "requires_human_approval": False,
+                "changed_paths": [],
+                "forbidden_actions": ["push_to_main"],
+                "stop_conditions": [],
+                "allowed_paths": ["scripts/"],
+                "audit_status": "clean"
+            }, f)
+
+        # Run gate via router
+        cmd = [sys.executable, str(router_script), "gate",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-router-gate",
+               "--current-main-sha", "abc123",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "router gate failed: %s" % result.stderr}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON from router"}
+
+        if data.get("verdict") not in ("ALLOW", "REVIEW"):
+            return {"passed": False, "message": "unexpected verdict: %s" % data.get("verdict")}
+
+        return {"passed": True, "message": "gate/ready-run aliases work"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -1341,6 +1588,18 @@ def run_tests(jobs_dir=None):
     # Test 37: Evidence - basic operations
     tests.append(_run_test("evidence_basic", lambda: _test_evidence_basic(script_dir)))
     
+
+    # Test 41: Gate - ALLOW scenario
+    tests.append(_run_test("gate_allow", lambda: _test_gate_allow(script_dir)))
+    
+    # Test 42: Gate - BLOCK scenario (SHA mismatch)
+    tests.append(_run_test("gate_block", lambda: _test_gate_block(script_dir)))
+    
+    # Test 43: Gate - BLOCK scenario (audit_tainted)
+    tests.append(_run_test("gate_review", lambda: _test_gate_review(script_dir)))
+    
+    # Test 44: Gate - router integration
+    tests.append(_run_test("gate_router", lambda: _test_gate_router(script_dir)))
     # Test 38: Evidence - JSON output
     tests.append(_run_test("evidence_json", lambda: _test_evidence_json(script_dir)))
     
