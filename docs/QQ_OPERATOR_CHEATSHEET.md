@@ -239,3 +239,41 @@ BLOCKED_NEEDS_OPERATOR → 需要人工排障
 **trusted self repo 可自动批量推进；任何 blocker 立即停止；worker 失联进入等待恢复，不算业务失败。**
 
 *V1 Operational Freeze — 2026-06-15*
+
+## V1.6 Operator Control Plane
+
+### 查看 batch 状态
+```
+bs --json              # 快速查看当前 batch 状态（只读）
+breport --json         # 详细 batch 报告（只读）
+```
+
+### 暂停/恢复 batch
+```
+bp --checkpoint cp.json --json      # 在安全点暂停
+bresume --checkpoint cp.json --json # 恢复前先 reconcile
+```
+
+### 取消/终止 batch
+```
+bcancel --checkpoint cp.json --json  # 取消（仅 mutation 前）
+babort --checkpoint cp.json --json   # 立即终止（不做 destructive cleanup）
+```
+
+### 状态说明
+- **PAUSED**: 安全点暂停，等待 resume
+- **CANCELLED**: mutation 前取消，不可 resume
+- **ABORTED**: 立即终止，不可 resume
+- **BLOCKED_BASELINE_MISMATCH**: baseline 不匹配，需人工检查
+- **BLOCKED_DIRTY_WORKTREE**: worktree 脏，需清理
+
+### 恢复前提条件（reconcile）
+1. Worker 可达（SSH 检查）
+2. Baseline 匹配 checkpoint
+3. Worktree 干净
+4. 状态允许 resume
+
+### V1.6 一句话原则
+**trusted self repo 可安全暂停/恢复；cancel 仅 mutation 前；abort 不做 destructive cleanup；external repo 写操作必须 approve。**
+
+*V1.6 Operator Control Plane — 2026-06-16*
