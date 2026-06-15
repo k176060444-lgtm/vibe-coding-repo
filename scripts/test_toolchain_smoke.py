@@ -838,6 +838,224 @@ def _test_registry_readonly(script_dir):
     return {"passed": True, "message": "graceful failure without registry dir"}
 
 
+
+def _test_status_update(script_dir):
+    """Test registry status update with valid transitions."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    registry_script = script_dir / "vibe_workorder_registry.py"
+    if not registry_script.exists():
+        return {"passed": False, "message": "registry script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="status_smoke_")
+
+    try:
+        # Register entry
+        cmd = [sys.executable, str(registry_script), "register",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-status",
+               "--title", "Status Test"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "register failed"}
+
+        # Test valid transition: draft → validated
+        cmd = [sys.executable, str(registry_script), "update-status",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-status",
+               "--status", "validated",
+               "--reason", "All checks passed",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "update-status failed: %s" % result.stderr}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON output"}
+
+        if data.get("from_status") != "draft":
+            return {"passed": False, "message": "wrong from_status"}
+        if data.get("to_status") != "validated":
+            return {"passed": False, "message": "wrong to_status"}
+
+        return {"passed": True, "message": "valid transition works"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_status_invalid_transition(script_dir):
+    """Test registry rejects invalid status transitions."""
+    import subprocess
+    import tempfile
+    import shutil
+
+    registry_script = script_dir / "vibe_workorder_registry.py"
+    if not registry_script.exists():
+        return {"passed": False, "message": "registry script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="status_smoke_")
+
+    try:
+        # Register entry
+        cmd = [sys.executable, str(registry_script), "register",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-invalid",
+               "--title", "Invalid Transition Test"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "register failed"}
+
+        # Test invalid transition: draft → executed (should fail)
+        cmd = [sys.executable, str(registry_script), "update-status",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-invalid",
+               "--status", "executed",
+               "--reason", "Skip approval"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+        # Should fail with exit code 1
+        if result.returncode == 0:
+            return {"passed": False, "message": "invalid transition should fail"}
+
+        if "Invalid transition" not in result.stderr:
+            return {"passed": False, "message": "missing error message about invalid transition"}
+
+        return {"passed": True, "message": "invalid transition rejected"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_approval_receipt(script_dir):
+    """Test approval receipt creation and listing."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    receipt_script = script_dir / "vibe_approval_receipt.py"
+    if not receipt_script.exists():
+        return {"passed": False, "message": "receipt script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="receipt_smoke_")
+
+    try:
+        # Create a test workorder entry
+        entry_file = os.path.join(tmpdir, "test-wo-receipt.json")
+        with open(entry_file, "w") as f:
+            json.dump({
+                "workorder_id": "test-wo-receipt",
+                "title": "Receipt Test",
+                "status": "packaged",
+                "requires_human_approval": True,
+                "changed_paths": ["scripts/test.py"],
+                "stop_conditions": ["py_compile fails"]
+            }, f)
+
+        # Create receipt
+        cmd = [sys.executable, str(receipt_script), "create",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-receipt",
+               "--base-sha", "abc123",
+               "--package-digest", "def456",
+               "--approver", "human",
+               "--approval-text", "Approved for execution",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "create failed: %s" % result.stderr}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON output"}
+
+        receipt = data.get("receipt", {})
+        if not receipt.get("receipt_id"):
+            return {"passed": False, "message": "missing receipt_id"}
+        if not receipt.get("digest"):
+            return {"passed": False, "message": "missing digest"}
+        if receipt.get("requires_human_approval") != True:
+            return {"passed": False, "message": "wrong requires_human_approval"}
+        if "scripts/test.py" not in receipt.get("approved_scope", []):
+            return {"passed": False, "message": "wrong approved_scope"}
+
+        # List receipts
+        cmd = [sys.executable, str(receipt_script), "list",
+               "--registry-dir", tmpdir, "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "list failed"}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON from list"}
+
+        if data.get("count") != 1:
+            return {"passed": False, "message": "expected 1 receipt"}
+
+        return {"passed": True, "message": "receipt create/list works"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_approval_router(script_dir):
+    """Test approval receipt via command router."""
+    import subprocess
+    import tempfile
+    import shutil
+    import json
+
+    router_script = script_dir / "vibe_command_router.py"
+    if not router_script.exists():
+        return {"passed": False, "message": "router script not found"}
+
+    tmpdir = tempfile.mkdtemp(prefix="receipt_smoke_")
+
+    try:
+        # Create a test workorder entry
+        entry_file = os.path.join(tmpdir, "test-wo-router-receipt.json")
+        with open(entry_file, "w") as f:
+            json.dump({
+                "workorder_id": "test-wo-router-receipt",
+                "title": "Router Receipt Test",
+                "status": "packaged",
+                "requires_human_approval": False,
+                "changed_paths": [],
+                "stop_conditions": []
+            }, f)
+
+        # Create receipt via router
+        cmd = [sys.executable, str(router_script), "ar", "create",
+               "--registry-dir", tmpdir,
+               "--id", "test-wo-router-receipt",
+               "--base-sha", "abc123",
+               "--package-digest", "def456",
+               "--approver", "automated",
+               "--approval-text", "Auto-approved",
+               "--json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return {"passed": False, "message": "router receipt create failed: %s" % result.stderr}
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"passed": False, "message": "invalid JSON from router"}
+
+        if not data.get("receipt", {}).get("receipt_id"):
+            return {"passed": False, "message": "missing receipt_id from router"}
+
+        return {"passed": True, "message": "ar (approve-receipt) alias works"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -935,6 +1153,18 @@ def run_tests(jobs_dir=None):
     # Test 29: Registry - basic operations
     tests.append(_run_test("registry_basic", lambda: _test_registry_basic(script_dir)))
     
+
+    # Test 33: Status Update - valid transition
+    tests.append(_run_test("status_update", lambda: _test_status_update(script_dir)))
+    
+    # Test 34: Status Update - invalid transition
+    tests.append(_run_test("status_invalid_transition", lambda: _test_status_invalid_transition(script_dir)))
+    
+    # Test 35: Approval Receipt - create/list
+    tests.append(_run_test("approval_receipt", lambda: _test_approval_receipt(script_dir)))
+    
+    # Test 36: Approval Receipt - router integration
+    tests.append(_run_test("approval_router", lambda: _test_approval_router(script_dir)))
     # Test 30: Registry - JSON output
     tests.append(_run_test("registry_json", lambda: _test_registry_json(script_dir)))
     

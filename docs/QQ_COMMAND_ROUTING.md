@@ -490,3 +490,17 @@ Bot:
 /reg show --id my-wo --json
 /wo-list --registry-dir /tmp/registry
 ```
+
+
+### Status & Receipt Commands
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `wo-status` | `ws` | Work Order 状态更新（受控流转） |
+| `receipt` | `ar`, `approve-receipt` | 审批收据：创建/列出/查看 |
+
+**示例:**
+```
+/ws --id my-wo --status validated --reason "Checks passed"
+/ar create --id my-wo --base-sha abc123 --package-digest def456 --approver "human" --approval-text "OK"
+/ar list --json
+```

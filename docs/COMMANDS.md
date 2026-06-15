@@ -908,3 +908,23 @@ python3 scripts/vibe_approval_receipt.py show --receipt-id receipt-001
 - SHA256 digest of receipt data
 - Includes requires_human_approval, approved_scope, stop_conditions from workorder
 - Does NOT execute Work Orders
+
+
+### `wo-status` / `ws` (Work Order Status Update)
+Update status with controlled transitions via router.
+
+**Usage:**
+```
+python3 scripts/vibe_command_router.py ws --id my-wo --status validated --reason "All checks passed"
+python3 scripts/vibe_command_router.py wo-status --id my-wo --status packaged --reason "Package ready" --json
+```
+
+### `receipt` / `ar` / `approve-receipt` (Approval Receipt)
+Create and manage approval receipts via router.
+
+**Usage:**
+```
+python3 scripts/vibe_command_router.py ar create --id my-wo --base-sha abc123 --package-digest def456 --approver "human" --approval-text "Approved"
+python3 scripts/vibe_command_router.py receipt list --json
+python3 scripts/vibe_command_router.py ar show --receipt-id receipt-001
+```

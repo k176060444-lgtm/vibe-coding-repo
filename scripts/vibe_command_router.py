@@ -17,7 +17,9 @@ Commands:
     validate-wo - Work Order Validator (draft validation)
     pack-wo     - Work Order Packager (draft to prompt)
     preflight   - Preflight Check (intake+validate+pack)
-    registry    - Work Order Registry (register/list/show)
+    registry    - Work Order Registry (register/list/show/update-status)
+    wo-status   - Work Order Status Update (registry update-status)
+    receipt     - Approval Receipt (create/list/show)
     help        - Show this help message
     version     - Show version
 
@@ -25,7 +27,8 @@ Short aliases:
     s → snapshot, a → advisor, d → dispatch, b → batch-plan,
     h → health, sm → smoke, i/wo → intake, notes/rn/progress → release-notes,
     dash/status-page → dashboard, validate/vw → validate-wo, pack/pw → pack-wo,
-    pre → preflight, reg/wo-list/wo-show → registry, ? → help, v → version
+    pre → preflight, reg/wo-list/wo-show → registry, ws → wo-status,
+    approve-receipt → receipt, ar → receipt, ? → help, v → version
 
 Constraints:
     - Read-only, no IO on import, standard library only.
@@ -40,7 +43,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.5.0"
+VERSION = "2.6.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -57,6 +60,8 @@ COMMAND_SCRIPTS = {
     "pack-wo": "vibe_workorder_packager.py",
     "preflight": None,
     "registry": "vibe_workorder_registry.py",
+    "wo-status": "vibe_workorder_registry.py",
+    "receipt": "vibe_approval_receipt.py",
 }
 
 # Short aliases
@@ -82,6 +87,9 @@ ALIASES = {
     "reg": "registry",
     "wo-list": "registry",
     "wo-show": "registry",
+    "ws": "wo-status",
+    "approve-receipt": "receipt",
+    "ar": "receipt",
     "?": "help",
     "v": "version",
 }
@@ -100,7 +108,9 @@ COMMAND_DESCRIPTIONS = {
     "validate-wo": "Work Order Validator - validate intake drafts",
     "pack-wo": "Work Order Packager - package drafts into prompts",
     "preflight": "Preflight Check - intake + validate + package chain",
-    "registry": "Work Order Registry - register/list/show work orders",
+    "registry": "Work Order Registry - register/list/show/update-status",
+    "wo-status": "Work Order Status Update - controlled status transitions",
+    "receipt": "Approval Receipt - create/list/show approval receipts",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -114,6 +124,8 @@ COMMAND_FLAGS = {
     "health": ["--json", "--jobs-dir"],
     "smoke": ["--json", "--jobs-dir"],
     "registry": ["--json", "--registry-dir"],
+    "wo-status": ["--json", "--registry-dir"],
+    "receipt": ["--json", "--registry-dir"],
 }
 
 
@@ -191,7 +203,8 @@ def _show_help():
     lines.append("  python scripts/vibe_command_router.py s --json")
     lines.append("  python scripts/vibe_command_router.py pre 'Add --verbose flag to health check'")
     lines.append("  python scripts/vibe_command_router.py reg list --registry-dir /tmp/registry")
-    lines.append("  python scripts/vibe_command_router.py reg show --id my-wo --json")
+    lines.append("  python scripts/vibe_command_router.py ws --id my-wo --status validated --reason 'OK'")
+    lines.append("  python scripts/vibe_command_router.py ar create --id my-wo --base-sha abc123 ...")
 
     print("\n".join(lines))
 
@@ -369,6 +382,11 @@ def main(argv=None):
     if not script_path.exists():
         print("ERROR: Script not found: %s" % script_path, file=sys.stderr)
         return 1
+
+    # Special handling for wo-status command (route to registry update-status)
+    if cmd == "wo-status":
+        # Inject 'update-status' as first argument
+        args = ["update-status"] + args
 
     return _run_script(script_path, args)
 
