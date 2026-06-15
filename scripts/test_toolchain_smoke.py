@@ -1676,6 +1676,43 @@ def _test_loop_summary_router(script_dir):
         return {"passed": False, "message": "missing components"}
     return {"passed": True, "message": "router loop-summary OK"}
 
+
+def _test_sandbox_check(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_executor_sandbox.py", ["check", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit %d" % rc}
+    data = json.loads(out)
+    if data.get("verdict") != "PASS":
+        return {"passed": False, "message": "verdict=%s" % data.get("verdict")}
+    return {"passed": True, "message": "sandbox check PASS: %d checks" % len(data.get("checks", []))}
+
+def _test_control_plan(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_executor_control.py", ["plan-timeout", "--id", "smoke", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit %d" % rc}
+    data = json.loads(out)
+    if "timeout_config" not in data:
+        return {"passed": False, "message": "missing timeout_config"}
+    return {"passed": True, "message": "control plan OK"}
+
+def _test_recovery_plan(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_executor_recovery.py", ["plan", "--id", "smoke", "--failure-type", "model_error", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit %d" % rc}
+    data = json.loads(out)
+    if data.get("failure_type") != "model_error":
+        return {"passed": False, "message": "wrong type: %s" % data.get("failure_type")}
+    return {"passed": True, "message": "recovery plan OK"}
+
+def _test_recovery_classify(script_dir):
+    rc, out, err = _run_script(script_dir / "vibe_executor_recovery.py", ["classify-failure", "--id", "smoke", "--error-msg", "quota exceeded", "--json"])
+    if rc != 0:
+        return {"passed": False, "message": "exit %d" % rc}
+    data = json.loads(out)
+    if data.get("classified_type") != "model_error":
+        return {"passed": False, "message": "wrong type: %s" % data.get("classified_type")}
+    return {"passed": True, "message": "classify OK: %s" % data["classified_type"]}
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -1856,6 +1893,18 @@ def run_tests(jobs_dir=None):
 
     # Test 53: Loop Summary - router integration
     tests.append(_run_test("loop_summary_router", lambda: _test_loop_summary_router(script_dir)))
+
+    # Test 58: Sandbox check
+    tests.append(_run_test("sandbox_check", lambda: _test_sandbox_check(script_dir)))
+
+    # Test 59: Control plan
+    tests.append(_run_test("control_plan", lambda: _test_control_plan(script_dir)))
+
+    # Test 60: Recovery plan
+    tests.append(_run_test("recovery_plan", lambda: _test_recovery_plan(script_dir)))
+
+    # Test 61: Recovery classify
+    tests.append(_run_test("recovery_classify", lambda: _test_recovery_classify(script_dir)))
     return tests
 
 

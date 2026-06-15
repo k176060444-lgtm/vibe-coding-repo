@@ -1121,3 +1121,15 @@ python3 scripts/vibe_command_router.py ec cancel-token --id my-wo
 ```
 
 **Features:** timeout phases, heartbeat monitoring, stale lock detection, cancel token, graceful/immediate/file-signal cancel methods
+
+### recovery / rc / recover (Executor Recovery Plan)
+Failure recovery/rollback plan generator. Covers 8 failure types. Plan-only; no reset/clean/rm/push/delete executed.
+
+**Usage:**
+```
+python3 scripts/vibe_executor_recovery.py plan --id my-wo --failure-type model_error --json
+python3 scripts/vibe_executor_recovery.py classify-failure --id my-wo --error-msg 'quota exceeded' --json
+python3 scripts/vibe_command_router.py rc plan --id my-wo --failure-type timeout --json
+```
+
+**Failure types:** model_error, timeout, dirty_worktree, gate_blocked, wrapper_blocked, test_failed, partial_artifacts, evidence_mismatch
