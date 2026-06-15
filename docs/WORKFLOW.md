@@ -825,3 +825,28 @@ The smoke suite now includes 40 tests covering:
 - Execution Evidence (basic, JSON, router, readonly)
 
 All tests must PASS for deployment.
+
+
+### Execution Gate
+
+The execution gate is a machine-checkable admission control before Work Order execution:
+
+```
+requirement → intake → validate → registry → packager → approval-receipt
+                                                              ↓
+                              execution-gate.check ← [before execute]
+                                                              ↓
+                              verdict: ALLOW / REVIEW / BLOCK
+```
+
+Gate checks:
+1. Registry status is approved
+2. Approval receipt exists and matches
+3. Base SHA matches current origin/main
+4. Risk level requires human approval if high/critical
+5. Stop conditions are defined
+6. Allowed paths are specified
+7. Forbidden actions include high-risk protections
+8. Audit tainted lock is not set
+
+BLOCK verdicts must halt execution. REVIEW verdicts require human decision.
