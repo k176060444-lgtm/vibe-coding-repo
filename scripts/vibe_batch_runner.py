@@ -45,7 +45,7 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
 
@@ -338,6 +338,26 @@ def _cmd_run(args):
 
     if batch_result["status"] == "running":
         batch_result["status"] = "completed"
+
+    # Enhanced report fields
+    batch_result["work_order_count"] = len(work_orders)
+    batch_result["completed_count"] = batch_result["completed"]
+    batch_result["stopped_count"] = batch_result["failed"]
+    batch_result["stop_reason"] = batch_result.get("stop_reason")
+    batch_result["per_wo_prs"] = [
+        {"wo_id": r.get("wo_id"), "pr": r.get("pr"), "branch": r.get("branch")}
+        for r in batch_result["work_order_results"]
+    ]
+    batch_result["per_wo_changed_paths"] = [
+        {"wo_id": r.get("wo_id"), "changed_paths": r.get("changed_paths", [])}
+        for r in batch_result["work_order_results"]
+    ]
+    # Determine last successful baseline
+    baselines = [r.get("post_merge_baseline") for r in batch_result["work_order_results"] if r.get("post_merge_baseline")]
+    batch_result["last_successful_baseline"] = baselines[-1] if baselines else None
+    batch_result["final_baseline"] = baselines[-1] if baselines else None
+    batch_result["checkpoint_status"] = "none"
+    batch_result["resume_status"] = "not_needed"
 
     return batch_result, 0 if batch_result["status"] == "completed" else 1
 
