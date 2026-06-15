@@ -2,30 +2,45 @@
 """Privileged Push Wrapper — controlled push for approved privileged actions.
 
 Reads an approved action from the approval directory, validates all
-constraints, and outputs would_push=true/false in dry-run mode.
-Current phase: DRY-RUN ONLY — no real push, no token read.
+constraints, and performs token-aware preflight before push.
+Current phase: PREFLIGHT + DRY-RUN + REAL PUSH (to test branches only).
 
 Usage:
     python3 scripts/vibe_privileged_push.py \\
         --action-id <id> [--approval-dir <dir>] [--json] [--compact]
 
     python3 scripts/vibe_privileged_push.py --list-approved [--json]
+    python3 scripts/vibe_privileged_push.py --action-id <id> --push [--json]
 
 Constraints:
-    - Dry-run only: never reads GitHub Key, never pushes.
+    - Token only read after action is approved.
+    - Token NEVER output to stdout/stderr/log/report.
     - Validates: repo, branch, changed_paths, forbidden_actions,
       no_force_push, no_pr_merge, no_secrets/CI/workflow/provider/SSH.
+    - Real push only to self-repo test branches.
     - Standard library only, no external dependencies.
     - No IO on import.
 """
 
 import argparse
+import hashlib
 import json
 import os
+import stat
+import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+
+# Self-repo: the only repo allowed for real privileged push
+SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
+
+# Test branch prefix: only branches matching this prefix are allowed
+TEST_BRANCH_PREFIX = "privileged-smoke/"
+
+# Token file path
+DEFAULT_TOKEN_FILE = "/home/vibeworker/.vibedev/secrets/github_privileged_token"
 
 # Paths/components that are always forbidden in privileged push
 FORBIDDEN_PATH_PREFIXES = [
@@ -92,6 +107,53 @@ def _check_forbidden_actions(record):
     return False, None
 
 
+def _check_token_file(token_path):
+    """Check token file exists with correct owner/mode/size.
+
+    Returns (ok: bool, details: dict).  NEVER returns token content.
+    """
+    details = {"path": token_path, "exists": False}
+    p = Path(token_path)
+    if not p.exists():
+        details["error"] = "token file not found"
+        return False, details
+    details["exists"] = True
+
+    try:
+        st = p.stat()
+    except OSError as e:
+        details["error"] = f"stat failed: {e}"
+        return False, details
+
+    # Check size > 20
+    details["size"] = st.st_size
+    if st.st_size <= 20:
+        details["error"] = "token file too small (size <= 20)"
+        return False, details
+
+    # Check mode is 600 (owner read/write only)
+    mode = stat.S_IMODE(st.st_mode)
+    details["mode"] = oct(mode)
+    if mode != 0o600:
+        details["error"] = f"token file mode {oct(mode)}, expected 0o600"
+        return False, details
+
+    # Check owner (on Linux, st_uid)
+    try:
+        import pwd
+        owner_info = pwd.getpwuid(st.st_uid)
+        details["owner"] = owner_info.pw_name
+        if owner_info.pw_name != "vibeworker":
+            details["error"] = f"token file owner={owner_info.pw_name}, expected=vibeworker"
+            return False, details
+    except (ImportError, KeyError):
+        # pwd module not available (Windows) or uid not found
+        details["owner_check"] = "skipped (pwd unavailable)"
+
+    details["error"] = None
+    return True, details
+
+
 def _validate_push(record):
     """Validate all constraints for a privileged push.
 
@@ -134,30 +196,110 @@ def _validate_push(record):
     if is_forbidden:
         blockers.append(f"forbidden_action: {reason}")
 
-    # 8. Digest validation
-    if record.get("digest"):
-        import hashlib
-        # Recompute digest from canonical record (without approved_at/approved_by which may vary)
-        check_record = {k: v for k, v in record.items()
-                       if k not in ("approved_at", "approved_by", "expired_at")}
-        # Restore pre-approval state for check
-        check_record_copy = dict(check_record)
-        check_record_copy["status"] = "pending"
-        check_record_copy["approved_at"] = None
-        check_record_copy["approved_by"] = None
-        canonical = json.dumps(check_record_copy, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        expected_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        # Note: we don't block on digest mismatch since approved records have modified digests
-        # This is a warning only
-        if record.get("digest") != expected_digest:
-            # Recompute from current state
-            current_canonical = json.dumps(record, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-            current_digest = hashlib.sha256(current_canonical.encode("utf-8")).hexdigest()
-            if record.get("digest") != current_digest:
-                warnings.append("digest mismatch (record may have been tampered)")
+    # 8. Repo restriction: only self-repo for real push
+    repo = record.get("repo", "")
+    if repo != SELF_REPO:
+        blockers.append(f"repo '{repo}' is not self-repo ({SELF_REPO}); only self-repo privileged push allowed")
+
+    # 9. Branch restriction: only test branch prefix for real push
+    branch = record.get("branch", "")
+    if not branch.startswith(TEST_BRANCH_PREFIX):
+        blockers.append(f"branch '{branch}' does not start with '{TEST_BRANCH_PREFIX}'; only test branches allowed")
 
     would_push = len(blockers) == 0
     return would_push, blockers, warnings
+
+
+def _execute_push(record, token_path, dry_run=False):
+    """Execute a real git push using the token.
+
+    Returns (success: bool, details: dict).  NEVER outputs token content.
+    """
+    result = {
+        "action_id": record.get("action_id"),
+        "repo": record.get("repo"),
+        "branch": record.get("branch"),
+        "dry_run": dry_run,
+    }
+
+    # 1. Validate constraints
+    would_push, blockers, warnings = _validate_push(record)
+    result["would_push"] = would_push
+    result["blockers"] = blockers
+    result["warnings"] = warnings
+    if not would_push:
+        result["push_executed"] = False
+        return False, result
+
+    # 2. Token preflight
+    token_ok, token_details = _check_token_file(token_path)
+    result["token_preflight"] = {k: v for k, v in token_details.items() if k != "content"}
+    if not token_ok:
+        result["push_executed"] = False
+        result["blockers"].append(f"token preflight failed: {token_details.get('error')}")
+        return False, result
+
+    # 3. Read token (never output it)
+    try:
+        with open(token_path, "r") as f:
+            token = f.read().strip()
+    except OSError as e:
+        result["push_executed"] = False
+        result["blockers"].append(f"token read failed: {e}")
+        return False, result
+
+    if dry_run:
+        result["push_executed"] = False
+        result["dry_run"] = True
+        result["push_preview"] = f"gh auth login --with-token < (token_file) && git push origin {record['branch']}"
+        return True, result
+
+    # 4. Execute real push via gh
+    try:
+        # Set up gh auth with token (via stdin, never as argument)
+        proc = subprocess.run(
+            ["gh", "auth", "login", "--with-token"],
+            input=token, capture_output=True, text=True, timeout=30,
+        )
+        if proc.returncode != 0:
+            result["push_executed"] = False
+            result["blockers"].append(f"gh auth login failed: rc={proc.returncode}")
+            return False, result
+
+        # Configure git to use gh credential helper
+        subprocess.run(
+            ["gh", "auth", "setup-git"],
+            capture_output=True, text=True, timeout=15,
+        )
+
+        # Push
+        push_result = subprocess.run(
+            ["git", "push", "origin", f"HEAD:{record['branch']}"],
+            capture_output=True, text=True, timeout=60,
+        )
+        result["push_executed"] = True
+        result["push_rc"] = push_result.returncode
+        # Sanitize stderr: remove any potential token-like strings
+        stderr_clean = push_result.stderr
+        if token in stderr_clean:
+            stderr_clean = stderr_clean.replace(token, "[REDACTED]")
+        result["push_stderr"] = stderr_clean[:500]
+        result["push_stdout"] = push_result.stdout[:500]
+
+        if push_result.returncode != 0:
+            result["blockers"].append(f"git push failed: rc={push_result.returncode}")
+            return False, result
+
+        return True, result
+
+    except subprocess.TimeoutExpired:
+        result["push_executed"] = False
+        result["blockers"].append("push timed out")
+        return False, result
+    except OSError as e:
+        result["push_executed"] = False
+        result["blockers"].append(f"push error: {e}")
+        return False, result
 
 
 def _cmd_check(args):
@@ -190,8 +332,28 @@ def _cmd_check(args):
     return result, 0 if would_push else 1
 
 
+def _cmd_push(args):
+    """Execute a real privileged push (token-aware)."""
+    record, err = _load_approval(args.approval_dir, args.action_id)
+    if err:
+        return {"error": err, "would_push": False}, 1
+
+    token_path = args.token_file or DEFAULT_TOKEN_FILE
+    dry_run = args.dry_run if hasattr(args, "dry_run") else False
+
+    success, result = _execute_push(record, token_path, dry_run=dry_run)
+    return result, 0 if success else 1
+
+
+def _cmd_token_preflight(args):
+    """Check token file without reading its content."""
+    token_path = args.token_file or DEFAULT_TOKEN_FILE
+    ok, details = _check_token_file(token_path)
+    return {"token_preflight": details, "ok": ok}, 0 if ok else 1
+
+
 def _cmd_list_approved(args):
-    """List all approved actions ready for push."""
+    """List all approved actions."""
     approved = _list_approved(args.approval_dir)
     results = []
     for record in approved:
@@ -218,7 +380,7 @@ def build_parser():
     """Build argument parser. Used by router for help generation."""
     parser = argparse.ArgumentParser(
         prog="vibe_privileged_push",
-        description="Privileged Push Wrapper — controlled push (dry-run only)",
+        description="Privileged Push Wrapper — controlled push with token-aware preflight",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--json", action="store_true", dest="output_json", help="JSON output")
@@ -226,11 +388,23 @@ def build_parser():
     parser.add_argument(
         "--approval-dir",
         default=os.path.expanduser("~/vibedev/privileged-approvals"),
-        help="Directory for approval records (default: ~/vibedev/privileged-approvals)",
+        help="Directory for approval records",
+    )
+    parser.add_argument(
+        "--token-file",
+        default=None,
+        help="Path to privileged token file (default: ~/.vibedev/secrets/github_privileged_token)",
     )
 
     # Default mode: check a specific action
-    parser.add_argument("--action-id", help="Action ID to check")
+    parser.add_argument("--action-id", help="Action ID to check/push")
+
+    # Push mode
+    parser.add_argument("--push", action="store_true", help="Execute real push (requires approved action)")
+    parser.add_argument("--dry-run-push", action="store_true", help="Push dry-run (validate + token preflight, no push)")
+
+    # Token preflight
+    parser.add_argument("--token-preflight", action="store_true", help="Check token file without reading content")
 
     # List approved
     parser.add_argument("--list-approved", action="store_true", help="List approved actions")
@@ -242,12 +416,16 @@ def _format_compact(result):
     """Format result as compact single-line string."""
     if "error" in result:
         return f"PP ERROR | {result['error']}"
+    if result.get("push_executed"):
+        return f"PP PUSHED | {result.get('repo')}:{result.get('branch')} | rc={result.get('push_rc')}"
     if result.get("would_push"):
         cp_count = len(result.get("changed_paths", []))
         return f"PP READY | {result.get('repo')}:{result.get('branch')} | {cp_count} paths | dry-run"
-    else:
-        blockers = result.get("blockers", [])
-        return f"PP BLOCKED | {len(blockers)} blockers | {blockers[0] if blockers else 'unknown'}"
+    if result.get("token_preflight"):
+        ok = result.get("ok", False)
+        return f"PP TOKEN {'OK' if ok else 'FAIL'} | {result['token_preflight'].get('error', 'ok')}"
+    blockers = result.get("blockers", [])
+    return f"PP BLOCKED | {len(blockers)} blockers | {blockers[0] if blockers else 'unknown'}"
 
 
 def main(argv=None):
@@ -255,8 +433,15 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.list_approved:
+    if args.token_preflight:
+        result, rc = _cmd_token_preflight(args)
+    elif args.list_approved:
         result, rc = _cmd_list_approved(args)
+    elif args.action_id and args.push:
+        result, rc = _cmd_push(args)
+    elif args.action_id and args.dry_run_push:
+        args.dry_run = True
+        result, rc = _cmd_push(args)
     elif args.action_id:
         result, rc = _cmd_check(args)
     else:
@@ -276,15 +461,21 @@ def main(argv=None):
             for a in result["actions"]:
                 icon = "✓" if a["would_push"] else "✗"
                 print(f"  {icon} {a['action_id']}: {a['repo']}:{a['branch']}")
+        elif args.token_preflight:
+            ok = result.get("ok", False)
+            print(f"Token preflight: {'OK' if ok else 'FAIL'}")
+            for k, v in result["token_preflight"].items():
+                if k != "content":
+                    print(f"  {k}: {v}")
         else:
-            if result["would_push"]:
+            if result.get("push_executed"):
+                print(f"PUSHED: {result['repo']}:{result['branch']} (rc={result.get('push_rc')})")
+            elif result.get("would_push"):
                 print(f"WOULD PUSH: {result['repo']}:{result['branch']}")
-                print(f"  base_sha: {result['base_sha']}")
-                print(f"  changed_paths: {result['changed_paths']}")
                 print(f"  [DRY-RUN — not executed]")
             else:
-                print(f"BLOCKED: {result['action_id']}")
-                for b in result["blockers"]:
+                print(f"BLOCKED: {result.get('action_id', 'unknown')}")
+                for b in result.get("blockers", []):
                     print(f"  - {b}")
 
     return rc
