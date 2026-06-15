@@ -20,6 +20,7 @@ Commands:
     registry    - Work Order Registry (register/list/show/update-status)
     wo-status   - Work Order Status Update (registry update-status)
     receipt     - Approval Receipt (create/list/show)
+    evidence    - Execution Evidence (create/list/show)
     help        - Show this help message
     version     - Show version
 
@@ -28,7 +29,8 @@ Short aliases:
     h → health, sm → smoke, i/wo → intake, notes/rn/progress → release-notes,
     dash/status-page → dashboard, validate/vw → validate-wo, pack/pw → pack-wo,
     pre → preflight, reg/wo-list/wo-show → registry, ws → wo-status,
-    approve-receipt → receipt, ar → receipt, ? → help, v → version
+    approve-receipt → receipt, ar → receipt, ev → evidence, exec-log → evidence,
+    ? → help, v → version
 
 Constraints:
     - Read-only, no IO on import, standard library only.
@@ -43,7 +45,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.6.0"
+VERSION = "2.7.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -62,6 +64,7 @@ COMMAND_SCRIPTS = {
     "registry": "vibe_workorder_registry.py",
     "wo-status": "vibe_workorder_registry.py",
     "receipt": "vibe_approval_receipt.py",
+    "evidence": "vibe_execution_evidence.py",
 }
 
 # Short aliases
@@ -90,6 +93,8 @@ ALIASES = {
     "ws": "wo-status",
     "approve-receipt": "receipt",
     "ar": "receipt",
+    "ev": "evidence",
+    "exec-log": "evidence",
     "?": "help",
     "v": "version",
 }
@@ -111,6 +116,7 @@ COMMAND_DESCRIPTIONS = {
     "registry": "Work Order Registry - register/list/show/update-status",
     "wo-status": "Work Order Status Update - controlled status transitions",
     "receipt": "Approval Receipt - create/list/show approval receipts",
+    "evidence": "Execution Evidence - create/list/show evidence bundles",
     "help": "Show this help message",
     "version": "Show version",
 }
@@ -126,6 +132,7 @@ COMMAND_FLAGS = {
     "registry": ["--json", "--registry-dir"],
     "wo-status": ["--json", "--registry-dir"],
     "receipt": ["--json", "--registry-dir"],
+    "evidence": ["--json", "--evidence-dir"],
 }
 
 
@@ -205,6 +212,7 @@ def _show_help():
     lines.append("  python scripts/vibe_command_router.py reg list --registry-dir /tmp/registry")
     lines.append("  python scripts/vibe_command_router.py ws --id my-wo --status validated --reason 'OK'")
     lines.append("  python scripts/vibe_command_router.py ar create --id my-wo --base-sha abc123 ...")
+    lines.append("  python scripts/vibe_command_router.py ev create --id my-wo --base-sha abc123 --result-sha def456 ...")
 
     print("\n".join(lines))
 
