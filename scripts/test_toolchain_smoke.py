@@ -3902,9 +3902,109 @@ def _test_batch_runner_version_150(script_dir):
     if not path.exists():
         return {"passed": False, "message": "script not found"}
     content = path.read_text()
-    if 'VERSION = "1.5.0"' not in content:
-        return {"passed": False, "message": "expected version 1.5.0"}
-    return {"passed": True, "message": "batch runner v1.5.0"}
+    v = content.split("VERSION = ")[1].split(chr(34))[1] if "VERSION = " in content else "0.0.0"
+    parts = v.split("."); major, minor = int(parts[0]), int(parts[1])
+    if major < 1 or (major == 1 and minor < 5):
+        return {"passed": False, "message": "expected version >= 1.5.0, got %s" % v}
+    return {"passed": True, "message": "batch runner v" + v}
+
+
+
+
+def _test_fast_validation_mode_auto(script_dir):
+    """Test fast validation mode auto-detection for trusted self repo."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    content = path.read_text()
+    if "VALIDATION_MODES" not in content:
+        return {"passed": False, "message": "missing VALIDATION_MODES"}
+    if "QUICK_CHECKS" not in content:
+        return {"passed": False, "message": "missing QUICK_CHECKS"}
+    if "_determine_validation_mode" not in content:
+        return {"passed": False, "message": "missing _determine_validation_mode"}
+    if "_run_quick_checks" not in content:
+        return {"passed": False, "message": "missing _run_quick_checks"}
+    return {"passed": True, "message": "fast validation policy present"}
+
+
+def _test_fast_validation_modes_in_status(script_dir):
+    """Test --status includes validation modes."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--status", "--json"])
+    import json
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if "validation_modes" not in data:
+        return {"passed": False, "message": "missing validation_modes"}
+    if data.get("default_validation_mode") != "fast":
+        return {"passed": False, "message": "expected default=fast"}
+    if "quick_checks" not in data:
+        return {"passed": False, "message": "missing quick_checks"}
+    if len(data["quick_checks"]) < 5:
+        return {"passed": False, "message": "too few quick checks: %d" % len(data["quick_checks"])}
+    return {"passed": True, "message": "validation modes in status: %s" % data.get("validation_modes")}
+
+
+def _test_fast_validation_help_flag(script_dir):
+    """Test --help shows --validation-mode."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--help"])
+    combined = stdout + stderr
+    if "--validation-mode" not in combined:
+        return {"passed": False, "message": "--validation-mode not in help"}
+    if "fast" not in combined:
+        return {"passed": False, "message": "fast not in help"}
+    return {"passed": True, "message": "validation-mode in help"}
+
+
+def _test_quick_checks_function(script_dir):
+    """Test _run_quick_checks function exists and has correct signature."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    content = path.read_text()
+    if "def _run_quick_checks(repo_root, changed_paths, allowed_paths):" not in content:
+        return {"passed": False, "message": "missing _run_quick_checks signature"}
+    # Check all 7 quick checks are mentioned
+    checks = ["git_status_clean", "changed_paths_allowlist", "forbidden_paths",
+              "wrapper_merge_result", "baseline_refresh", "pr_changed_paths", "token_redaction_scan"]
+    missing = [c for c in checks if c not in content]
+    if missing:
+        return {"passed": False, "message": "missing checks: %s" % missing}
+    return {"passed": True, "message": "all 7 quick checks present"}
+
+
+def _test_forbidden_paths_constant(script_dir):
+    """Test FORBIDDEN_PATHS constant includes .github/workflows."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    content = path.read_text()
+    if "FORBIDDEN_PATHS" not in content:
+        return {"passed": False, "message": "missing FORBIDDEN_PATHS"}
+    if ".github/workflows/" not in content:
+        return {"passed": False, "message": "missing .github/workflows/"}
+    if ".github/actions/" not in content:
+        return {"passed": False, "message": "missing .github/actions/"}
+    return {"passed": True, "message": "FORBIDDEN_PATHS includes .github/workflows and .github/actions"}
+
+
+def _test_fast_validation_batch_runner_version(script_dir):
+    """Test batch runner version >= 1.6.0."""
+    path = script_dir / "vibe_batch_runner.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+    content = path.read_text()
+    if 'VERSION = "1.6.0"' not in content:
+        return {"passed": False, "message": "expected version 1.6.0"}
+    return {"passed": True, "message": "batch runner v1.6.0"}
 
 
 def _test_batch_runner_checkpoint_status_field(script_dir):
@@ -4248,6 +4348,26 @@ def run_tests(jobs_dir=None):
 
     # Test 99: batch runner version 1.5.0
     tests.append(_run_test("batch_runner_version_150", lambda: _test_batch_runner_version_150(script_dir)))
+
+
+
+    # Test 100: fast validation mode auto-detection
+    tests.append(_run_test("fast_validation_mode_auto", lambda: _test_fast_validation_mode_auto(script_dir)))
+
+    # Test 101: validation modes in status
+    tests.append(_run_test("fast_validation_modes_in_status", lambda: _test_fast_validation_modes_in_status(script_dir)))
+
+    # Test 102: validation-mode in help
+    tests.append(_run_test("fast_validation_help_flag", lambda: _test_fast_validation_help_flag(script_dir)))
+
+    # Test 103: quick checks function
+    tests.append(_run_test("quick_checks_function", lambda: _test_quick_checks_function(script_dir)))
+
+    # Test 104: forbidden paths constant
+    tests.append(_run_test("forbidden_paths_constant", lambda: _test_forbidden_paths_constant(script_dir)))
+
+    # Test 105: batch runner version 1.6.0
+    tests.append(_run_test("fast_validation_batch_runner_version", lambda: _test_fast_validation_batch_runner_version(script_dir)))
 
     return tests
 
