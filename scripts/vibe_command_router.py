@@ -73,6 +73,7 @@ COMMAND_SCRIPTS = {
     "loop-summary": "vibe_loop_summary.py",
     "sandbox": "vibe_executor_sandbox.py",
     "exec-control": "vibe_executor_control.py",
+    "recovery": "vibe_executor_recovery.py",
     "transcript": "vibe_execution_transcript.py",
 }
 
@@ -112,6 +113,8 @@ ALIASES = {
     "ls": "loop-summary",
     "sb": "sandbox",
     "ec": "exec-control",
+    "rc": "recovery",
+    "recover": "recovery",
     "ctrl": "exec-control",
     "summary": "loop-summary",
     "txn": "transcript",
@@ -145,6 +148,7 @@ COMMAND_DESCRIPTIONS = {
     "loop-summary": "Autonomous Loop Summary - complete chain capability overview",
     "sandbox": "Executor Sandbox Contract - verify sandbox constraints",
     "exec-control": "Executor Control - timeout, cancel, and lifecycle management",
+    "recovery": "Executor Recovery Plan - failure recovery/rollback plan generator",
     "transcript": "Execution Transcript - append-only record of dry-run / noop sessions",
     "help": "Show this help message",
     "version": "Show version",
@@ -168,6 +172,7 @@ COMMAND_FLAGS = {
     "loop-summary": ["--json", "--compact"],
     "sandbox": ["--json", "--base-sha"],
     "exec-control": ["--json"],
+    "recovery": ["--json"],
     "transcript": ["--json", "--transcript-dir"],
 }
 
