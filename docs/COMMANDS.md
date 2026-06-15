@@ -16,6 +16,7 @@ Use the command router for all operations:
 | `sm` | smoke | Toolchain Smoke Suite |
 | `i` / `wo` | intake | Work Order Intake |
 | `notes` / `rn` / `progress` | release-notes | Release Notes |
+| `dash` / `status-page` | dashboard | Project Dashboard |
 | `?` | help | Show help |
 | `v` | version | Show version |
 
@@ -580,3 +581,26 @@ $ python scripts/vibe_command_router.py rn --json --limit 5
 See [PROJECT_DASHBOARD.md](PROJECT_DASHBOARD.md) for the complete operator-facing status dashboard.
 
 Includes: system status, router commands, toolchain scripts, autonomous capabilities, safety status, lifecycle summary, recent merges, quick commands, and next phase recommendations.
+
+
+### Dashboard via Router
+
+```
+$ python scripts/vibe_command_router.py dash
+========================================
+  📊 Project Dashboard
+========================================
+  Baseline:  cc5501f375efc86d28435563d6860aa67fef9f3f
+  Total PRs Merged: 40
+  Status:    🟢 OPERATIONAL
+  Smoke:     PASS
+  Health:    PASS
+  Queue:     Clean
+  Dashboard: docs/PROJECT_DASHBOARD.md
+========================================
+```
+
+```
+$ python scripts/vibe_command_router.py dash --json
+{ "dashboard_path": "docs/PROJECT_DASHBOARD.md", "exists": true, "version": "2.3.0", ... }
+```
