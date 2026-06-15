@@ -1220,3 +1220,19 @@ python3 scripts/vibe_command_router.py batch --batch plan.json --dry-run --json
 Output: batch_id, wo_id, repo_trust_level, branch, pr, changed_paths, merge_sha, status, blockers, stop_reason.
 
 Max batch size: 5 Work Orders. Stop on any failure.
+
+
+### worker-resilience (wr, worker, resilience)
+
+Worker Reachability & Resilience — retry, checkpoint, resume.
+
+```bash
+python3 scripts/vibe_worker_resilience.py --check [--json] [--compact]
+python3 scripts/vibe_worker_resilience.py --checkpoint <file> [--json]
+python3 scripts/vibe_worker_resilience.py --resume <file> [--json]
+python3 scripts/vibe_worker_resilience.py --status-report <file> [--json]
+python3 scripts/vibe_command_router.py wr --json
+python3 scripts/vibe_command_router.py worker --check --compact
+```
+
+Output: worker_status, worker_error, retry_interval_minutes, max_wait_minutes, resume_allowed.

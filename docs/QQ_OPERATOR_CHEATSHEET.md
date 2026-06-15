@@ -197,4 +197,26 @@ br --status --json
 ### V1.4 一句话原则
 **trusted self repo 可批次自动执行；任何 blocker 立即停止；external repo 写操作仍需人工授权。**
 
+## V1.5.1 Worker Resilience
+
+### Worker 暂时失联
+```
+不要重开批次。等待自动重试（每 5 分钟）。
+恢复后可发送：继续 V1.5 或 resume batch。
+15 分钟收到一次状态报告。
+```
+
+### 状态说明
+- **WAITING_WORKER_RECOVERY**：不是失败，正在等待恢复
+- **RECONCILING**：worker 恢复，正在校验状态
+- **BLOCKED_NEEDS_OPERATOR**：超过 75 分钟，需要人工排障
+
+### 命令
+```
+wr --check              # 检查 worker 可达性
+wr --checkpoint cp.json # 创建检查点
+wr --resume cp.json     # 从检查点恢复
+wr --status-report cp.json # 生成状态报告
+```
+
 *V1 Operational Freeze — 2026-06-15*

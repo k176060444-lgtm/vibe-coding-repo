@@ -1103,6 +1103,31 @@ High-privilege GitHub keys are controlled via a two-stage approval workflow:
 
 
 
+
+
+## V1.5.1 Worker Resilience & Resume
+
+**When worker is temporarily unreachable, do NOT restart the batch. Wait for auto-retry.**
+
+### Recovery States
+| State | Meaning | Action |
+|-------|---------|--------|
+| `WAITING_WORKER_RECOVERY` | Worker unreachable, retrying | Wait, no mutation |
+| `RECONCILING` | Worker back, verifying state | Check baseline/worktree/remote |
+| `BLOCKED_NEEDS_OPERATOR` | Max wait exceeded | Human intervention needed |
+
+### Retry Policy
+- Retry interval: 5 minutes
+- Max wait: 75 minutes
+- Max retries: 15
+- Status report: every 15 minutes
+
+### Resume Rules
+- `before_any_mutation` → restart WO from scratch
+- `after_push` / `after_pr` / `after_merge` → reconcile first, then continue/skip/block
+- Baseline mismatch or dirty worktree → BLOCK, do not auto-fix
+
+
 ## V1.4 Trusted Self Batch Runner
 
 **One-line principle: trusted self repo can batch auto-execute; any blocker stops immediately; external repo writes still require human authorization.**
