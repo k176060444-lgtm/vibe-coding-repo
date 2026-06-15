@@ -84,6 +84,30 @@ def _compute_evidence_digest(evidence_data):
     data_str = json.dumps(evidence_data, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(data_str.encode("utf-8")).hexdigest()
 
+
+def _is_fixture_mode(evidence):
+    """Detect if this evidence is from a fixture/partial execution.
+
+    Heuristics:
+    - workorder_id contains 'fixture' or 'level1'/'level2'/'level3'/'level4'
+    - evidence has wrapper_dry_run or wrapper_merge set (indicates PR workflow)
+    - implementer_model is 'none' or empty (no real model)
+    """
+    wid = evidence.get("workorder_id", "")
+    model = evidence.get("implementer_model", "")
+    has_wrapper = bool(evidence.get("wrapper_dry_run") or evidence.get("wrapper_merge"))
+
+    # Explicit fixture indicators
+    if "fixture" in wid.lower():
+        return True
+    # Level-based execution (not a standard job)
+    if any(prefix in wid.lower() for prefix in ["level1", "level2", "level3", "level4"]):
+        return True
+    # PR workflow with no real model
+    if has_wrapper and (not model or model == "none"):
+        return True
+    return False
+
 def cmd_verify(args):
     """Verify an evidence bundle."""
     evidence_dir = _evidence_dir_path(args)
@@ -142,8 +166,9 @@ def cmd_verify(args):
     if entry:
         checks.append({"name": "registry_entry", "result": "PASS", "detail": "Registry entry exists"})
     else:
-        checks.append({"name": "registry_entry", "result": "WARN", "detail": "Registry entry not found", "missing_fields": ["registry_entry"], "expected_fixture_mode": True})
-        warnings.append(f"Registry entry '{workorder_id}' not found (expected in fixture mode)")
+        warn_type = "WARN_EXPECTED_FIXTURE_MODE" if _is_fixture_mode(evidence) else "WARN_UNEXPECTED_MISSING_FIELD"
+        checks.append({"name": "registry_entry", "result": "WARN", "warn_type": warn_type, "detail": "Registry entry not found", "missing_fields": ["registry_entry"], "expected_fixture_mode": _is_fixture_mode(evidence)})
+        warnings.append(f"Registry entry '{workorder_id}' not found ({warn_type})")
 
     # Check 4: Approval receipt exists
     receipts_dir = registry_dir / "receipts"
@@ -151,8 +176,9 @@ def cmd_verify(args):
     if receipt:
         checks.append({"name": "approval_receipt", "result": "PASS", "detail": "Approval receipt exists"})
     else:
-        checks.append({"name": "approval_receipt", "result": "WARN", "detail": "Approval receipt not found", "missing_fields": ["approval_receipt"], "expected_fixture_mode": True})
-        warnings.append(f"Approval receipt for '{workorder_id}' not found (expected in fixture mode)")
+        warn_type = "WARN_EXPECTED_FIXTURE_MODE" if _is_fixture_mode(evidence) else "WARN_UNEXPECTED_MISSING_FIELD"
+        checks.append({"name": "approval_receipt", "result": "WARN", "warn_type": warn_type, "detail": "Approval receipt not found", "missing_fields": ["approval_receipt"], "expected_fixture_mode": _is_fixture_mode(evidence)})
+        warnings.append(f"Approval receipt for '{workorder_id}' not found ({warn_type})")
 
     # Check 5: SHAs are non-empty
     if evidence.get("base_sha") and evidence.get("result_sha"):
@@ -170,8 +196,9 @@ def cmd_verify(args):
             checks.append({"name": "smoke_result", "result": "WARN", "detail": f"Smoke: {smoke_result}"})
             warnings.append(f"Smoke result indicates issues: {smoke_result}")
     else:
-        checks.append({"name": "smoke_result", "result": "WARN", "detail": "No smoke result recorded", "missing_fields": ["smoke_result"], "expected_fixture_mode": True})
-        warnings.append("No smoke result recorded (expected in fixture mode)")
+        warn_type = "WARN_EXPECTED_FIXTURE_MODE" if _is_fixture_mode(evidence) else "WARN_UNEXPECTED_MISSING_FIELD"
+        checks.append({"name": "smoke_result", "result": "WARN", "warn_type": warn_type, "detail": "No smoke result recorded", "missing_fields": ["smoke_result"], "expected_fixture_mode": _is_fixture_mode(evidence)})
+        warnings.append(f"No smoke result recorded ({warn_type})")
 
     # Check 7: Job status
     job_status = evidence.get("job_status", "")
@@ -179,8 +206,10 @@ def cmd_verify(args):
         if "passed" in job_status.lower() or "clean" in job_status.lower():
             checks.append({"name": "job_status", "result": "PASS", "detail": f"Job status: {job_status}"})
         else:
-            checks.append({"name": "job_status", "result": "WARN", "detail": f"Job status: {job_status}", "expected_fixture_mode": job_status == "completed"})
-            warnings.append(f"Job status indicates issues: {job_status}")
+            is_fixture = _is_fixture_mode(evidence) or job_status == "completed"
+            warn_type = "WARN_EXPECTED_FIXTURE_MODE" if is_fixture else "WARN_UNEXPECTED_MISSING_FIELD"
+            checks.append({"name": "job_status", "result": "WARN", "warn_type": warn_type, "detail": f"Job status: {job_status}", "expected_fixture_mode": is_fixture})
+            warnings.append(f"Job status indicates issues: {job_status} ({warn_type})")
     else:
         checks.append({"name": "job_status", "result": "WARN", "detail": "No job status recorded"})
 
@@ -227,15 +256,47 @@ def cmd_verify(args):
 
     # Collect all missing fields from WARN/FAIL checks
     all_missing = []
-    fixture_mode = False
+    fixture_mode = _is_fixture_mode(evidence)
+    unexpected_warnings = []
+    expected_warnings = []
     for c in checks:
         if c.get("missing_fields"):
             all_missing.extend(c["missing_fields"])
         if c.get("expected_fixture_mode"):
             fixture_mode = True
+        if c["result"] == "WARN":
+            if c.get("warn_type") == "WARN_UNEXPECTED_MISSING_FIELD":
+                unexpected_warnings.append(c["name"])
+            elif c.get("expected_fixture_mode"):
+                expected_warnings.append(c["name"])
+
+    # Generate operator summary
+    if verdict == "PASS":
+        operator_summary = "All checks passed. Evidence is complete and valid."
+    elif verdict == "FAIL":
+        operator_summary = "CRITICAL: Evidence has integrity failures. Do NOT proceed. Errors: %s" % "; ".join(errors)
+    elif unexpected_warnings:
+        operator_summary = "UNEXPECTED warnings in non-fixture mode: %s. These fields are normally required — investigate why they are missing." % ", ".join(unexpected_warnings)
+    elif fixture_mode and expected_warnings:
+        operator_summary = "Fixture/partial evidence mode detected. Missing fields are expected: %s. This is acceptable for fixture runs." % ", ".join(expected_warnings)
+    else:
+        operator_summary = "Warnings found: %s. Review before proceeding." % ", ".join(warnings)
+
+    # Determine detailed verdict
+    if verdict == "PASS":
+        verdict_detail = "PASS"
+    elif verdict == "FAIL":
+        verdict_detail = "FAIL"
+    elif fixture_mode and not unexpected_warnings:
+        verdict_detail = "WARN_EXPECTED_FIXTURE_MODE"
+    elif unexpected_warnings:
+        verdict_detail = "WARN_UNEXPECTED_MISSING_FIELD"
+    else:
+        verdict_detail = "WARN"
 
     result = {
         "verdict": verdict,
+        "verdict_detail": verdict_detail,
         "evidence_id": evidence_id,
         "workorder_id": workorder_id,
         "checks": checks,
@@ -243,6 +304,9 @@ def cmd_verify(args):
         "warnings": warnings,
         "missing_fields": sorted(set(all_missing)),
         "expected_fixture_mode": fixture_mode,
+        "unexpected_warnings": unexpected_warnings,
+        "expected_warnings": expected_warnings,
+        "operator_summary": operator_summary,
         "summary": {
             "total": len(checks),
             "pass": sum(1 for c in checks if c["result"] == "PASS"),
@@ -254,9 +318,10 @@ def cmd_verify(args):
     if use_json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print(f"Evidence Verifier: {verdict}")
+        print(f"Evidence Verifier: {verdict_detail}")
         print(f"  Evidence: {evidence_id}")
         print(f"  Work Order: {workorder_id}")
+        print(f"  Fixture Mode: {fixture_mode}")
         print(f"  Checks: {result['summary']['total']} total, {result['summary']['pass']} pass, {result['summary']['warn']} warn, {result['summary']['fail']} fail")
         if errors:
             print(f"  Errors:")
@@ -266,6 +331,7 @@ def cmd_verify(args):
             print(f"  Warnings:")
             for w in warnings:
                 print(f"    - {w}")
+        print(f"  Operator: {operator_summary}")
 
     if verdict == "FAIL":
         return 1

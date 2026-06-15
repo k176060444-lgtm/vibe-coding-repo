@@ -943,3 +943,38 @@ See docs/EXECUTOR_UNFREEZE_PLAN.md for graduated unfreeze levels (0-4).
 
 ## Minimal Executor Fixture Spec
 See docs/MINIMAL_EXECUTOR_FIXTURE_SPEC.md for Level 1 fixture definition.
+
+
+## Fixture / Partial Evidence Handling
+
+When the evidence verifier examines evidence from fixture runs, partial executions,
+or level-based unfreeze tests, it uses heuristics to detect **fixture mode**:
+
+### Fixture Mode Detection
+
+The verifier considers evidence to be in fixture mode when:
+- `workorder_id` contains `fixture`, `level1`, `level2`, `level3`, or `level4`
+- Evidence has `wrapper_dry_run` or `wrapper_merge` set (PR workflow)
+- `implementer_model` is `none` or empty (no real model invoked)
+
+### Verdict Classification
+
+| Verdict Detail | Meaning | Operator Action |
+|----------------|---------|-----------------|
+| `PASS` | All checks passed | Proceed |
+| `WARN_EXPECTED_FIXTURE_MODE` | Missing fields expected in fixture mode | Acceptable for fixture runs |
+| `WARN_UNEXPECTED_MISSING_FIELD` | Missing fields in non-fixture mode | Investigate — normally required |
+| `FAIL` | Critical integrity failure | Do NOT proceed |
+
+### Operator Summary
+
+The `operator_summary` field provides a human-readable explanation:
+- **Fixture mode**: "Fixture/partial evidence mode detected. Missing fields are expected: [list]."
+- **Unexpected**: "UNEXPECTED warnings in non-fixture mode: [list]. Investigate why."
+- **Fail**: "CRITICAL: Evidence has integrity failures. Errors: [list]."
+
+### Missing Fields
+
+The `missing_fields` list identifies all absent fields across WARN/FAIL checks.
+In fixture mode, expected missing fields include: `registry_entry`, `approval_receipt`, `smoke_result`.
+
