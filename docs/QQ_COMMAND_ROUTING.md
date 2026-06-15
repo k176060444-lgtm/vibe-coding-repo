@@ -517,3 +517,16 @@ Bot:
 /ev list --json
 /ev show --evidence-id ev-001
 ```
+
+
+### Execution Gate Commands
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `exec-gate` | `gate`, `ready-run` | 执行准入门禁：ALLOW/REVIEW/BLOCK |
+
+**示例:**
+```
+/gate --id my-wo --current-main-sha abc123
+/gate --id my-wo --current-main-sha abc123 --json
+/ready-run --id my-wo --current-main-sha abc123
+```
