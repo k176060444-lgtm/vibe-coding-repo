@@ -1805,6 +1805,109 @@ def _test_temp_context_graceful(script_dir):
 
 
 
+
+def _test_evidence_verifier_fixture_mode(script_dir):
+    """Test that evidence verifier correctly identifies fixture mode."""
+    path = script_dir / "vibe_evidence_verifier.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    import tempfile, json as _json
+    tmpdir = tempfile.mkdtemp()
+    evidence_dir = Path(tmpdir) / "evidence"
+    registry_dir = Path(tmpdir) / "registry"
+    evidence_dir.mkdir()
+    registry_dir.mkdir()
+
+    # Create fixture-mode evidence (level4 workorder, no real model)
+    ev = {
+        "evidence_id": "ev-fixture",
+        "workorder_id": "level4a-test-fixture",
+        "base_sha": "abc123",
+        "result_sha": "def456",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "digest": "test",
+        "wrapper_dry_run": "PASS",
+        "implementer_model": "none",
+        "smoke_result": "",
+    }
+    import hashlib
+    ev_data = {k: ev.get(k) for k in ["workorder_id", "base_sha", "result_sha", "pr_url", "pr_number", "post_merge_sha", "timestamp"]}
+    ev["digest"] = hashlib.sha256(_json.dumps(ev_data, sort_keys=True).encode()).hexdigest()
+    with open(evidence_dir / "ev-fixture.json", "w") as f:
+        _json.dump(ev, f)
+
+    rc, stdout, stderr = _run_script(path, ["verify", "--evidence-id", "ev-fixture",
+                                             "--evidence-dir", str(evidence_dir),
+                                             "--registry-dir", str(registry_dir), "--json"])
+    try:
+        data = _json.loads(stdout)
+    except _json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    if data.get("verdict") == "FAIL":
+        return {"passed": False, "message": "verdict=FAIL (should be WARN for fixture)"}
+    if not data.get("expected_fixture_mode"):
+        return {"passed": False, "message": "expected_fixture_mode should be True"}
+    if data.get("verdict_detail") != "WARN_EXPECTED_FIXTURE_MODE":
+        return {"passed": False, "message": "verdict_detail=%s (expected WARN_EXPECTED_FIXTURE_MODE)" % data.get("verdict_detail")}
+    if "operator_summary" not in data:
+        return {"passed": False, "message": "missing operator_summary"}
+
+    return {"passed": True, "message": "fixture mode detected: %s" % data.get("verdict_detail")}
+
+
+def _test_evidence_verifier_unexpected_warn(script_dir):
+    """Test that evidence verifier flags unexpected missing fields in non-fixture mode."""
+    path = script_dir / "vibe_evidence_verifier.py"
+    if not path.exists():
+        return {"passed": False, "message": "script not found"}
+
+    import tempfile, json as _json
+    tmpdir = tempfile.mkdtemp()
+    evidence_dir = Path(tmpdir) / "evidence"
+    registry_dir = Path(tmpdir) / "registry"
+    evidence_dir.mkdir()
+    registry_dir.mkdir()
+
+    # Create non-fixture evidence (no fixture indicators, real model)
+    ev = {
+        "evidence_id": "ev-real",
+        "workorder_id": "wo-real-job-001",
+        "base_sha": "abc123",
+        "result_sha": "def456",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "digest": "test",
+        "implementer_model": "deepseek-v4-flash",
+        "smoke_result": "",
+        "job_status": "",
+    }
+    import hashlib
+    ev_data = {k: ev.get(k) for k in ["workorder_id", "base_sha", "result_sha", "pr_url", "pr_number", "post_merge_sha", "timestamp"]}
+    ev["digest"] = hashlib.sha256(_json.dumps(ev_data, sort_keys=True).encode()).hexdigest()
+    with open(evidence_dir / "ev-real.json", "w") as f:
+        _json.dump(ev, f)
+
+    rc, stdout, stderr = _run_script(path, ["verify", "--evidence-id", "ev-real",
+                                             "--evidence-dir", str(evidence_dir),
+                                             "--registry-dir", str(registry_dir), "--json"])
+    try:
+        data = _json.loads(stdout)
+    except _json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    if data.get("expected_fixture_mode"):
+        return {"passed": False, "message": "expected_fixture_mode should be False for real job"}
+    unexpected = data.get("unexpected_warnings", [])
+    if not unexpected:
+        return {"passed": False, "message": "should have unexpected_warnings, got none"}
+    if data.get("verdict_detail") != "WARN_UNEXPECTED_MISSING_FIELD":
+        return {"passed": False, "message": "verdict_detail=%s (expected WARN_UNEXPECTED_MISSING_FIELD)" % data.get("verdict_detail")}
+
+    return {"passed": True, "message": "unexpected warnings flagged: %s" % ", ".join(unexpected)}
+
+
+
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
     if jobs_dir is None:
@@ -2012,6 +2115,12 @@ def run_tests(jobs_dir=None):
 
     # Test 66: Temp-context graceful handling
     tests.append(_run_test("temp_context_graceful", lambda: _test_temp_context_graceful(script_dir)))
+
+    # Test 67: Evidence verifier fixture mode detection
+    tests.append(_run_test("evidence_verifier_fixture_mode", lambda: _test_evidence_verifier_fixture_mode(script_dir)))
+
+    # Test 68: Evidence verifier unexpected WARN in non-fixture mode
+    tests.append(_run_test("evidence_verifier_unexpected_warn", lambda: _test_evidence_verifier_unexpected_warn(script_dir)))
 
     return tests
 
