@@ -1900,3 +1900,34 @@ When a task needs both Windows (gateway diagnostic) and Debian (execution):
 - `gateway recovery then resume pytest` → dual-node-task
 - `run pytest` → debian-worker (default)
 - `external push` → debian-worker + approval
+
+## V1.14.2 Gateway Health 72h Limit Detection
+
+### Background
+2026-06-16 RCA confirmed: Windows Task Scheduler `ExecutionTimeLimit=PT72H` with
+`AllowHardTerminate=True` forcibly terminated both gateway processes after 72h.
+Combined with `StartWhenAvailable=False` and `MultipleInstances=IgnoreNew`, both
+default and vibedev gateways went offline simultaneously with no auto-recovery.
+
+### Fix Applied
+- `Hermes_Gateway`: ExecutionTimeLimit PT72H → PT0S (no limit)
+- `Hermes_Gateway_vibedev`: ExecutionTimeLimit PT72H → PT0S (no limit)
+
+### Detection (V1.14.2)
+`vibe_gateway_health.py` v2.0.0 now detects:
+- `execution_time_limit` — raw Task Scheduler value (PT0S, PT72H, etc.)
+- `execution_time_limit_seconds` — parsed to seconds
+- `execution_time_limit_is_indefinite` — True for PT0S/PT0/indefinite
+- `allow_hard_terminate` — whether Windows will force-kill
+- `limit_risk_status` — OK / WARN / BLOCK
+
+### Risk Rules
+- PT0S / PT0 / indefinite → **OK** (no time limit)
+- PT72H + running + AllowHardTerminate=True → **WARN** (finite limit with force kill)
+- PT72H + ready/not running + gateway absent → **BLOCK** (limit likely expired)
+- PT72H + running + AllowHardTerminate=False → **OK** (no force kill)
+
+### Important
+- Do NOT delete Hermes_Gateway / Hermes_Gateway_vibedev tasks
+- Do NOT blindly restart both default/vibedev simultaneously
+- If migrating to Windows Service, keep this check as fallback

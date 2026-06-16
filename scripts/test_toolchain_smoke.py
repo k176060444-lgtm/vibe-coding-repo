@@ -5014,6 +5014,13 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("v114_compiler_dual_node", test_v114_compiler_dual_node))
     tests.append(_run_test("v114_gateway_isolation", test_v114_gateway_isolation))
     tests.append(_run_test("v114_unknown_defaults_debian", test_v114_unknown_defaults_debian))
+    # V1.14.2 Gateway Health 72h Limit Detection tests
+    tests.append(_run_test("v1142_pt0s_ok", test_v1142_pt0s_ok))
+    tests.append(_run_test("v1142_pt72h_warn", test_v1142_pt72h_warn))
+    tests.append(_run_test("v1142_pt72h_block", test_v1142_pt72h_block))
+    tests.append(_run_test("v1142_parse_duration", test_v1142_parse_duration))
+    tests.append(_run_test("v1142_gw_health_selfcheck", test_v1142_gw_health_selfcheck))
+    tests.append(_run_test("v1142_version_2", test_v1142_version_2))
     return tests
 
 
@@ -5848,6 +5855,69 @@ def test_v114_unknown_defaults_debian():
     r = classify_task_node("do random stuff")
     return {"passed": r["node"] == "debian-worker",
             "message": f"node={r['node']}"}
+
+
+
+# ── V1.14.2 Gateway Health 72h Limit Detection ───────────────────
+
+
+def test_v1142_pt0s_ok():
+    """V1.14.2-01: PT0S → limit OK."""
+    from vibe_gateway_health import _assess_limit_risk, LIMIT_OK
+    risk = _assess_limit_risk("Running", True, 0, False, True)
+    return {"passed": risk == LIMIT_OK, "message": f"risk={risk}"}
+
+
+def test_v1142_pt72h_warn():
+    """V1.14.2-02: PT72H + running + AHT → WARN."""
+    from vibe_gateway_health import _assess_limit_risk, LIMIT_WARN
+    risk = _assess_limit_risk("Running", False, 259200, True, True)
+    return {"passed": risk == LIMIT_WARN, "message": f"risk={risk}"}
+
+
+def test_v1142_pt72h_block():
+    """V1.14.2-03: PT72H + ready + no proc → BLOCK."""
+    from vibe_gateway_health import _assess_limit_risk, LIMIT_BLOCK
+    risk = _assess_limit_risk("Ready", False, 259200, True, False)
+    return {"passed": risk == LIMIT_BLOCK, "message": f"risk={risk}"}
+
+
+def test_v1142_parse_duration():
+    """V1.14.2-04: duration parsing PT72H/PT0S/PT0."""
+    from vibe_gateway_health import _parse_duration
+    s1, i1 = _parse_duration("PT72H")
+    s2, i2 = _parse_duration("PT0S")
+    s3, i3 = _parse_duration("PT0")
+    ok = (s1 == 259200 and not i1 and s2 == 0 and i2 and s3 == 0 and i3)
+    return {"passed": ok, "message": f"PT72H={s1} PT0S={s2} PT0={s3}"}
+
+
+def test_v1142_gw_health_selfcheck():
+    """V1.14.2-05: gateway_health self-check v2.0.0."""
+    import vibe_gateway_health as gwh
+    # Run self-check logic without printing
+    checks = []
+    checks.append({"name": "version", "passed": True})
+    secs, indef = gwh._parse_duration("PT0S")
+    checks.append({"name": "pt0s", "passed": secs == 0 and indef})
+    secs, indef = gwh._parse_duration("PT72H")
+    checks.append({"name": "pt72h", "passed": secs == 259200 and not indef})
+    risk = gwh._assess_limit_risk("Running", True, 0, False, True)
+    checks.append({"name": "indef_ok", "passed": risk == gwh.LIMIT_OK})
+    risk = gwh._assess_limit_risk("Running", False, 259200, True, True)
+    checks.append({"name": "pt72h_warn", "passed": risk == gwh.LIMIT_WARN})
+    risk = gwh._assess_limit_risk("Ready", False, 259200, True, False)
+    checks.append({"name": "pt72h_block", "passed": risk == gwh.LIMIT_BLOCK})
+    passed = sum(1 for c in checks if c["passed"])
+    failed = sum(1 for c in checks if not c["passed"])
+    return {"passed": failed == 0 and passed >= 5,
+            "message": f"{passed}/{len(checks)} v{gwh.VERSION}"}
+
+
+def test_v1142_version_2():
+    """V1.14.2-06: gateway_health version 2.0.0."""
+    from vibe_gateway_health import VERSION
+    return {"passed": VERSION == "2.0.0", "message": f"VERSION={VERSION}"}
 
 if __name__ == "__main__":
     sys.exit(main())

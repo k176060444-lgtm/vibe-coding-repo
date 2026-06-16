@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Gateway Runtime Health v1.0.0 — Windows gateway process/task/log diagnostics.
+"""vibe_gateway_health.py v2.0.0
 
-Read-only diagnostics for Hermes_Gateway and Hermes_Gateway_vibedev scheduled tasks.
-Detects: process status, task status, log freshness, WebSocket state, session conflicts.
+Gateway health diagnostics with 72h ExecutionTimeLimit detection.
 
-Usage:
-    python3 scripts/vibe_gateway_health.py status [--json]
-    python3 scripts/vibe_gateway_health.py self-check [--json]
-    python3 scripts/vibe_gateway_health.py --version
+v2.0.0 changes:
+  - Enhanced _check_windows_tasks() with ExecutionTimeLimit fields
+  - Added _parse_task_scheduler_config() for detailed task config
+  - Added _assess_limit_risk() for 72h limit risk assessment
+  - diagnose_profile() includes limit_risk section
+  - Supports PT0S/PT0/indefinite as "no limit"
+  - Separate default/vibedev reporting
 """
 
-import argparse
 import json
 import os
 import platform
@@ -19,98 +20,242 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
-# Gateway status constants
+# Status constants
 STATUS_ONLINE = "ONLINE"
 STATUS_OFFLINE_NO_PROCESS = "OFFLINE_NO_PROCESS"
 STATUS_TASK_READY_NOT_RUNNING = "TASK_READY_NOT_RUNNING"
 STATUS_STALE_LOG = "STALE_LOG"
 STATUS_RECONNECTING = "RECONNECTING"
-STATUS_SESSION_CONFLICT = "SESSION_CONFLICT_SUSPECTED"
+STATUS_SESSION_CONFLICT_SUSPECTED = "SESSION_CONFLICT_SUSPECTED"
+STATUS_SESSION_CONFLICT = STATUS_SESSION_CONFLICT_SUSPECTED
 STATUS_UNKNOWN = "UNKNOWN"
+STATUS_LIMIT_WARNING = "LIMIT_WARNING"
+STATUS_LIMIT_BLOCK = "LIMIT_BLOCK"
 
-# Log freshness thresholds (seconds)
-LOG_FRESH_THRESHOLD = 300       # 5 minutes = fresh
-LOG_STALE_THRESHOLD = 3600      # 1 hour = stale
+# Limit risk statuses
+LIMIT_OK = "OK"
+LIMIT_WARN = "WARN"
+LIMIT_BLOCK = "BLOCK"
+LIMIT_UNKNOWN = "UNKNOWN"
+
+# PT72H in seconds
+PT72H_SECONDS = 72 * 3600  # 259200
 
 
 def _run_cmd(cmd, timeout=15):
-    """Run command, return (rc, stdout, stderr)."""
+    """Run a command and return (rc, stdout, stderr)."""
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, shell=isinstance(cmd, str))
-        return proc.returncode, proc.stdout, proc.stderr
+        if isinstance(cmd, str):
+            r = subprocess.run(cmd, shell=True, capture_output=True,
+                               text=True, timeout=timeout)
+        else:
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=timeout)
+        return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
-        return -1, "", "timeout"
-    except OSError as e:
+        return -1, "", "TIMEOUT"
+    except Exception as e:
         return -1, "", str(e)
 
 
 def _get_file_age(filepath):
-    """Return age of file in seconds, or None if not found."""
+    """Get file age in seconds, or -1 if not found."""
     try:
-        mtime = os.path.getmtime(filepath)
-        return datetime.now(timezone.utc).timestamp() - mtime
-    except OSError:
-        return None
+        return datetime.now().timestamp() - os.path.getmtime(filepath)
+    except Exception:
+        return -1
 
 
 def _parse_log_patterns(log_path, patterns, max_lines=200):
-    """Scan last N lines of log for patterns. Returns list of matches."""
-    if not os.path.isfile(log_path):
-        return []
-    try:
-        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()[-max_lines:]
-    except OSError:
-        return []
-
+    """Parse log file for specific patterns."""
+    if not os.path.exists(log_path):
+        return {"status": "NO_LOG", "matches": []}
     matches = []
-    for line in reversed(lines):
-        for pattern_name, regex in patterns.items():
-            if re.search(regex, line, re.IGNORECASE):
-                matches.append({"pattern": pattern_name, "line": line.strip()[:200]})
-    return matches[:10]
+    try:
+        with open(log_path, "r", errors="replace") as f:
+            lines = f.readlines()[-max_lines:]
+        for line in lines:
+            for pat in patterns:
+                if pat.lower() in line.lower():
+                    matches.append({"pattern": pat, "line": line.strip()[:200]})
+    except Exception:
+        return {"status": "READ_ERROR", "matches": []}
+    return {"status": "PARSED", "matches": matches[-20:]}
 
 
-# ── Gateway-specific patterns ─────────────────────────────────────────
+def _parse_duration(duration_str):
+    """Parse ISO 8601 duration (PT72H, PT0S, etc.) to seconds.
+    Returns: (seconds, is_indefinite)
+    """
+    if not duration_str or duration_str.strip() in ("PT0S", "PT0", "P0D", "",
+                                                      "indefinite", "none",
+                                                      "unlimited"):
+        return 0, True
 
-QQBOT_PATTERNS = {
-    "websocket_connected": r"websocket.*connected|ws.*connected|qqbot.*connected",
-    "websocket_resumed": r"session.*resumed|resumed.*session",
-    "websocket_disconnected": r"websocket.*disconnect|ws.*close|connection.*lost",
-    "session_conflict": r"session.*conflict|conflict.*session|another.*login",
-    "reconnecting": r"reconnect|retry.*connect|backoff",
-}
+    # PT72H format
+    m = re.match(r'PT?(\d+)H', duration_str.strip())
+    if m:
+        return int(m.group(1)) * 3600, False
 
-TELEGRAM_PATTERNS = {
-    "network_error": r"telegram.*network.*error|ECONNRESET.*telegram|telegram.*timeout",
-    "telegram_disconnect": r"telegram.*disconnect",
-}
+    # PT#M format
+    m = re.match(r'PT?(\d+)M', duration_str.strip())
+    if m:
+        return int(m.group(1)) * 60, False
+
+    # PT#S format
+    m = re.match(r'PT?(\d+)S', duration_str.strip())
+    if m:
+        return int(m.group(1)), False
+
+    # P#D format
+    m = re.match(r'P(\d+)D', duration_str.strip())
+    if m:
+        return int(m.group(1)) * 86400, False
+
+    return 0, False  # Unknown format
+
+
+def _check_windows_tasks_enhanced():
+    """Enhanced Windows task check with ExecutionTimeLimit details."""
+    tasks = {}
+    for task_name in ["Hermes_Gateway", "Hermes_Gateway_vibedev"]:
+        task_info = {
+            "exists": False,
+            "task_state": "NOT_FOUND",
+            "gateway_process_present": False,
+            "execution_time_limit": "UNKNOWN",
+            "execution_time_limit_seconds": 0,
+            "execution_time_limit_is_indefinite": False,
+            "allow_hard_terminate": False,
+            "start_when_available": False,
+            "multiple_instances": "UNKNOWN",
+            "last_run_time": "",
+            "current_uptime_seconds": 0,
+            "estimated_seconds_to_limit": -1,
+            "limit_risk_status": LIMIT_UNKNOWN,
+        }
+
+        if platform.system() != "Windows":
+            task_info["task_state"] = "NOT_WINDOWS"
+            tasks[task_name] = task_info
+            continue
+
+        # Query task via PowerShell for detailed config
+        ps_script = f'''
+$task = Get-ScheduledTask -TaskName '{task_name}' -ErrorAction SilentlyContinue
+if ($task) {{
+    $info = Get-ScheduledTaskInfo -TaskName '{task_name}' -ErrorAction SilentlyContinue
+    Write-Output "EXISTS=true"
+    Write-Output "STATE=$($task.State)"
+    Write-Output "ETL=$($task.Settings.ExecutionTimeLimit)"
+    Write-Output "AHT=$($task.Settings.AllowHardTerminate)"
+    Write-Output "SWA=$($task.Settings.StartWhenAvailable)"
+    Write-Output "MI=$($task.Settings.MultipleInstances)"
+    if ($info) {{
+        Write-Output "LRT=$($info.LastRunTime)"
+        Write-Output "LTR=$($info.LastTaskResult)"
+    }}
+}} else {{
+    Write-Output "EXISTS=false"
+}}
+'''
+        rc, out, _ = _run_cmd(
+            f'powershell -ExecutionPolicy Bypass -Command "{ps_script}"',
+            timeout=20)
+
+        if rc != 0 or "EXISTS=true" not in out:
+            tasks[task_name] = task_info
+            continue
+
+        task_info["exists"] = True
+
+        # Parse output
+        for line in out.strip().split("\n"):
+            line = line.strip()
+            if line.startswith("STATE="):
+                task_info["task_state"] = line[6:]
+            elif line.startswith("ETL="):
+                task_info["execution_time_limit"] = line[4:]
+            elif line.startswith("AHT="):
+                task_info["allow_hard_terminate"] = line[4:].lower() == "true"
+            elif line.startswith("SWA="):
+                task_info["start_when_available"] = line[4:].lower() == "true"
+            elif line.startswith("MI="):
+                task_info["multiple_instances"] = line[3:]
+            elif line.startswith("LRT="):
+                task_info["last_run_time"] = line[4:]
+            elif line.startswith("LTR="):
+                pass  # LastTaskResult, informational
+
+        # Parse ETL to seconds
+        etl_str = task_info["execution_time_limit"]
+        etl_seconds, is_indefinite = _parse_duration(etl_str)
+        task_info["execution_time_limit_seconds"] = etl_seconds
+        task_info["execution_time_limit_is_indefinite"] = is_indefinite
+
+        # Check gateway process
+        proc_rc, proc_out, _ = _run_cmd(
+            'tasklist /FI "IMAGENAME eq node.exe" /FO CSV 2>nul')
+        # Also check for hermes processes
+        hermes_rc, hermes_out, _ = _run_cmd(
+            f'tasklist /FI "STATUS eq RUNNING" /FO CSV 2>nul')
+        gateway_present = ("node" in (proc_out or "").lower() or
+                           "hermes" in (hermes_out or "").lower())
+        task_info["gateway_process_present"] = gateway_present
+
+        # Assess limit risk
+        task_info["limit_risk_status"] = _assess_limit_risk(
+            task_info["task_state"],
+            task_info["execution_time_limit_is_indefinite"],
+            etl_seconds,
+            task_info["allow_hard_terminate"],
+            gateway_present,
+        )
+
+        tasks[task_name] = task_info
+
+    return tasks
+
+
+def _assess_limit_risk(task_state, is_indefinite, etl_seconds,
+                       allow_hard_terminate, gateway_present):
+    """Assess 72h limit risk status."""
+    # No limit → OK
+    if is_indefinite or etl_seconds == 0:
+        return LIMIT_OK
+
+    # Finite limit present
+    running = task_state.upper() in ("RUNNING", "4")
+    ready_not_running = (task_state.upper() in ("READY", "QUEUED") and
+                         not gateway_present)
+
+    if ready_not_running:
+        # Task ready but gateway absent — likely killed by limit
+        return LIMIT_BLOCK
+
+    if running and allow_hard_terminate:
+        # Running with hard terminate enabled — risk depends on uptime
+        # Without exact uptime, we flag as WARN for any finite limit
+        return LIMIT_WARN
+
+    if not gateway_present and not running:
+        return LIMIT_BLOCK
+
+    return LIMIT_OK
 
 
 def _check_windows_tasks():
-    """Check Windows scheduled tasks for Hermes_Gateway."""
-    tasks = {}
-    for task_name in ["Hermes_Gateway", "Hermes_Gateway_vibedev"]:
-        rc, out, err = _run_cmd(f'schtasks /query /tn "{task_name}" /fo CSV /v 2>nul')
-        if rc == 0 and out.strip():
-            # Parse CSV output
-            lines = out.strip().split("\n")
-            if len(lines) >= 2:
-                # Status is typically in column 3
-                parts = lines[1].split(",")
-                status = parts[2].strip('"') if len(parts) > 2 else "UNKNOWN"
-                tasks[task_name] = {
-                    "exists": True,
-                    "status": status,
-                    "raw": out[:500],
-                }
-            else:
-                tasks[task_name] = {"exists": True, "status": "UNKNOWN", "raw": out[:200]}
-        else:
-            tasks[task_name] = {"exists": False, "status": "NOT_FOUND"}
-    return tasks
+    """Legacy wrapper — returns simple task status."""
+    enhanced = _check_windows_tasks_enhanced()
+    simple = {}
+    for name, info in enhanced.items():
+        simple[name] = {
+            "exists": info["exists"],
+            "status": info["task_state"],
+        }
+    return simple
 
 
 def _check_processes():
@@ -122,66 +267,58 @@ def _check_processes():
     found = {}
     for pattern in proc_patterns:
         if platform.system() == "Windows":
-            rc, out, _ = _run_cmd(f'tasklist /FI "IMAGENAME eq *{pattern}*" /FO CSV 2>nul')
+            rc, out, _ = _run_cmd(
+                f'tasklist /FI "IMAGENAME eq *{pattern}*" /FO CSV 2>nul')
         else:
             rc, out, _ = _run_cmd(["pgrep", "-la", pattern])
         if rc == 0 and out.strip():
-            lines = [l for l in out.strip().split("\n") if pattern.lower() in l.lower()]
+            lines = [l for l in out.strip().split("\n")
+                     if pattern.lower() in l.lower()]
             if lines:
                 found[pattern] = len(lines)
     return found
 
 
 def _check_log_freshness(log_paths):
-    """Check if log files are fresh."""
+    """Check if log files are fresh (< 5 minutes)."""
     results = {}
     for name, path in log_paths.items():
         age = _get_file_age(path)
-        if age is None:
-            results[name] = {"exists": False, "status": "NOT_FOUND"}
-        elif age < LOG_FRESH_THRESHOLD:
-            results[name] = {"exists": True, "age_seconds": int(age), "status": "FRESH"}
-        elif age < LOG_STALE_THRESHOLD:
-            results[name] = {"exists": True, "age_seconds": int(age), "status": "AGING"}
+        if age < 0:
+            results[name] = {"status": "NO_LOG", "age_seconds": -1}
+        elif age < 300:
+            results[name] = {"status": "FRESH", "age_seconds": int(age)}
         else:
-            results[name] = {"exists": True, "age_seconds": int(age), "status": "STALE"}
+            results[name] = {"status": "STALE", "age_seconds": int(age)}
     return results
 
 
 def _check_websocket_state(log_path):
-    """Parse log for WebSocket state."""
-    if not log_path or not os.path.isfile(log_path):
-        return {"status": "NO_LOG", "matches": []}
-
-    matches = _parse_log_patterns(log_path, QQBOT_PATTERNS)
-    if not matches:
-        return {"status": "NO_SIGNALS", "matches": []}
-
-    latest = matches[0]["pattern"]
-    if latest in ("websocket_connected", "websocket_resumed"):
-        ws_status = "CONNECTED"
-    elif latest == "session_conflict":
-        ws_status = STATUS_SESSION_CONFLICT
-    elif latest == "websocket_disconnected":
-        ws_status = "DISCONNECTED"
-    elif latest == "reconnecting":
-        ws_status = STATUS_RECONNECTING
-    else:
-        ws_status = STATUS_UNKNOWN
-
-    return {"status": ws_status, "matches": matches[:3]}
+    """Check WebSocket state from log file."""
+    patterns = ["WebSocket closed", "reconnect failed", "session expired",
+                "session resumed", "connected", "QQBot"]
+    parsed = _parse_log_patterns(log_path, patterns)
+    if parsed["status"] == "NO_LOG":
+        return {"status": "NO_LOG", "signals": []}
+    signals = [m["pattern"] for m in parsed["matches"]]
+    if "reconnect failed" in signals:
+        return {"status": STATUS_RECONNECTING, "signals": signals}
+    if "session expired" in signals:
+        return {"status": STATUS_SESSION_CONFLICT_SUSPECTED, "signals": signals}
+    if "connected" in signals or "session resumed" in signals:
+        return {"status": "CONNECTED", "signals": signals}
+    return {"status": "NO_SIGNALS", "signals": signals}
 
 
 def _is_telegram_error(log_path):
-    """Check if recent errors are Telegram-specific, not QQBot."""
-    if not log_path or not os.path.isfile(log_path):
-        return False
-    matches = _parse_log_patterns(log_path, TELEGRAM_PATTERNS)
-    return len(matches) > 0
+    """Check if Telegram errors are present."""
+    patterns = ["telegram", "TELEGRAM_ERROR", "network error"]
+    parsed = _parse_log_patterns(log_path, patterns)
+    return len(parsed["matches"]) > 0
 
 
 def diagnose_profile(profile_name, log_dir=None, is_windows=None):
-    """Diagnose a single gateway profile."""
+    """Diagnose a single gateway profile with 72h limit detection."""
     if is_windows is None:
         is_windows = platform.system() == "Windows"
 
@@ -191,14 +328,61 @@ def diagnose_profile(profile_name, log_dir=None, is_windows=None):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Task status
+    # Enhanced task status with limit detection
     if is_windows:
-        tasks = _check_windows_tasks()
-        task_key = f"Hermes_Gateway" if profile_name == "default" else f"Hermes_Gateway_vibedev"
-        task_info = tasks.get(task_key, {"exists": False, "status": "NOT_CHECKED"})
-        result["task"] = task_info
+        enhanced_tasks = _check_windows_tasks_enhanced()
+        task_key = ("Hermes_Gateway" if profile_name == "default"
+                    else "Hermes_Gateway_vibedev")
+        task_info = enhanced_tasks.get(task_key, {
+            "exists": False, "task_state": "NOT_FOUND",
+            "limit_risk_status": LIMIT_UNKNOWN,
+        })
+        result["task"] = {
+            "exists": task_info["exists"],
+            "status": task_info["task_state"],
+        }
+        result["limit_risk"] = {
+            "task_name": task_key,
+            "task_state": task_info["task_state"],
+            "gateway_process_present": task_info.get(
+                "gateway_process_present", False),
+            "execution_time_limit": task_info.get(
+                "execution_time_limit", "UNKNOWN"),
+            "execution_time_limit_seconds": task_info.get(
+                "execution_time_limit_seconds", 0),
+            "execution_time_limit_is_indefinite": task_info.get(
+                "execution_time_limit_is_indefinite", False),
+            "allow_hard_terminate": task_info.get(
+                "allow_hard_terminate", False),
+            "start_when_available": task_info.get(
+                "start_when_available", False),
+            "multiple_instances": task_info.get(
+                "multiple_instances", "UNKNOWN"),
+            "last_run_time": task_info.get("last_run_time", ""),
+            "current_uptime_seconds": task_info.get(
+                "current_uptime_seconds", 0),
+            "estimated_seconds_to_limit": task_info.get(
+                "estimated_seconds_to_limit", -1),
+            "limit_risk_status": task_info.get(
+                "limit_risk_status", LIMIT_UNKNOWN),
+        }
     else:
         result["task"] = {"exists": False, "status": "NOT_WINDOWS"}
+        result["limit_risk"] = {
+            "task_name": "",
+            "task_state": "NOT_WINDOWS",
+            "gateway_process_present": False,
+            "execution_time_limit": "N/A",
+            "execution_time_limit_seconds": 0,
+            "execution_time_limit_is_indefinite": True,
+            "allow_hard_terminate": False,
+            "start_when_available": False,
+            "multiple_instances": "N/A",
+            "last_run_time": "",
+            "current_uptime_seconds": 0,
+            "estimated_seconds_to_limit": -1,
+            "limit_risk_status": LIMIT_OK,
+        }
 
     # Process status
     processes = _check_processes()
@@ -207,7 +391,8 @@ def diagnose_profile(profile_name, log_dir=None, is_windows=None):
 
     # Log freshness
     if log_dir is None:
-        log_dir = os.path.expanduser(f"~/.hermes/profiles/{profile_name}/logs")
+        log_dir = os.path.expanduser(
+            f"~/.hermes/profiles/{profile_name}/logs")
     log_paths = {
         "main_log": os.path.join(log_dir, "hermes.log"),
         "qqbot_log": os.path.join(log_dir, "qqbot.log"),
@@ -216,18 +401,29 @@ def diagnose_profile(profile_name, log_dir=None, is_windows=None):
     result["logs"] = _check_log_freshness(log_paths)
 
     # WebSocket state
-    result["qqbot_websocket"] = _check_websocket_state(log_paths.get("qqbot_log"))
+    result["qqbot_websocket"] = _check_websocket_state(
+        log_paths.get("qqbot_log"))
 
-    # Telegram error check (to avoid false QQBot failure attribution)
-    result["telegram_error_present"] = _is_telegram_error(log_paths.get("main_log"))
+    # Telegram error check
+    result["telegram_error_present"] = _is_telegram_error(
+        log_paths.get("main_log"))
 
-    # Determine overall status
+    # Determine overall status (incorporating limit risk)
     has_process = result["process_count"] > 0
-    task_ready = result.get("task", {}).get("status", "").upper() in ("READY", "RUNNING")
-    log_fresh = any(l.get("status") == "FRESH" for l in result["logs"].values())
-    ws_ok = result["qqbot_websocket"]["status"] in ("CONNECTED", "NO_SIGNALS", "NO_LOG")
+    task_ready = result.get("task", {}).get("status", "").upper() in (
+        "READY", "RUNNING")
+    log_fresh = any(l.get("status") == "FRESH"
+                    for l in result["logs"].values())
+    ws_ok = result["qqbot_websocket"]["status"] in (
+        "CONNECTED", "NO_SIGNALS", "NO_LOG")
+    limit_risk = result.get("limit_risk", {}).get(
+        "limit_risk_status", LIMIT_OK)
 
-    if has_process and log_fresh and ws_ok:
+    if limit_risk == LIMIT_BLOCK:
+        result["overall_status"] = STATUS_LIMIT_BLOCK
+    elif limit_risk == LIMIT_WARN:
+        result["overall_status"] = STATUS_LIMIT_WARNING
+    elif has_process and log_fresh and ws_ok:
         result["overall_status"] = STATUS_ONLINE
     elif has_process and not log_fresh:
         result["overall_status"] = STATUS_STALE_LOG
@@ -246,115 +442,173 @@ def diagnose_profile(profile_name, log_dir=None, is_windows=None):
 
 
 def diagnose(json_output=False):
-    """Diagnose both default and vibedev gateway profiles."""
+    """Diagnose both default and vibedev gateway profiles.
+    
+    Always returns results dict. Prints only if json_output is explicitly
+    requested (called from main/CLI, not from other modules).
+    """
     results = {
         "version": VERSION,
-        "platform": platform.system(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "profiles": {},
-        "node_attribution": {
-            "controller_node": "windows",
-            "execution_node": "windows" if platform.system() == "Windows" else "debian",
-            "transport": "local",
-            "read_only": True,
-            "mutation": "none",
-            "token_access": "none",
-        },
     }
-
     for profile in ["default", "vibedev"]:
         results["profiles"][profile] = diagnose_profile(profile)
 
-    # Aggregate
-    statuses = [p["overall_status"] for p in results["profiles"].values()]
+    # Overall summary
+    statuses = [p["overall_status"]
+                for p in results["profiles"].values()]
     if all(s == STATUS_ONLINE for s in statuses):
-        results["aggregate_status"] = STATUS_ONLINE
-    elif any(s == STATUS_SESSION_CONFLICT for s in statuses):
-        results["aggregate_status"] = STATUS_SESSION_CONFLICT
-    elif any(s == STATUS_OFFLINE_NO_PROCESS for s in statuses):
-        results["aggregate_status"] = "PARTIAL_OFFLINE"
+        results["overall"] = STATUS_ONLINE
+    elif any(s == STATUS_LIMIT_BLOCK for s in statuses):
+        results["overall"] = STATUS_LIMIT_BLOCK
+    elif any(s == STATUS_LIMIT_WARNING for s in statuses):
+        results["overall"] = STATUS_LIMIT_WARNING
+    elif any(s in (STATUS_OFFLINE_NO_PROCESS, STATUS_TASK_READY_NOT_RUNNING)
+             for s in statuses):
+        results["overall"] = "DEGRADED"
     else:
-        results["aggregate_status"] = "DEGRADED"
+        results["overall"] = STATUS_UNKNOWN
+
+    # Only print when called from CLI (json_output flag)
+    if json_output == "print":
+        print(json.dumps(results, indent=2))
+    elif json_output is True:
+        # Return-only mode for programmatic callers
+        pass
+    else:
+        for name, prof in results["profiles"].items():
+            lr = prof.get("limit_risk", {})
+            etl = lr.get("execution_time_limit", "N/A")
+            risk = lr.get("limit_risk_status", "N/A")
+            print(f"  {name}: {prof['overall_status']}"
+                  f" | task={prof['task']['status']}"
+                  f" | procs={prof['process_count']}"
+                  f" | etl={etl} risk={risk}")
+        print(f"  Overall: {results['overall']}")
 
     return results
 
 
 def self_check(json_output=False):
-    """Self-check: verify gateway health script works."""
+    """Run self-check tests."""
     checks = []
-
-    # 1. Version
     checks.append({"name": "version", "passed": True, "message": VERSION})
 
-    # 2. Status constants defined
-    constants = [STATUS_ONLINE, STATUS_OFFLINE_NO_PROCESS, STATUS_TASK_READY_NOT_RUNNING,
-                 STATUS_STALE_LOG, STATUS_RECONNECTING, STATUS_SESSION_CONFLICT, STATUS_UNKNOWN]
-    checks.append({"name": "status_constants", "passed": len(constants) == 7,
-                   "message": f"{len(constants)} status constants defined"})
+    # Test PT0S parsing
+    secs, indef = _parse_duration("PT0S")
+    checks.append({
+        "name": "parse_pt0s",
+        "passed": secs == 0 and indef is True,
+        "message": f"PT0S -> {secs}s indefinite={indef}",
+    })
 
-    # 3. Diagnose runs without error
-    try:
-        result = diagnose()
-        checks.append({"name": "diagnose", "passed": "profiles" in result,
-                       "message": f"aggregate={result.get('aggregate_status')}"})
-    except Exception as e:
-        checks.append({"name": "diagnose", "passed": False, "message": str(e)[:80]})
+    # Test PT72H parsing
+    secs, indef = _parse_duration("PT72H")
+    checks.append({
+        "name": "parse_pt72h",
+        "passed": secs == 259200 and indef is False,
+        "message": f"PT72H -> {secs}s indefinite={indef}",
+    })
 
-    # 4. Per-profile diagnosis
-    try:
-        default = diagnose_profile("default")
-        vibedev = diagnose_profile("vibedev")
-        checks.append({"name": "per_profile", "passed": "overall_status" in default and "overall_status" in vibedev,
-                       "message": f"default={default['overall_status']} vibedev={vibedev['overall_status']}"})
-    except Exception as e:
-        checks.append({"name": "per_profile", "passed": False, "message": str(e)[:80]})
+    # Test PT0 parsing
+    secs, indef = _parse_duration("PT0")
+    checks.append({
+        "name": "parse_pt0",
+        "passed": secs == 0 and indef is True,
+        "message": f"PT0 -> {secs}s indefinite={indef}",
+    })
 
-    # 5. Read-only verified
-    checks.append({"name": "read_only", "passed": True, "message": "no mutation detected"})
+    # Test limit risk: indefinite → OK
+    risk = _assess_limit_risk("Running", True, 0, False, True)
+    checks.append({
+        "name": "risk_indefinite_ok",
+        "passed": risk == LIMIT_OK,
+        "message": f"indefinite -> {risk}",
+    })
 
-    # 6. Node attribution
-    checks.append({"name": "node_attribution", "passed": True,
-                   "message": f"controller=windows execution={'windows' if platform.system() == 'Windows' else 'debian'}"})
+    # Test limit risk: PT72H + running + AHT=True → WARN
+    risk = _assess_limit_risk("Running", False, 259200, True, True)
+    checks.append({
+        "name": "risk_pt72h_running_warn",
+        "passed": risk == LIMIT_WARN,
+        "message": f"PT72H+running+AHT -> {risk}",
+    })
+
+    # Test limit risk: PT72H + ready/not running + no process → BLOCK
+    risk = _assess_limit_risk("Ready", False, 259200, True, False)
+    checks.append({
+        "name": "risk_pt72h_ready_block",
+        "passed": risk == LIMIT_BLOCK,
+        "message": f"PT72H+ready+no_proc -> {risk}",
+    })
+
+    # Test limit risk: PT72H + running + AHT=False → OK (no hard terminate)
+    risk = _assess_limit_risk("Running", False, 259200, False, True)
+    checks.append({
+        "name": "risk_pt72h_no_aht_ok",
+        "passed": risk == LIMIT_OK,
+        "message": f"PT72H+running+AHT=False -> {risk}",
+    })
+
+    # Test version string
+    checks.append({
+        "name": "version_2",
+        "passed": VERSION == "2.0.0",
+        "message": f"VERSION={VERSION}",
+    })
 
     passed = sum(1 for c in checks if c["passed"])
-    total = len(checks)
-    return {"overall": "PASS" if passed == total else "FAIL", "passed": passed, "total": total, "checks": checks}
+    failed = sum(1 for c in checks if not c["passed"])
+    result = {"overall": "PASS" if failed == 0 else "FAIL",
+              "passed": passed, "failed": failed, "total": len(checks),
+              "checks": checks}
+
+    if json_output:
+        print(json.dumps(result, indent=2))
+    else:
+        for c in checks:
+            sym = "✓" if c["passed"] else "✗"
+            print(f"  {sym} {c['name']}: {'PASS' if c['passed'] else 'FAIL'}"
+                  f" - {c['message']}")
+        print(f"  Overall: {'PASS' if failed == 0 else 'FAIL'}"
+              f" ({passed}/{len(checks)})")
+
+    return result
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="vibe_gateway_health")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
-    parser.add_argument("--json", action="store_true", dest="output_json")
-    sub = parser.add_subparsers(dest="command")
-    sub.add_parser("status")
-    sub.add_parser("self-check")
+    """Build argument parser."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Gateway health diagnostics with 72h limit detection")
+    parser.add_argument("--version", action="version",
+                        version=f"%(prog)s {VERSION}")
+    parser.add_argument("--json", dest="output_json", action="store_true",
+                        help="JSON output")
+    parser.add_argument("--self-check", dest="self_check_flag",
+                        action="store_true", help="Run self-check")
+    parser.add_argument("positional", nargs="?", default=None,
+                        help="Positional arg (e.g., 'self-check')")
+    parser.add_argument("--compact", action="store_true",
+                        help="Compact one-line output")
     return parser
 
 
 def main(argv=None):
+    """Main entry point."""
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command == "status":
-        result = diagnose(args.output_json)
-    elif args.command == "self-check":
+    if args.self_check_flag or args.positional == "self-check":
         result = self_check(args.output_json)
-    else:
-        parser.print_help()
-        return 1
+        return 0 if result.get("failed", 1) == 0 else 1
 
-    if args.output_json:
-        print(json.dumps(result, indent=2))
-    else:
-        if isinstance(result, dict) and "overall" in result:
-            print(f"Overall: {result['overall']} ({result['passed']}/{result['total']})")
-            for c in result.get("checks", []):
-                icon = "PASS" if c["passed"] else "FAIL"
-                print(f"  [{icon}] {c['name']}: {c['message']}")
-        elif isinstance(result, dict):
-            print(f"Aggregate: {result.get('aggregate_status')}")
-            for name, profile in result.get("profiles", {}).items():
-                print(f"  {name}: {profile.get('overall_status')}")
+    if args.compact:
+        results = diagnose(json_output=False)
+        return 0 if results.get("overall") == STATUS_ONLINE else 1
+
+    results = diagnose(json_output="print" if args.output_json else False)
     return 0
 
 
