@@ -5,3 +5,5 @@ gitdir
 index
 index.lock
 logs/
+__pycache__/
+*.pyc

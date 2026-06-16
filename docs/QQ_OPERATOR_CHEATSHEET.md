@@ -522,3 +522,13 @@ report-schema --json validate --input report.json
 
 429/timeout → no auto model switch, report to operator.
 401/config → BLOCK. Extended → must record reason.
+
+### Node Routing
+| Task | Node | Timeout |
+|------|------|---------|
+| gateway health | windows-worker | 30s |
+| PowerShell/ACL | windows-worker | 300s |
+| pytest/smoke | debian-worker | 600s |
+| git push/PR | debian-worker | 600s |
+| gateway+resume | dual-node | 600s |
+| external push | debian+approval | 600s |

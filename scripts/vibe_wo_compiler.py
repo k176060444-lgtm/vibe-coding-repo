@@ -62,6 +62,24 @@ WO_TEMPLATES = {
         "resume_strategy": "approval_for_each_package",
         "requires_approval": True,
     },
+    "windows-worker-task": {
+        "execution_node": "windows",
+        "tools": ["terminal", "file"],
+        "requires_approval": False,
+        "per_wo_validation": ["exit_code"],
+        "final_validation": ["exit_code"],
+        "stop_conditions": ["timeout_exceeded", "exit_code_nonzero", "gateway_blocked"],
+        "resume_strategy": "escalate_to_debian",
+    },
+    "dual-node-task": {
+        "execution_node": "dual-node",
+        "tools": ["terminal", "file"],
+        "requires_approval": False,
+        "per_wo_validation": ["exit_code"],
+        "final_validation": ["exit_code"],
+        "stop_conditions": ["windows_phase_failed", "debian_phase_failed", "timeout_exceeded"],
+        "resume_strategy": "phase_retry",
+    },
 }
 
 
@@ -70,8 +88,16 @@ def _select_template(task_spec):
     risk = task_spec.get("risk_level", "low")
     scope = task_spec.get("repo_scope", "trusted-self")
     op = task_spec.get("operation_type", "planning")
+    summary = task_spec.get("summary", "")
 
-    if "gateway" in task_spec.get("summary", "").lower():
+    # Gateway routing: health/status → windows-worker, recovery → dual-node/gateway-recovery
+    if "gateway" in summary.lower():
+        is_health = any(kw in summary.lower() for kw in ["health", "status", "check", "log", "monitor"])
+        is_recovery = any(kw in summary.lower() for kw in ["recover", "resume", "restart", "fix"])
+        if is_health and not is_recovery:
+            return "windows-worker-task"
+        if is_recovery and any(kw in summary.lower() for kw in ["resume", "pytest", "debian"]):
+            return "dual-node-task"
         return "gateway-recovery"
     if scope == "trusted-self" and risk in ("low", "medium"):
         return "self-repo-low-risk"
@@ -209,6 +235,28 @@ def self_check(output_json=False):
         "name": "has_stop_conditions",
         "passed": len(plan.get("stop_conditions", [])) >= 2,
         "message": f"count={len(plan.get('stop_conditions', []))}",
+    })
+
+    # Test windows worker lane
+    spec_win = {"task_id": "task-win", "summary": "gateway health check",
+                "repo_scope": "trusted-self", "operation_type": "diagnostic",
+                "risk_level": "low"}
+    plan_win = compile_wo(spec_win)
+    checks.append({
+        "name": "windows_worker_lane",
+        "passed": plan_win.get("template") == "windows-worker-task",
+        "message": f"template={plan_win.get('template')} node={plan_win.get('execution_node')}",
+    })
+
+    # Test dual-node scheduling
+    spec_dual = {"task_id": "task-dual", "summary": "gateway recovery then resume pytest",
+                 "repo_scope": "trusted-self", "operation_type": "recovery",
+                 "risk_level": "medium"}
+    plan_dual = compile_wo(spec_dual)
+    checks.append({
+        "name": "dual_node_scheduling",
+        "passed": plan_dual.get("template") == "dual-node-task",
+        "message": f"template={plan_dual.get('template')} node={plan_dual.get('execution_node')}",
     })
 
     passed = sum(1 for c in checks if c["passed"])

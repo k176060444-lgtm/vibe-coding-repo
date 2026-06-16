@@ -1574,3 +1574,11 @@ python3 scripts/vibe_iteration_policy.py self-check          # Run self-check
 python3 scripts/vibe_iteration_policy.py recommend --read-only  # Recommend for task
 python3 scripts/vibe_iteration_policy.py recommend --multi-wo --external
 ```
+
+### Windows Worker Lane
+```bash
+python3 scripts/vibe_windows_worker_policy.py self-check    # Policy self-check
+python3 scripts/vibe_windows_worker_policy.py classify "gateway health check"
+python3 scripts/vibe_windows_job_runner.py self-check        # Runner self-check
+python3 scripts/vibe_windows_job_runner.py run --command "echo hello" --timeout 30
+```

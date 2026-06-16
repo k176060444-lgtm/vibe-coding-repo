@@ -5004,6 +5004,16 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("v1131_401_blocked", test_v1131_401_blocked))
     tests.append(_run_test("v1131_intake_iteration_field", test_v1131_intake_iteration_field))
     tests.append(_run_test("v1131_compiler_iteration_field", test_v1131_compiler_iteration_field))
+    # V1.14 Windows Worker Lane tests
+    tests.append(_run_test("v114_gateway_windows", test_v114_gateway_windows))
+    tests.append(_run_test("v114_pytest_debian", test_v114_pytest_debian))
+    tests.append(_run_test("v114_external_push_debian", test_v114_external_push_debian))
+    tests.append(_run_test("v114_windows_long_blocked", test_v114_windows_long_blocked))
+    tests.append(_run_test("v114_job_runner_blocks_dangerous", test_v114_job_runner_blocks_dangerous))
+    tests.append(_run_test("v114_compiler_windows_lane", test_v114_compiler_windows_lane))
+    tests.append(_run_test("v114_compiler_dual_node", test_v114_compiler_dual_node))
+    tests.append(_run_test("v114_gateway_isolation", test_v114_gateway_isolation))
+    tests.append(_run_test("v114_unknown_defaults_debian", test_v114_unknown_defaults_debian))
     return tests
 
 
@@ -5751,6 +5761,93 @@ def test_v1131_compiler_iteration_field():
     ip = plan.get("iteration_policy", {})
     return {"passed": ip.get("profile") == "long" and ip.get("steps") == 500,
             "message": f"profile={ip.get('profile')} steps={ip.get('steps')} source={ip.get('source')}"}
+
+
+
+# ── V1.14 Windows Worker Lane Tests ──────────────────────────────
+
+
+def test_v114_gateway_windows():
+    """V1.14-01: gateway health → windows-worker."""
+    from vibe_windows_worker_policy import classify_task_node
+    r = classify_task_node("gateway health check")
+    return {"passed": r["node"] == "windows-worker",
+            "message": f"node={r['node']} timeout={r['timeout']}"}
+
+
+def test_v114_pytest_debian():
+    """V1.14-02: pytest → debian-worker."""
+    from vibe_windows_worker_policy import classify_task_node
+    r = classify_task_node("run pytest full smoke suite")
+    return {"passed": r["node"] == "debian-worker",
+            "message": f"node={r['node']}"}
+
+
+def test_v114_external_push_debian():
+    """V1.14-03: external push → debian + approval."""
+    from vibe_windows_worker_policy import classify_task_node
+    r = classify_task_node("external push to fork", risk_level="high",
+                           repo_scope="protected-external")
+    return {"passed": r["node"] == "debian-worker" and r["requires_approval"],
+            "message": f"node={r['node']} approval={r['requires_approval']}"}
+
+
+def test_v114_windows_long_blocked():
+    """V1.14-04: Windows job runner blocks >300s."""
+    from vibe_windows_job_runner import validate_task
+    v = validate_task("echo hello", 600)
+    return {"passed": not v["allowed"],
+            "message": f"allowed={v['allowed']} reason={v['reason']}"}
+
+
+def test_v114_job_runner_blocks_dangerous():
+    """V1.14-05: job runner blocks git/pytest/token."""
+    from vibe_windows_job_runner import validate_task
+    blocked = ["git push origin main", "pytest tests/", "cat token.txt"]
+    for cmd in blocked:
+        v = validate_task(cmd, 60)
+        if v["allowed"]:
+            return {"passed": False, "message": f"should block: {cmd}"}
+    return {"passed": True, "message": "all dangerous commands blocked"}
+
+
+def test_v114_compiler_windows_lane():
+    """V1.14-06: WO compiler routes gateway health → windows-worker-task."""
+    from vibe_wo_compiler import compile_wo
+    spec = {"task_id": "task-win", "summary": "gateway health check",
+            "repo_scope": "trusted-self", "operation_type": "diagnostic",
+            "risk_level": "low"}
+    plan = compile_wo(spec)
+    return {"passed": plan.get("template") == "windows-worker-task",
+            "message": f"template={plan.get('template')} node={plan.get('execution_node')}"}
+
+
+def test_v114_compiler_dual_node():
+    """V1.14-07: WO compiler routes gateway recovery → dual-node-task."""
+    from vibe_wo_compiler import compile_wo
+    spec = {"task_id": "task-dual", "summary": "gateway recovery then resume pytest",
+            "repo_scope": "trusted-self", "operation_type": "recovery",
+            "risk_level": "medium"}
+    plan = compile_wo(spec)
+    return {"passed": plan.get("template") == "dual-node-task",
+            "message": f"template={plan.get('template')} node={plan.get('execution_node')}"}
+
+
+def test_v114_gateway_isolation():
+    """V1.14-08: gateway isolation timeout enforcement."""
+    from vibe_windows_worker_policy import check_gateway_isolation
+    ok = check_gateway_isolation("windows-worker", 120)
+    bad = check_gateway_isolation("windows-worker", 400)
+    return {"passed": ok["allowed"] and not bad["allowed"],
+            "message": f"120s={ok['allowed']} 400s={bad['allowed']}"}
+
+
+def test_v114_unknown_defaults_debian():
+    """V1.14-09: unknown task → debian-worker."""
+    from vibe_windows_worker_policy import classify_task_node
+    r = classify_task_node("do random stuff")
+    return {"passed": r["node"] == "debian-worker",
+            "message": f"node={r['node']}"}
 
 if __name__ == "__main__":
     sys.exit(main())
