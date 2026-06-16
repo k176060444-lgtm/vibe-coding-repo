@@ -1338,3 +1338,26 @@ python3 scripts/vibe_batch_runner.py --status --json  # shows validation_modes, 
 **Output fields:** validation_mode, per_wo_quick_checks, deferred_checks, final_full_validation_required, final_full_validation_result
 
 **Safety rule:** Quick checks fail → stop batch. Final full validation fail → BLOCK, no freeze.
+
+### batch-runner v1.7.0 — External Repo Policy & Approval
+
+```bash
+# Check external repo policy (dry-run)
+python3 scripts/vibe_batch_runner.py --external-policy --ext-repo org/repo --ext-operation push --json
+python3 scripts/vibe_batch_runner.py --external-policy --ext-repo org/repo --ext-operation fetch --json
+
+# Manage approvals
+python3 scripts/vibe_batch_runner.py --external-approval --approval-action create --approval-repo org/repo --approval-branch main --approval-operation push --approval-base-sha abc123 --json
+python3 scripts/vibe_batch_runner.py --external-approval --approval-action approve --approval-id <id> --json
+python3 scripts/vibe_batch_runner.py --external-approval --approval-action expire --approval-id <id> --json
+python3 scripts/vibe_batch_runner.py --external-approval --approval-action list --json
+python3 scripts/vibe_batch_runner.py --external-approval --approval-action show --approval-id <id> --json
+```
+
+**External policy fields:** repo_trust_level, operation_type, requires_approval, approved, would_read_token, would_push, blockers, warnings
+
+**Approval bindings:** repo, branch, operation, base_sha, changed_paths, patch_sha256, expires_at (TTL)
+
+**Status fields:** external_policy_supported, external_approval_supported, external_read_ops, external_write_ops, repo_trust_levels, default_trust_level
+
+**Safety:** Read-only external ops → no token. Write external ops → BLOCK without approval. Approved → dry-run only (V1.8).

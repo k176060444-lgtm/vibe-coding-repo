@@ -1248,3 +1248,55 @@ If final full validation fails, batch status = BLOCK, no freeze allowed.
 
 ### One-line principle
 **Quality validation can be deferred; safety boundary checks run per-WO. Fast mode: quick checks per WO, full validation at batch end.**
+
+## V1.8 External Repo Protected Policy (Dry-Run)
+
+### Repo Trust Classification
+
+| Repo | Trust Level | Auto Policy |
+|------|-------------|-------------|
+| `k176060444-lgtm/vibe-coding-repo` | `trusted-self` | Auto-allow batch operations |
+| All other repos | `protected-external` | Requires explicit approval for writes |
+
+### Operation Classification
+
+**Read-only (allowed without token):**
+- `fetch`, `diff`, `merge-dry-run`, `patch`, `read-tree`, `log`, `show`, `status`
+
+**Write (BLOCK unless approved):**
+- `push`, `pr-update`, `branch-write`, `merge`, `tag`, `release`, `deploy`
+
+### Approval Flow
+
+1. **Create** approval request → binds: repo, branch, operation, base_sha, changed_paths, patch_sha256, expires_at
+2. **Approve** → operator reviews and approves
+3. **Check** → policy gate validates approval before operation
+4. **Expire** → approval can be explicitly expired
+
+### V1.8 Constraints
+
+- External read-only operations: allowed, no token access
+- External write without approval: **BLOCK**
+- External write with approval: **dry-run only** (would_push=true, real push blocked)
+- Even approved, V1.8 does NOT execute real push to external repos
+- Token is never read for external read-only operations
+
+### Policy Decision Output Fields
+
+```
+repo_trust_level    — trusted-self | protected-external
+operation_type      — the operation being checked
+requires_approval   — true for external writes
+approved            — true if policy allows
+would_read_token    — true only for approved external writes
+would_push          — true for write operations
+blockers            — list of blocking reasons
+warnings            — list of informational warnings
+```
+
+### Safety Invariant
+
+**Self repo = automation priority. External repo = authorization priority.**
+External writes MUST have explicit operator approval. V1.8 is dry-run only.
+
+*V1.8 External Repo Protected Dry-Run — 2026-06-16*
