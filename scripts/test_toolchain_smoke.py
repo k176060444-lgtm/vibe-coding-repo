@@ -4984,6 +4984,11 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("classifier_self_check", lambda: _test_classifier_self_check(script_dir)))
     tests.append(_run_test("classifier_exit5_not_pass", lambda: _test_classifier_exit5_not_pass(script_dir)))
     tests.append(_run_test("classifier_strong_validation", lambda: _test_classifier_strong_validation(script_dir)))
+    tests.append(_run_test("dashboard_self_check", lambda: _test_dashboard_self_check(script_dir)))
+    tests.append(_run_test("resume_gate_self_check", lambda: _test_resume_gate_self_check(script_dir)))
+    tests.append(_run_test("health_snapshot_self_check", lambda: _test_health_snapshot_self_check(script_dir)))
+    tests.append(_run_test("health_snapshot_verdict", lambda: _test_health_snapshot_verdict(script_dir)))
+    tests.append(_run_test("resume_gate_decisions", lambda: _test_resume_gate_decisions(script_dir)))
     return tests
 
 
@@ -5519,6 +5524,82 @@ def _test_classifier_strong_validation(script_dir):
     r3 = prc.classify_pytest_result(5, "1 skipped in 0.05s")
     ok = r1["strong_validation"] and not r2["strong_validation"] and not r3["strong_validation"]
     return {"passed": ok, "message": f"pass={r1['strong_validation']} skipped={r2['strong_validation']} inc={r3['strong_validation']}"}
+
+
+def _test_dashboard_self_check(script_dir):
+    """Batch dashboard self-check passes."""
+    path = os.path.join(script_dir, "vibe_batch_dashboard.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--self-check"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_resume_gate_self_check(script_dir):
+    """Resume gate self-check passes."""
+    path = os.path.join(script_dir, "vibe_resume_gate.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "self-check"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_health_snapshot_self_check(script_dir):
+    """Health snapshot self-check passes."""
+    path = os.path.join(script_dir, "vibe_health_snapshot.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--self-check"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_health_snapshot_verdict(script_dir):
+    """Health snapshot returns valid verdict."""
+    path = os.path.join(script_dir, "vibe_health_snapshot.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("verdict") in ("OK", "WARN", "BLOCK")
+    return {"passed": ok, "message": f"verdict={data.get('verdict')}"}
+
+
+def _test_resume_gate_decisions(script_dir):
+    """Resume gate returns valid decisions for multiple scenarios."""
+    path = os.path.join(script_dir, "vibe_resume_gate.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    scenarios = [
+        (["--json", "check", "--batch-id", "t", "--worktree", "/x", "--expected-baseline", "a", "--current-main", "a", "--dirty", "false", "--gateway-status", "ONLINE", "--worker-reachable", "true"], "RESUME_SAFE"),
+        (["--json", "check", "--batch-id", "t", "--worktree", "/x", "--expected-baseline", "old", "--current-main", "new", "--dirty", "true", "--gateway-status", "ONLINE", "--worker-reachable", "true"], "CLEAN_RESUME_REQUIRED"),
+    ]
+    for args, expected in scenarios:
+        rc, stdout, stderr = _run_script(path, args)
+        try:
+            data = json.loads(stdout)
+        except:
+            return {"passed": False, "message": "invalid json"}
+        if data.get("decision") != expected:
+            return {"passed": False, "message": f"expected={expected} got={data.get('decision')}"}
+    return {"passed": True, "message": "all scenarios correct"}
 if __name__ == "__main__":
     sys.exit(main())
 

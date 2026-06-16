@@ -445,3 +445,31 @@ pytest-classifier classify --exit-code 5 --output "1 skipped"
 ```
 
 SKIPPED_ONLY ≠ PASS。INCONSISTENT_RESULT ≠ strong_validation。
+
+
+### Batch Dashboard (v1.0.0)
+
+```bash
+batch-dashboard --json   # 全集群状态
+batch-dashboard --text   # 人类可读
+```
+
+输出：baseline、worktrees、PRs、jobs、test envs、audit lock。
+
+### Resume Gate (v1.0.0)
+
+```bash
+resume-gate check --batch-id X --worktree /path --expected-baseline SHA
+```
+
+决策：RESUME_SAFE / CLEAN_RESUME_REQUIRED / BLOCK_* / MANUAL_APPROVAL_REQUIRED。
+
+关键经验：stale dirty worktree + main 前进 => CLEAN_RESUME_REQUIRED。不要自动 destructive cleanup。
+
+### Health Snapshot (v1.0.0)
+
+```bash
+health-snapshot --json   # 一键开工前检查
+```
+
+汇总：dashboard + gateway + worker + token + classifier + harness。OK/WARN/BLOCK。

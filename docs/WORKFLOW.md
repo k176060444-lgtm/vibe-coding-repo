@@ -1735,3 +1735,62 @@ Previous: "1 skipped, exit=5" reported as PASS
 Now: **INCONSISTENT_RESULT** — exit=5 but output shows test activity. Not strong enough for code validation.
 
 *V1.12.3 Runtime Reliability + Pytest Result Semantics - 2026-06-16*
+
+
+## V1.12.4 Operator Runbook + Auto Resume Gate + Batch Dashboard
+
+### Batch Dashboard
+
+One-command cluster status:
+
+```bash
+python3 scripts/vibe_batch_dashboard.py --json    # JSON
+python3 scripts/vibe_batch_dashboard.py --text     # Human readable
+python3 scripts/vibe_batch_dashboard.py --self-check
+```
+
+Reports: baseline, worktrees, pending PRs, jobs, test envs, audit lock, Level 5.
+
+### Resume Gate
+
+Decide if a batch can be safely resumed:
+
+```bash
+python3 scripts/vibe_resume_gate.py check --batch-id <id> --worktree <path> --expected-baseline <sha>
+python3 scripts/vibe_resume_gate.py self-check
+```
+
+Decisions:
+- RESUME_SAFE — continue
+- CLEAN_RESUME_REQUIRED — stale dirty worktree + main advanced
+- BLOCK_BASELINE_MISMATCH — main advanced, re-fetch first
+- BLOCK_GATEWAY_OFFLINE — restart gateway first
+- BLOCK_WORKER_UNREACHABLE — check SSH, retry in 5min
+- MANUAL_APPROVAL_REQUIRED — external write pending
+
+Key rule from V1.12.2: stale dirty worktree + main advanced => CLEAN_RESUME_REQUIRED. Never auto-destructive cleanup.
+
+### Health Snapshot
+
+Pre-work safety check:
+
+```bash
+python3 scripts/vibe_health_snapshot.py --json    # Full snapshot
+python3 scripts/vibe_health_snapshot.py --self-check
+```
+
+Aggregates: dashboard, gateway health, test env manager, token policy, classifier, harness, audit lock. Output: OK / WARN / BLOCK + top risks + recommended action.
+
+### Operator Runbook
+
+**Gateway offline:** Check `vibe_gateway_health.py diagnose --profile default`. Restart default first, then vibedev. Don't restart both simultaneously.
+
+**Batch interrupted:** Don't re-run the whole batch. Run `vibe_batch_dashboard.py` + `vibe_resume_gate.py check`. If CLEAN_RESUME_REQUIRED, backup worktree, create fresh branch from current main, port files.
+
+**Debian worker unreachable:** Wait 5min, retry. Max 75min wait. If SSH key changed, check VPN.
+
+**Stale dirty worktree:** `git rebase --abort; git reset --hard origin/main; re-apply from backup`.
+
+**pytest exit=5:** NEVER classify as PASS. Use `vibe_pytest_result_classifier.py`.
+
+*V1.12.4 Operator Runbook + Auto Resume Gate + Batch Dashboard - 2026-06-16*
