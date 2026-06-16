@@ -1479,3 +1479,24 @@ Self repo: gh_cached_credentials_allowed. External write: standard_token_require
 ### Node / Agent Attribution
 
 Every final report includes 10-field per-node attribution.
+
+
+### gateway-health v1.0.0
+
+```bash
+python3 scripts/vibe_gateway_health.py status [--json]     # Full status
+python3 scripts/vibe_gateway_health.py self-check [--json]  # Self-check
+```
+
+Profiles: default, vibedev. Statuses: ONLINE, OFFLINE_NO_PROCESS, TASK_READY_NOT_RUNNING, STALE_LOG, RECONNECTING, SESSION_CONFLICT_SUSPECTED, UNKNOWN.
+
+### pytest-result-classifier v1.0.0
+
+```bash
+python3 scripts/vibe_pytest_result_classifier.py classify --exit-code 5 --output "1 skipped" [--json]
+python3 scripts/vibe_pytest_result_classifier.py self-check [--json]
+```
+
+Categories: PASS, SKIPPED_ONLY, NO_TESTS, INCONSISTENT_RESULT, ENV_FAIL, TEST_FAIL, INTERRUPTED, TIMEOUT.
+
+**exit=5 is NEVER PASS.** strong_validation requires exit=0 AND passed>0.
