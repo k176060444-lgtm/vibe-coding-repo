@@ -4989,6 +4989,11 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("health_snapshot_self_check", lambda: _test_health_snapshot_self_check(script_dir)))
     tests.append(_run_test("health_snapshot_verdict", lambda: _test_health_snapshot_verdict(script_dir)))
     tests.append(_run_test("resume_gate_decisions", lambda: _test_resume_gate_decisions(script_dir)))
+    tests.append(_run_test("task_intake_self_check", lambda: _test_task_intake_self_check(script_dir)))
+    tests.append(_run_test("wo_compiler_self_check", lambda: _test_wo_compiler_self_check(script_dir)))
+    tests.append(_run_test("model_routing_self_check", lambda: _test_model_routing_self_check(script_dir)))
+    tests.append(_run_test("report_schema_self_check", lambda: _test_report_schema_self_check(script_dir)))
+    tests.append(_run_test("task_intake_classifies_risk", lambda: _test_task_intake_classifies_risk(script_dir)))
     return tests
 
 
@@ -5600,6 +5605,56 @@ def _test_resume_gate_decisions(script_dir):
         if data.get("decision") != expected:
             return {"passed": False, "message": f"expected={expected} got={data.get('decision')}"}
     return {"passed": True, "message": "all scenarios correct"}
+
+
+def _test_task_intake_self_check(script_dir):
+    path = os.path.join(script_dir, "vibe_task_intake.py")
+    if not os.path.exists(path): return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--self-check"])
+    try: data = json.loads(stdout)
+    except: return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_wo_compiler_self_check(script_dir):
+    path = os.path.join(script_dir, "vibe_wo_compiler.py")
+    if not os.path.exists(path): return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--self-check"])
+    try: data = json.loads(stdout)
+    except: return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_model_routing_self_check(script_dir):
+    path = os.path.join(script_dir, "vibe_model_routing_policy.py")
+    if not os.path.exists(path): return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--self-check"])
+    try: data = json.loads(stdout)
+    except: return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_report_schema_self_check(script_dir):
+    path = os.path.join(script_dir, "vibe_report_schema.py")
+    if not os.path.exists(path): return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--self-check"])
+    try: data = json.loads(stdout)
+    except: return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_task_intake_classifies_risk(script_dir):
+    path = os.path.join(script_dir, "vibe_task_intake.py")
+    if not os.path.exists(path): return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--repo", "k176060444-lgtm/vibe-coding-repo", "update docs for V1.13"])
+    try: data = json.loads(stdout)
+    except: return {"passed": False, "message": "invalid json"}
+    ok = data.get("risk_level") == "low" and data.get("repo_scope") == "trusted-self"
+    return {"passed": ok, "message": f"risk={data.get('risk_level')} scope={data.get('repo_scope')}"}
 if __name__ == "__main__":
     sys.exit(main())
 

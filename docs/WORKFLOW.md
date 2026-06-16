@@ -1794,3 +1794,54 @@ Aggregates: dashboard, gateway health, test env manager, token policy, classifie
 **pytest exit=5:** NEVER classify as PASS. Use `vibe_pytest_result_classifier.py`.
 
 *V1.12.4 Operator Runbook + Auto Resume Gate + Batch Dashboard - 2026-06-16*
+
+
+## V1.13 Autonomous Work Intake + WO Compiler + Model Routing
+
+### Task Intake
+
+Natural language to auditable task spec:
+
+```bash
+python3 scripts/vibe_task_intake.py --json "fix conflict in PR 40457"
+python3 scripts/vibe_task_intake.py --json --repo org/repo "push fix"
+python3 scripts/vibe_task_intake.py --self-check
+```
+
+Output: task_id, summary, repo, repo_scope, operation_type, risk_level, requires_approval, requires_token, forbidden_actions, validation_mode, next_command.
+
+### WO Compiler
+
+Task spec to WO plan:
+
+```bash
+python3 scripts/vibe_wo_compiler.py --json --input task_spec.json
+python3 scripts/vibe_wo_compiler.py --self-check
+```
+
+Templates: self-repo-low-risk, protected-external-read, protected-external-push, gateway-recovery, dependency-install. Output: WO id, goal, allowed/forbidden files, execution_node, tools, validations, stop conditions, resume strategy.
+
+### Model Routing Policy
+
+```bash
+python3 scripts/vibe_model_routing_policy.py --json route --task-type implementer
+python3 scripts/vibe_model_routing_policy.py --json route-all
+python3 scripts/vibe_model_routing_policy.py --self-check
+```
+
+Roles: planner, implementer, reviewer, summarizer, recovery. Recommends model per role. 429/timeout requires operator approval to switch; 401/config errors do NOT auto-switch.
+
+### Report Schema
+
+```bash
+python3 scripts/vibe_report_schema.py --json validate --input report.json
+python3 scripts/vibe_report_schema.py --self-check
+```
+
+Required: pr_merge_info, changed_paths, baseline, validation, node_attribution, token_status, external_write_status. Missing node_attribution or token section = FAIL.
+
+### Quality Metrics
+
+Smoke suite now tracks: smoke_duration_seconds, slowest_tests_top10, timeout_seconds, timeout_margin. Smoke vs Freeze count mismatch triggers WARN with explanation.
+
+*V1.13 Autonomous Work Intake + WO Compiler + Model Routing - 2026-06-16*

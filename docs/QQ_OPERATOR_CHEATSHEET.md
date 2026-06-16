@@ -473,3 +473,41 @@ health-snapshot --json   # 一键开工前检查
 ```
 
 汇总：dashboard + gateway + worker + token + classifier + harness。OK/WARN/BLOCK。
+
+
+### Task Intake (v1.0.0)
+
+自然语言 → JSON task spec。
+
+```bash
+task-intake --json "修复 PR 冲突"
+task-intake --json --repo org/repo "push fix"
+```
+
+自动分类：risk_level / repo_scope / operation_type / approval / forbidden_actions。
+
+### WO Compiler (v1.0.0)
+
+Task spec → WO plan。
+
+```bash
+wo-compiler --json --input task.json
+```
+
+模板：self-repo-low-risk / external-read / external-push / gateway-recovery / dependency-install。
+
+### Model Routing (v1.0.0)
+
+```bash
+model-routing-policy --json route --task-type implementer
+```
+
+5 角色：planner / implementer / reviewer / summarizer / recovery。429/timeout 需 operator 批准。
+
+### Report Schema (v1.0.0)
+
+```bash
+report-schema --json validate --input report.json
+```
+
+必填：PR/merge、changed_paths、baseline、validation、node_attribution、token_status、ext_write_status。
