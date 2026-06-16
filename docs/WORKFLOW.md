@@ -1300,3 +1300,59 @@ warnings            — list of informational warnings
 External writes MUST have explicit operator approval. V1.8 is dry-run only.
 
 *V1.8 External Repo Protected Dry-Run — 2026-06-16*
+
+## V1.9 External Repo Authorized Push Canary
+
+### Trust Classification Reminder
+
+| Repo | Trust Level | Policy |
+|------|-------------|--------|
+| `k176060444-lgtm/vibe-coding-repo` | **trusted-self** | Auto-allow batch, NOT external |
+| All other repos | **protected-external** | Requires approval for writes |
+
+**Critical:** `k176060444-lgtm/vibe-coding-repo` is trusted-self. It must NEVER be treated as an external repo for authorized push canary. External canary targets must be explicitly provided by the user.
+
+### External Authorized Push Flow
+
+```
+1. User specifies external test repo (NOT self repo)
+2. Create approval request → binds: repo, branch, operation, base_sha, changed_paths, patch_sha256, expires_at
+3. Human reviews and approves
+4. Run ext-push-preflight → validates approval + token file metadata
+5. Execute controlled push via privileged wrapper
+6. Fetch remote to verify branch + commit
+7. Generate evidence / run-report
+```
+
+### Preflight Checks (ext-push-preflight)
+
+| Check | Description |
+|-------|-------------|
+| approval_load | Approval record exists |
+| approval_status | Status = "approved" |
+| approval_expiry | Not expired |
+| write_operation | Operation is a write type |
+| forbidden_paths | No .github/*, secrets/*, etc. |
+| token_file | Token file exists, mode=600, correct size |
+
+**Token handling:** Preflight checks token file METADATA only. Token content is NEVER read during preflight. Token is only read during actual push execution, and NEVER output to stdout/stderr/log.
+
+### Canary Constraints
+
+- Target: user-specified external test repo (NOT self repo)
+- Branch: `privileged-canary/v1-9-*` or similar isolated branch
+- Changed paths: low-risk docs only (e.g., `docs/PRIVILEGED_EXTERNAL_PUSH_CANARY.md`)
+- Force push: ❌
+- Delete branch: ❌
+- Tag/Release/Deploy: ❌
+- .github/*: ❌
+
+### WO2 Status (V1.9 batch)
+
+`SKIPPED_NO_EXTERNAL_TARGET` — No user-specified external test repo provided. Self repo (`k176060444-lgtm/vibe-coding-repo`) does not qualify as external. Real external push canary deferred until user provides a protected external test repo.
+
+### Safety Invariant
+
+**Self repo ≠ external repo.** External authorized push is ONLY for protected external repos with explicit user approval. Trusted-self repos use normal batch automation.
+
+*V1.9 External Repo Authorized Push Canary — 2026-06-16*

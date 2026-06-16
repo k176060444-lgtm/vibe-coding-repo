@@ -326,3 +326,32 @@ br --external-approval --approval-action list --json
 **Self repo 自动化优先；external repo 授权优先。读取不需 token，写入必须 approve，V1.8 只 dry-run。**
 
 *V1.8 External Repo Protected Dry-Run — 2026-06-16*
+
+## V1.9 External Authorized Push Preflight
+
+### 运行 preflight 检查
+```
+br --ext-push-preflight --approval-id <id> --json
+```
+
+### Preflight 检查项
+- approval 存在且状态=approved
+- approval 未过期
+- 操作类型是 write
+- changed_paths 无 forbidden path
+- token 文件存在且权限正确（不读内容）
+
+### 重要区分
+- **trusted-self repo** (`k176060444-lgtm/vibe-coding-repo`) = 自动化，不是 external
+- **protected-external repo** = 需要人工 approve
+- External canary 必须用户提供外部测试仓库
+
+### V1.9 一句话原则
+**External authorized push = 用户指定外部仓库 + 人工 approve + preflight + 受控 push。Self repo 不是 external。**
+
+### 当前状态
+- WO1 ✅ preflight 实现完成
+- WO2 ⏭️ SKIPPED — 无外部测试仓库
+- WO3 ✅ 文档冻结
+
+*V1.9 External Repo Authorized Push Canary — 2026-06-16*
