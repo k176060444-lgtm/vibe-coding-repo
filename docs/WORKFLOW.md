@@ -1871,3 +1871,32 @@ Default is Infinity (no limit). VibeCoding defines 4 profiles:
 
 ### Override
 Operator can override by passing `--steps N` or specifying profile in task spec.
+
+## V1.14 Windows Worker Lane + Dual-Node Scheduling
+
+### Node Roles
+| Node | Role | Default Tasks |
+|------|------|---------------|
+| windows-controller | QQ gateway, plan generation, SSH scheduling | Controller only |
+| windows-worker | Short diagnostics, gateway health, PowerShell | Gateway, Task Scheduler, event logs, ACL, .NET, BAT, Office |
+| debian-worker | Git, Python, pytest, PR/merge, builds | Default executor for all coding tasks |
+| dual-node | Cross-node recovery | Gateway recovery + Debian resume |
+
+### Windows Worker Lane
+- Max task timeout: 300s (5 min)
+- Gateway health checks: 30s max
+- Blocked: git push, pytest, token access, SSH, external writes
+- Gateway isolation: worker tasks MUST NOT block gateway
+
+### Dual-Node Scheduling
+When a task needs both Windows (gateway diagnostic) and Debian (execution):
+1. Phase 1: windows-worker runs diagnostic
+2. Phase 2: debian-worker runs execution
+3. If phase 1 fails → escalate_to_debian
+4. If phase 2 fails → phase_retry
+
+### WO Compiler Integration
+- `gateway health check` → windows-worker-task
+- `gateway recovery then resume pytest` → dual-node-task
+- `run pytest` → debian-worker (default)
+- `external push` → debian-worker + approval
