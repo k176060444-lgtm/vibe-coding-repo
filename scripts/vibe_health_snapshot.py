@@ -74,6 +74,42 @@ def snapshot(jobs_dir=None, output_json=False):
     else:
         checks.append({"name": "gateway_health", "status": "WARN", "message": "not found"})
 
+    # 2b. Gateway limit risk (72h ExecutionTimeLimit detection)
+    gw_limit_path = os.path.join(script_dir, "vibe_gateway_health.py")
+    if os.path.isfile(gw_limit_path):
+        import importlib.util
+        try:
+            spec = importlib.util.spec_from_file_location("vibe_gateway_health", gw_limit_path)
+            gw_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(gw_mod)
+            diag = gw_mod.diagnose(json_output=True) if hasattr(gw_mod, "diagnose") else None
+            if diag:
+                limit_checks = []
+                for pname, pdata in diag.get("profiles", {}).items():
+                    lr = pdata.get("limit_risk", {})
+                    risk_status = lr.get("limit_risk_status", "UNKNOWN")
+                    etl = lr.get("execution_time_limit", "N/A")
+                    etl_indef = lr.get("execution_time_limit_is_indefinite", False)
+                    if etl_indef or etl in ("PT0S", "PT0", "N/A"):
+                        limit_checks.append(f"{pname}: etl={etl} OK")
+                    elif risk_status == "WARN":
+                        limit_checks.append(f"{pname}: etl={etl} WARN")
+                        risks.append(f"{pname} gateway limit risk: {etl}")
+                    elif risk_status == "BLOCK":
+                        limit_checks.append(f"{pname}: etl={etl} BLOCK")
+                        risks.append(f"{pname} gateway limit BLOCK: {etl}")
+                    else:
+                        limit_checks.append(f"{pname}: etl={etl} {risk_status}")
+                overall_limit = diag.get("overall", "UNKNOWN")
+                if overall_limit in ("LIMIT_BLOCK", "LIMIT_WARNING"):
+                    checks.append({"name": "gateway_limit_risk", "status": "WARN" if "WARN" in overall_limit else "BLOCK",
+                                   "message": "; ".join(limit_checks)[:120]})
+                else:
+                    checks.append({"name": "gateway_limit_risk", "status": "OK",
+                                   "message": "; ".join(limit_checks)[:120]})
+        except Exception as e:
+            checks.append({"name": "gateway_limit_risk", "status": "WARN", "message": str(e)[:60]})
+
     # 3. Test env manager
     env_path = os.path.join(script_dir, "vibe_test_env_manager.py")
     if os.path.isfile(env_path):

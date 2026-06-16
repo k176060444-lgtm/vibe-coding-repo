@@ -1582,3 +1582,11 @@ python3 scripts/vibe_windows_worker_policy.py classify "gateway health check"
 python3 scripts/vibe_windows_job_runner.py self-check        # Runner self-check
 python3 scripts/vibe_windows_job_runner.py run --command "echo hello" --timeout 30
 ```
+
+### Gateway Health v2 (72h Limit Detection)
+```bash
+python3 scripts/vibe_gateway_health.py --self-check          # Self-check
+python3 scripts/vibe_gateway_health.py --json self-check      # JSON self-check
+python3 scripts/vibe_gateway_health.py --json                 # Full diagnose
+python3 scripts/vibe_gateway_health.py --compact              # One-line status
+```

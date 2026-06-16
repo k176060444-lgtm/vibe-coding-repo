@@ -532,3 +532,12 @@ report-schema --json validate --input report.json
 | git push/PR | debian-worker | 600s |
 | gateway+resume | dual-node | 600s |
 | external push | debian+approval | 600s |
+
+### Gateway Limit Detection
+| ETL | Risk | Meaning |
+|-----|------|---------|
+| PT0S | OK | No time limit (correct) |
+| PT72H+running+AHT | WARN | Finite limit, force kill enabled |
+| PT72H+ready+no_proc | BLOCK | Limit likely expired, gateway dead |
+
+v2.0.0 fields: execution_time_limit, limit_risk_status, allow_hard_terminate

@@ -158,6 +158,27 @@ def dashboard(jobs_dir=None, output_json=False):
     jobs_dir = jobs_dir or os.path.expanduser("~/vibedev/jobs")
     bare_repo = os.path.expanduser("~/vibedev/repos/vibe-coding-repo.git")
 
+    # Gateway limit risk check
+    import importlib.util
+    gw_health_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vibe_gateway_health.py")
+    limit_info = {}
+    if os.path.isfile(gw_health_path):
+        try:
+            spec = importlib.util.spec_from_file_location("vgw", gw_health_path)
+            gw_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(gw_mod)
+            if hasattr(gw_mod, "diagnose"):
+                diag = gw_mod.diagnose(json_output=True)
+                for pname, pdata in diag.get("profiles", {}).items():
+                    lr = pdata.get("limit_risk", {})
+                    limit_info[pname] = {
+                        "etl": lr.get("execution_time_limit", "N/A"),
+                        "risk": lr.get("limit_risk_status", "UNKNOWN"),
+                        "indefinite": lr.get("execution_time_limit_is_indefinite", False),
+                    }
+        except Exception:
+            pass
+
     result = {
         "version": VERSION,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
@@ -169,6 +190,7 @@ def dashboard(jobs_dir=None, output_json=False):
         "test_envs": _check_test_envs(),
         "audit_lock": _check_audit_lock(jobs_dir),
         "level5_activated": False,
+        "gateway_limit_risk": limit_info,
         "node_attribution": {
             "controller_node": "windows",
             "execution_node": "debian",
