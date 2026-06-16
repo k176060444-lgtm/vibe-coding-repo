@@ -5919,6 +5919,44 @@ def test_v1142_version_2():
     from vibe_gateway_health import VERSION
     return {"passed": VERSION == "2.0.0", "message": f"VERSION={VERSION}"}
 
+def test_v1143_worker_registry_selfcheck():
+    """V1.14.3-01: worker_registry self-check."""
+    from vibe_worker_registry import self_check
+    r = self_check()
+    return {"passed": r["passed"], "message": str(len(r.get("checks",[]))) + " checks"}
+
+def test_v1143_scheduler_selfcheck():
+    """V1.14.3-02: scheduler_policy self-check."""
+    from vibe_scheduler_policy import self_check
+    r = self_check()
+    return {"passed": r["passed"], "message": str(len(r.get("checks",[]))) + " checks"}
+
+def test_v1143_pool_health_selfcheck():
+    """V1.14.3-03: worker_pool_health self-check."""
+    from vibe_worker_pool_health import self_check
+    r = self_check()
+    return {"passed": r["passed"], "message": str(len(r.get("checks",[]))) + " checks"}
+
+def test_v1143_dual_node_parallel():
+    """V1.14.3-04: dual-node parallel execution."""
+    from vibe_worker_registry import WorkerRegistry, NodeStatus
+    reg = WorkerRegistry()
+    reg.set_health("5bao", NodeStatus.ONLINE)
+    reg.set_health("9bao", NodeStatus.ONLINE)
+    w1 = reg.select_worker()
+    reg.record_job_start(w1.worker_id)
+    w2 = reg.select_worker()
+    assert w2 is not None and w2.worker_id != w1.worker_id
+    reg.record_job_start(w2.worker_id)
+    w3 = reg.select_worker()
+    assert w3 is None
+    return {"passed": True, "message": w1.worker_id + "+" + w2.worker_id + " parallel"}
+
+def test_v1143_version():
+    """V1.14.3-05: worker_registry version 1.0.0."""
+    from vibe_worker_registry import __version__
+    return {"passed": __version__ == "1.0.0", "message": "VERSION=" + __version__}
+
 if __name__ == "__main__":
     sys.exit(main())
 

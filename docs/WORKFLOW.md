@@ -1931,3 +1931,41 @@ default and vibedev gateways went offline simultaneously with no auto-recovery.
 - Do NOT delete Hermes_Gateway / Hermes_Gateway_vibedev tasks
 - Do NOT blindly restart both default/vibedev simultaneously
 - If migrating to Windows Service, keep this check as fallback
+
+## Active-Active Worker Pool (V1.14.3)
+
+### Architecture
+- **Windows controller**: orchestrator, scheduling, approval gate
+- **5bao** (192.168.5.6:22222): Debian worker, Intel N100, weight=100
+- **9bao** (192.168.9.6:22222): Debian worker, Intel N100, weight=100
+
+### Design Principles
+- Active-active, NOT primary/secondary
+- Equal weight, load-balanced scheduling
+- Either worker can handle any linux-worker task
+- If one goes offline, the other continues accepting jobs
+- Interrupted jobs require resume gate (no blind takeover)
+
+### Scheduling Policy
+1. Capability match (task type in worker capabilities)
+2. ONLINE status
+3. Not in maintenance
+4. No conflicting branch/merge lock
+5. Least active_jobs
+6. Lower recent_failure_count
+7. Weighted round-robin tie-break
+
+### Global Locks
+- **Branch mutation lock**: same branch cannot be mutated by two workers simultaneously
+- **Merge lock**: same PR cannot be merged by two workers simultaneously
+- Stale locks require resume gate + operator approval (never auto-delete)
+
+### Scripts
+-  v1.0.0 — worker pool registry
+-  v1.0.0 — scheduling policy
+-  v1.0.0 — pool health check
+
+### Credential Policy
+- Self-repo operations: gh cached credentials (per-worker)
+- Protected external write: privileged token + approval + wrapper
+- 9bao must not bypass external write gate with gh credentials
