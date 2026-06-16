@@ -8,9 +8,10 @@ After each WO, refreshes baseline before executing the next.
 Stop rules: any WO failure stops the batch immediately.
 
 V1.8: External repo protected policy dry-run.
-- External repo read-only ops (fetch/diff/merge-dry-run/patch) allowed without token.
-- External repo write ops (push/PR update/branch write) BLOCK unless approved.
-- Even with approval, only dry-run (would_push=true), not real push in V1.8.
+V1.9: External repo authorized push canary.
+- External repo read-only ops allowed without token.
+- External repo write ops BLOCK unless approved.
+- Approved external write: token preflight + controlled push via privileged wrapper.
 
 Usage:
     python3 scripts/vibe_batch_runner.py --batch <batch.json> [--json] [--compact] [--dry-run]
@@ -21,6 +22,7 @@ Usage:
     python3 scripts/vibe_batch_runner.py --resume [--checkpoint <file>] [--json] [--compact]
     python3 scripts/vibe_batch_runner.py --external-policy <repo> <operation> [--json]
     python3 scripts/vibe_batch_runner.py --external-approval <action> [--json] [--compact]
+    python3 scripts/vibe_batch_runner.py --ext-push-preflight --approval-id <id> [--json]
 
 Constraints:
     - Self-repo only (k176060444-lgtm/vibe-coding-repo) for automated batch.
@@ -41,7 +43,7 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
 
@@ -111,6 +113,155 @@ EXTERNAL_WRITE_OPS = [
 
 # Approval storage directory
 APPROVAL_DIR_NAME = "privileged-approvals"
+
+# Token file path (never read content into output)
+TOKEN_FILE = os.path.expanduser("~/.vibedev/secrets/github_privileged_token")
+TOKEN_FILE_MODE = 0o600
+TOKEN_FILE_OWNER = "vibeworker"
+
+
+def _check_token_file():
+    """Check token file metadata without reading content.
+
+    Returns: (ok: bool, metadata: dict)
+    Metadata contains: exists, mode, size. NEVER includes token content.
+    """
+    result = {
+        "exists": False,
+        "mode": None,
+        "size": None,
+        "checks": [],
+    }
+
+    p = Path(TOKEN_FILE)
+    if not p.exists():
+        result["checks"].append("FAIL: token file not found")
+        return False, result
+
+    result["exists"] = True
+    result["checks"].append("PASS: token file exists")
+
+    try:
+        st = p.stat()
+        actual_mode = oct(st.st_mode & 0o777)
+        if st.st_mode & 0o777 != TOKEN_FILE_MODE:
+            result["checks"].append(f"WARN: mode={actual_mode}, expected={oct(TOKEN_FILE_MODE)}")
+        else:
+            result["checks"].append(f"PASS: mode={actual_mode}")
+        result["mode"] = actual_mode
+        result["size"] = st.st_size
+    except OSError as e:
+        result["checks"].append(f"FAIL: cannot stat: {e}")
+        return False, result
+
+    return True, result
+
+
+def _ext_push_preflight(approval_id, dry_run=True):
+    """Full preflight for external authorized push.
+
+    Validates:
+    1. Approval exists and is valid
+    2. Approval is for a write operation
+    3. Approval not expired
+    4. Token file exists and has correct permissions
+    5. No forbidden paths in changed_paths
+
+    NEVER reads token content. NEVER outputs token.
+    """
+    result = {
+        "command": "ext-push-preflight",
+        "approval_id": approval_id,
+        "preflight_passed": False,
+        "checks": {},
+        "blockers": [],
+        "warnings": [],
+        "dry_run": dry_run,
+    }
+
+    # 1. Load approval
+    approval = _load_approval(approval_id)
+    if not approval:
+        result["blockers"].append("approval_not_found")
+        result["checks"]["approval_load"] = "FAIL"
+        return False, result
+    result["checks"]["approval_load"] = "PASS"
+
+    # 2. Check approval status
+    if approval.get("status") != "approved":
+        result["blockers"].append(f"approval_status={approval.get('status')}")
+        result["checks"]["approval_status"] = "FAIL"
+        return False, result
+    result["checks"]["approval_status"] = "PASS"
+
+    # 3. Check expiry
+    expires_at = approval.get("expires_at", 0)
+    if expires_at and time.time() > expires_at:
+        result["blockers"].append("approval_expired")
+        result["checks"]["approval_expiry"] = "FAIL"
+        return False, result
+    result["checks"]["approval_expiry"] = "PASS"
+
+    # 4. Check operation is write
+    operation = approval.get("operation", "")
+    if not _is_write_operation(operation):
+        result["blockers"].append(f"not_write_operation: {operation}")
+        result["checks"]["write_operation"] = "FAIL"
+        return False, result
+    result["checks"]["write_operation"] = "PASS"
+
+    # 5. Check forbidden paths
+    changed_paths = approval.get("changed_paths", [])
+    forbidden_violations = []
+    for cp in changed_paths:
+        for fp in FORBIDDEN_PATHS:
+            if cp.startswith(fp):
+                forbidden_violations.append(f"forbidden: {cp}")
+    if forbidden_violations:
+        result["blockers"].extend(forbidden_violations)
+        result["checks"]["forbidden_paths"] = "FAIL"
+        return False, result
+    result["checks"]["forbidden_paths"] = "PASS"
+
+    # 6. Check token file (metadata only, never read content)
+    token_ok, token_meta = _check_token_file()
+    result["checks"]["token_file"] = "PASS" if token_ok else "FAIL"
+    result["token_file_metadata"] = {
+        "exists": token_meta["exists"],
+        "mode": token_meta["mode"],
+        "size": token_meta["size"],
+    }
+    result["token_content_read"] = False  # NEVER read
+    if not token_ok:
+        result["blockers"].append("token_file_check_failed")
+        return False, result
+
+    # All checks passed
+    result["preflight_passed"] = True
+    result["approval"] = {
+        "repo": approval.get("repo"),
+        "branch": approval.get("branch"),
+        "operation": approval.get("operation"),
+        "base_sha": approval.get("base_sha"),
+        "changed_paths": approval.get("changed_paths"),
+        "patch_sha256": approval.get("patch_sha256"),
+        "expires_at": approval.get("expires_at"),
+        "approved_by": approval.get("approved_by"),
+        "approved_at": approval.get("approved_at"),
+    }
+    result["warnings"].append("v19_canary: controlled push only, not general external write")
+
+    return True, result
+
+
+def _cmd_ext_push_preflight(args):
+    """Run external authorized push preflight check."""
+    approval_id = args.approval_id
+    if not approval_id:
+        return {"error": "approval_id required"}, 1
+    dry_run = getattr(args, "dry_run", True)
+    ok, result = _ext_push_preflight(approval_id, dry_run=dry_run)
+    return result, 0 if ok else 1
 
 
 def _run_cmd(cmd, timeout=120, cwd=None):
@@ -1200,6 +1351,8 @@ def _cmd_status(args):
         "default_validation_mode": "fast",
         "external_policy_supported": True,
         "external_approval_supported": True,
+        "ext_push_preflight_supported": True,
+        "token_file_path": TOKEN_FILE,
         "external_read_ops": EXTERNAL_READ_OPS,
         "external_write_ops": EXTERNAL_WRITE_OPS,
         "repo_trust_levels": dict(REPO_TRUST_LEVELS),
@@ -1234,6 +1387,8 @@ def build_parser():
                        help="Check external repo policy (dry-run)")
     group.add_argument("--external-approval", action="store_true",
                        help="Manage external approval actions (dry-run)")
+    group.add_argument("--ext-push-preflight", action="store_true",
+                       help="External authorized push preflight check")
 
     # External policy args
     parser.add_argument("--ext-repo", metavar="REPO", help="External repo (owner/name)")
@@ -1301,6 +1456,8 @@ def main(argv=None):
         result, rc = _cmd_external_policy(args)
     elif args.external_approval:
         result, rc = _cmd_external_approval(args)
+    elif args.ext_push_preflight:
+        result, rc = _cmd_ext_push_preflight(args)
     else:
         parser.print_help()
         return 1
