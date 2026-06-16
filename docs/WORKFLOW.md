@@ -1845,3 +1845,29 @@ Required: pr_merge_info, changed_paths, baseline, validation, node_attribution, 
 Smoke suite now tracks: smoke_duration_seconds, slowest_tests_top10, timeout_seconds, timeout_margin. Smoke vs Freeze count mismatch triggers WARN with explanation.
 
 *V1.13 Autonomous Work Intake + WO Compiler + Model Routing - 2026-06-16*
+
+## V1.13.1 Iteration Budget Policy
+
+OpenCode `steps` parameter controls max agentic iterations per session.
+Default is Infinity (no limit). VibeCoding defines 4 profiles:
+
+| Profile | Steps | Use Case | Auto-Approve |
+|---------|-------|----------|-------------|
+| short | 200 | Read-only scout, dashboard, health, gateway | Yes |
+| standard | 300 | Self repo single WO, small fixes | Yes |
+| long | 500 | Multi-WO batch, full smoke, docs+tests+freeze | Yes |
+| extended | 800 | Very large batches (MUST record reason) | No |
+
+### Rules
+- High-risk tasks (external write, remediation, secrets, CI, workflow, Provider, SSH, deploy): recommendation only, always requires approval
+- 429/timeout: no auto model switch, must report to operator
+- 401/config error: BLOCK immediately
+- Extended profile: final report MUST include reason
+
+### Integration
+- `vibe_task_intake.py` outputs `iteration_policy` with recommended profile/steps
+- `vibe_wo_compiler.py` passes through iteration policy to WO plan
+- `vibe_iteration_policy.py` standalone policy engine with self-check
+
+### Override
+Operator can override by passing `--steps N` or specifying profile in task spec.

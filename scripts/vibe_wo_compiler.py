@@ -123,6 +123,22 @@ def compile_wo(task_spec):
             "execution_node": template["execution_node"],
         },
     }
+
+    # Add iteration policy from task spec
+    iter_policy = task_spec.get("iteration_policy", {})
+    if iter_policy:
+        plan["iteration_policy"] = {
+            "profile": iter_policy.get("recommended_profile", "standard"),
+            "steps": iter_policy.get("recommended_steps", 300),
+            "auto_approve": iter_policy.get("auto_approve", True),
+            "source": "task_intake_recommendation",
+        }
+    else:
+        plan["iteration_policy"] = {
+            "profile": "standard", "steps": 300, "auto_approve": True,
+            "source": "default",
+        }
+
     return plan
 
 
@@ -132,6 +148,18 @@ SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
 def self_check(output_json=False):
     checks = []
     checks.append({"name": "version", "passed": True, "message": VERSION})
+
+    # Test iteration policy passthrough
+    test_spec = {"task_id": "task-test", "summary": "test", "repo_scope": "trusted-self",
+                 "operation_type": "planning", "risk_level": "low",
+                 "iteration_policy": {"recommended_profile": "long", "recommended_steps": 500,
+                                      "auto_approve": True, "reason": "test"}}
+    plan = compile_wo(test_spec)
+    checks.append({
+        "name": "iteration_policy_passthrough",
+        "passed": plan.get("iteration_policy", {}).get("profile") == "long",
+        "message": f"profile={plan.get('iteration_policy', {}).get('profile', 'missing')}",
+    })
 
     # Self repo low-risk compilation
     spec = {"task_id": "task-test-001", "summary": "update docs", "repo": SELF_REPO,

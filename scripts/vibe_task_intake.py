@@ -131,13 +131,47 @@ def classify_task(text, repo=None):
         "forbidden_actions": sorted(set(forbidden)),
         "validation_mode": validation_mode,
         "next_command": next_cmd,
+        "iteration_policy": {},
         "node_attribution": {
             "controller_node": "windows",
             "execution_node": "debian",
         },
     }
+
+    # Populate iteration policy
+    iter_rec = recommend_iteration(
+        task_type=op_type,
+        risk_level=risk,
+        is_read_only="read-only" in op_type or op_type == "read-only",
+        is_external=repo_scope == "protected-external",
+    )
+    spec["iteration_policy"] = {
+        "recommended_profile": iter_rec["profile"],
+        "recommended_steps": iter_rec["steps"],
+        "auto_approve": iter_rec["auto_approve"],
+        "reason": iter_rec["reason"],
+    }
     return spec
 
+
+
+def recommend_iteration(task_type, risk_level, is_read_only=False,
+                        is_multi_wo=False, is_external=False):
+    """Recommend iteration profile based on task characteristics."""
+    if is_read_only and risk_level == "low":
+        return {"profile": "short", "steps": 200, "auto_approve": True,
+                "reason": "Read-only low-risk task"}
+    if is_external and risk_level in ("medium", "high", "critical"):
+        return {"profile": "standard", "steps": 300, "auto_approve": False,
+                "reason": f"External {risk_level}-risk — recommendation only"}
+    if is_multi_wo:
+        return {"profile": "long", "steps": 500, "auto_approve": True,
+                "reason": "Multi-WO batch or test-inclusive"}
+    if not is_external and risk_level in ("low", "medium"):
+        return {"profile": "standard", "steps": 300, "auto_approve": True,
+                "reason": "Self repo standard task"}
+    return {"profile": "standard", "steps": 300, "auto_approve": True,
+            "reason": "Default recommendation"}
 
 def self_check(output_json=False):
     checks = []
