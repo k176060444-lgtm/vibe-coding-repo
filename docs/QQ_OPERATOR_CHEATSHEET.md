@@ -355,3 +355,19 @@ br --ext-push-preflight --approval-id <id> --json
 - WO3 ✅ 文档冻结
 
 *V1.9 External Repo Authorized Push Canary — 2026-06-16*
+
+
+### External Push (ext-auth-push / eap)
+
+```
+ext-auth-push 流程:
+1. 创建 approval JSON → ~/vibedev/privileged-approvals/
+2. 用户 approve
+3. eap validate --approval-id <id>    # 验证约束
+4. eap dry-run --approval-id <id>     # 验证远端 SHA + 预览
+5. eap push --approval-id <id>        # 真实 push (需 approve)
+6. 验证: fetch 远端确认 branch SHA
+```
+
+**禁止:** direct git push / GitHub API write / github.env / GITHUB_PAT / force push
+
