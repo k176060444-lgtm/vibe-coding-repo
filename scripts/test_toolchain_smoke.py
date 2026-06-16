@@ -4963,6 +4963,13 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("node_attribution_distinguishes_nodes", lambda: _test_node_attribution_distinguishes_nodes(script_dir)))
 
 
+    # Test 136-139: WO1-WO3 hardening + tooling
+    tests.append(_run_test("api_fallback_hardening", lambda: _test_api_fallback_hardening(script_dir)))
+    tests.append(_run_test("tool_registry_list", lambda: _test_tool_registry_list(script_dir)))
+    tests.append(_run_test("tool_registry_plan", lambda: _test_tool_registry_plan(script_dir)))
+    tests.append(_run_test("external_harness_self_check", lambda: _test_external_harness_self_check(script_dir)))
+
+
     return tests
 
 
@@ -5196,6 +5203,56 @@ def _test_node_attribution_distinguishes_nodes(script_dir):
     if ctrl == exec_n:
         return {"passed": False, "message": f"same node: {ctrl}"}
     return {"passed": True, "message": f"controller={ctrl} execution={exec_n}"}
+
+
+
+def _test_api_fallback_hardening(script_dir):
+    """API fallback hardening self-test passes."""
+    path = os.path.join(script_dir, "vibe_api_fallback_hardening.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, [])
+    ok = rc == 0 and "ALL PASS" in stdout
+    return {"passed": ok, "message": stdout.strip()[:80]}
+
+def _test_tool_registry_list(script_dir):
+    """Tool registry lists 8+ tools."""
+    path = os.path.join(script_dir, "vibe_tool_registry.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--list"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = isinstance(data, list) and len(data) >= 8
+    return {"passed": ok, "message": f"tools: {len(data)}"}
+
+def _test_tool_registry_plan(script_dir):
+    """Tool registry workflow plan works."""
+    path = os.path.join(script_dir, "vibe_tool_registry.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--plan", "--repo", "org/repo", "--operation", "push"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("requires_approval") is True
+    return {"passed": ok, "message": f"template: {data.get('workflow_template')}"}
+
+def _test_external_harness_self_check(script_dir):
+    """External test harness self-check passes."""
+    path = os.path.join(script_dir, "vibe_external_test_harness.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "self-check"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
 
 
 def build_parser():
