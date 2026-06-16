@@ -1527,3 +1527,42 @@ python3 scripts/vibe_health_snapshot.py --self-check
 ```
 
 Aggregates all subsystem checks. Verdict: OK / WARN / BLOCK.
+
+
+### task-intake v1.0.0
+
+```bash
+python3 scripts/vibe_task_intake.py --json "task description"
+python3 scripts/vibe_task_intake.py --json --repo org/repo "task"
+python3 scripts/vibe_task_intake.py --self-check
+```
+
+Output: task_id, risk_level, repo_scope, operation_type, requires_approval, forbidden_actions.
+
+### wo-compiler v1.0.0
+
+```bash
+python3 scripts/vibe_wo_compiler.py --json --input task.json
+python3 scripts/vibe_wo_compiler.py --self-check
+```
+
+Templates: self-repo-low-risk, external-read, external-push, gateway-recovery, dependency-install.
+
+### model-routing-policy v1.0.0
+
+```bash
+python3 scripts/vibe_model_routing_policy.py --json route --task-type implementer
+python3 scripts/vibe_model_routing_policy.py --json route-all
+python3 scripts/vibe_model_routing_policy.py --self-check
+```
+
+Roles: planner, implementer, reviewer, summarizer, recovery. No auto-switch on 401/config errors.
+
+### report-schema v1.0.0
+
+```bash
+python3 scripts/vibe_report_schema.py --json validate --input report.json
+python3 scripts/vibe_report_schema.py --self-check
+```
+
+Required: pr_merge, changed_paths, baseline, validation, node_attribution, token_status, ext_write_status.
