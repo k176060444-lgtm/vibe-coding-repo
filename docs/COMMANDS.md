@@ -1590,3 +1590,12 @@ python3 scripts/vibe_gateway_health.py --json self-check      # JSON self-check
 python3 scripts/vibe_gateway_health.py --json                 # Full diagnose
 python3 scripts/vibe_gateway_health.py --compact              # One-line status
 ```
+
+### Worker Pool (Active-Active)
+python3 scripts/vibe_worker_registry.py --self-check         # Registry self-check
+python3 scripts/vibe_worker_registry.py --status             # Pool status
+python3 scripts/vibe_worker_registry.py --select             # Select best worker
+python3 scripts/vibe_scheduler_policy.py --self-check        # Scheduler self-check
+python3 scripts/vibe_scheduler_policy.py --schedule          # Schedule a task
+python3 scripts/vibe_worker_pool_health.py --self-check      # Pool health self-check
+python3 scripts/vibe_worker_pool_health.py --json            # Full pool health
