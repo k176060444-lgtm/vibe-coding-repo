@@ -1591,3 +1591,80 @@ python3 scripts/vibe_external_test_harness.py --json self-check
 ```
 
 *V1.12.1 Pytest Harness Accuracy + Repo Profiles - 2026-06-16*
+
+
+## V1.12.2 Hermetic External Test Env + Token Source Policy
+
+### Per-Repo Hermetic Test Environment
+
+Debian worker creates isolated venvs for external repo testing:
+
+```
+~/.vibedev/test-envs/<repo-profile>/<hash>/venv
+```
+
+Each venv records metadata in `env_meta.json`:
+- repo_profile, python_version, venv_path
+- installed_packages, install_log, created_at
+- system_python_touched (must be false)
+
+Usage:
+```bash
+python3 scripts/vibe_test_env_manager.py create --profile hermes-agent
+python3 scripts/vibe_test_env_manager.py install --profile hermes-agent --packages pytest-timeout
+python3 scripts/vibe_test_env_manager.py info --profile hermes-agent
+python3 scripts/vibe_test_env_manager.py self-check
+```
+
+### Dependency Install Approval Rules
+
+- Per-repo venv only — never system Python
+- No sudo, no global pip install
+- Each install requires explicit approval
+- Only approved packages are installed
+- Install log is append-only with timestamps
+
+### Token Source Policy
+
+| Scenario | Token Source | Approval |
+|----------|-------------|----------|
+| self repo PR create/merge | gh CLI cached credentials (must report) | wrapper gate |
+| self repo batch | gh CLI cached credentials (must report) | auto |
+| protected external read-only | no token needed | no |
+| protected external push | standard token + wrapper | explicit approval |
+| protected external remediation | standard token + wrapper | explicit approval |
+| external push with gh cached | **FORBIDDEN** | N/A |
+
+Standard token file: `/home/vibeworker/.vibedev/secrets/github_privileged_token`
+
+Forbidden sources: `~/.vibedev-secrets/github.env`, `GITHUB_PAT`, `GITHUB_TOKEN`
+
+### hermes-agent Targeted pytest
+
+```bash
+VENV=~/.vibedev/test-envs/hermes-agent/63c0194e1313/venv/bin/python
+PYTHONPATH=/path/to/hermes-agent $VENV -m pytest tests/tools/test_send_message_tool.py -q --tb=short
+```
+
+Result: 1 skipped (conditional skip in test), gateway resolved via PYTHONPATH, pytest-timeout resolved via venv.
+
+### Node / Agent Attribution
+
+Every final report must include per-node attribution:
+
+| Field | Description |
+|-------|-------------|
+| controller_node | Windows Hermes/QQ entry point |
+| execution_node | Where scripts/git/tests actually run |
+| transport | SSH/SCP/local |
+| commands_executed_on_windows | Windows-side actions |
+| commands_executed_on_debian | Debian-side actions |
+| git_mutation_node | Where branch/commit/push/PR/merge occurs |
+| token_access_node | Where token is read |
+| pr_operation_node | Where PR create/update/merge occurs |
+| failure_or_retry_node | Where failures/retries occur |
+| evidence_location | Where evidence/checkpoints are stored |
+
+Principle: "每份最终报告必须说明 Windows 主控做了什么、Debian worker 做了什么、哪个节点发生 git/token/PR/API 操作。"
+
+*V1.12.2 Hermetic External Test Env + Token Source Policy - 2026-06-16*
