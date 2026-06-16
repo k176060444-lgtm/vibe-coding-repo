@@ -1361,3 +1361,30 @@ python3 scripts/vibe_batch_runner.py --external-approval --approval-action show 
 **Status fields:** external_policy_supported, external_approval_supported, external_read_ops, external_write_ops, repo_trust_levels, default_trust_level
 
 **Safety:** Read-only external ops → no token. Write external ops → BLOCK without approval. Approved → dry-run only (V1.8).
+
+### batch-runner v1.8.0 — External Authorized Push Preflight
+
+```bash
+# Run preflight check (validates approval + token file metadata)
+python3 scripts/vibe_batch_runner.py --ext-push-preflight --approval-id <id> --json
+```
+
+**Preflight checks:** approval_load, approval_status, approval_expiry, write_operation, forbidden_paths, token_file
+
+**Output fields:** preflight_passed, checks, blockers, warnings, approval (repo/branch/operation/base_sha/changed_paths/patch_sha256/expires_at), token_file_metadata (exists/mode/size), token_content_read (always false)
+
+**Status fields:** ext_push_preflight_supported, token_file_path
+
+**Safety:** Token content NEVER read during preflight. Token NEVER output. External canary requires user-specified external repo (NOT self repo).
+
+### External Authorized Push Workflow
+
+```
+1. User provides external test repo
+2. Create approval: --external-approval --approval-action create --approval-repo <ext-repo> ...
+3. Human approves: --external-approval --approval-action approve --approval-id <id>
+4. Preflight: --ext-push-preflight --approval-id <id>
+5. Push via privileged wrapper (outside batch-runner)
+6. Verify: fetch remote, check branch + commit
+7. Evidence: run-report with all artifacts
+```
