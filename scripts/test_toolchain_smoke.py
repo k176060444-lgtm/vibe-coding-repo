@@ -4002,9 +4002,9 @@ def _test_fast_validation_batch_runner_version(script_dir):
     if not path.exists():
         return {"passed": False, "message": "script not found"}
     content = path.read_text()
-    if 'VERSION = "1.7.0"' not in content:
-        return {"passed": False, "message": "expected version 1.7.0"}
-    return {"passed": True, "message": "batch runner v1.7.0"}
+    if 'VERSION = "1.8.0"' not in content:
+        return {"passed": False, "message": "expected version 1.8.0"}
+    return {"passed": True, "message": "batch runner v1.8.0"}
 
 
 def _test_batch_runner_checkpoint_status_field(script_dir):
@@ -4245,7 +4245,7 @@ def _test_batch_runner_version_170(script_dir):
     )
     if rc != 0:
         return {"passed": False, "message": f"version rc={rc}"}
-    if "1.7.0" not in stdout:
+    if "1.8.0" not in stdout:
         return {"passed": False, "message": f"expected 1.7.0, got: {stdout}"}
     return {"passed": True, "message": "version 1.7.0"}
 
@@ -4267,6 +4267,295 @@ def _test_external_policy_status_fields(script_dir):
     if missing:
         return {"passed": False, "message": f"missing fields: {missing}"}
     return {"passed": True, "message": "external policy fields in status"}
+
+
+
+# ── V1.9 External Authorized Push Preflight Tests ───────────────────────
+
+def _test_ext_push_preflight_help(script_dir):
+    """Test 115: --ext-push-preflight appears in --help."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py", ["--help"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"help failed: rc={rc}"}
+    combined = stdout + stderr
+    if "--ext-push-preflight" not in combined:
+        return {"passed": False, "message": "--ext-push-preflight not in help"}
+    return {"passed": True, "message": "ext-push-preflight in help"}
+
+
+def _test_ext_push_preflight_no_approval(script_dir):
+    """Test 116: preflight without approval ID returns error."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--ext-push-preflight", "--json"]
+    )
+    # Should fail because --approval-id is required
+    if rc == 0:
+        # Check if it's an error response
+        try:
+            data = json.loads(stdout)
+            if "error" in data:
+                return {"passed": True, "message": "correctly returned error without approval_id"}
+        except json.JSONDecodeError:
+            pass
+        return {"passed": False, "message": "should fail without approval_id"}
+    return {"passed": True, "message": "correctly rejected without approval_id"}
+
+
+def _test_ext_push_preflight_pending_approval(script_dir):
+    """Test 117: preflight with pending (not approved) approval BLOCKS."""
+    # Create a pending approval (don't approve it)
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "create",
+         "--approval-repo", "test-org/test-repo",
+         "--approval-branch", "canary/test",
+         "--approval-operation", "push",
+         "--approval-base-sha", "abc123",
+         "--approval-changed-paths", "docs/test.md", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"create failed: {rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from create"}
+    approval_id = data.get("approval_id")
+    if not approval_id:
+        return {"passed": False, "message": "no approval_id"}
+
+    # Run preflight (should BLOCK because status=pending)
+    rc2, stdout2, stderr2 = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--ext-push-preflight", "--approval-id", approval_id, "--json"]
+    )
+    try:
+        data2 = json.loads(stdout2)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from preflight"}
+
+    if data2.get("preflight_passed"):
+        return {"passed": False, "message": "pending approval should not pass preflight"}
+    if "approval_status" not in str(data2.get("checks", {})):
+        return {"passed": False, "message": "should check approval_status"}
+    return {"passed": True, "message": "pending approval correctly BLOCKED"}
+
+
+def _test_ext_push_preflight_expired_approval(script_dir):
+    """Test 118: preflight with expired approval BLOCKS."""
+    # Create and approve
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "create",
+         "--approval-repo", "test-org/test-repo",
+         "--approval-branch", "canary/test",
+         "--approval-operation", "push",
+         "--approval-base-sha", "def456",
+         "--approval-changed-paths", "docs/test.md",
+         "--approval-ttl", "0", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"create failed: {rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    approval_id = data.get("approval_id")
+
+    # Approve it
+    _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "approve",
+         "--approval-id", approval_id, "--json"]
+    )
+
+    # Expire it
+    _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "expire",
+         "--approval-id", approval_id, "--json"]
+    )
+
+    # Run preflight
+    rc2, stdout2, stderr2 = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--ext-push-preflight", "--approval-id", approval_id, "--json"]
+    )
+    try:
+        data2 = json.loads(stdout2)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from preflight"}
+
+    if data2.get("preflight_passed"):
+        return {"passed": False, "message": "expired approval should not pass preflight"}
+    return {"passed": True, "message": "expired approval correctly BLOCKED"}
+
+
+def _test_ext_push_preflight_forbidden_path(script_dir):
+    """Test 119: preflight with forbidden path BLOCKS."""
+    # Create and approve with forbidden path
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "create",
+         "--approval-repo", "test-org/test-repo",
+         "--approval-branch", "canary/test",
+         "--approval-operation", "push",
+         "--approval-base-sha", "ghi789",
+         "--approval-changed-paths", ".github/workflows/test.yml", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"create failed: {rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    approval_id = data.get("approval_id")
+
+    # Approve
+    _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "approve",
+         "--approval-id", approval_id, "--json"]
+    )
+
+    # Run preflight (should BLOCK due to forbidden path)
+    rc2, stdout2, stderr2 = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--ext-push-preflight", "--approval-id", approval_id, "--json"]
+    )
+    try:
+        data2 = json.loads(stdout2)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    if data2.get("preflight_passed"):
+        return {"passed": False, "message": "forbidden path should not pass preflight"}
+    return {"passed": True, "message": "forbidden path correctly BLOCKED"}
+
+
+def _test_ext_push_preflight_approved_valid(script_dir):
+    """Test 120: preflight with valid approved approval passes checks."""
+    # Create and approve with valid paths
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "create",
+         "--approval-repo", "test-org/test-repo",
+         "--approval-branch", "privileged-canary/v1-9-test",
+         "--approval-operation", "push",
+         "--approval-base-sha", "jkl012",
+         "--approval-changed-paths", "docs/CANARY.md", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"create failed: {rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    approval_id = data.get("approval_id")
+
+    # Approve
+    _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "approve",
+         "--approval-id", approval_id, "--json"]
+    )
+
+    # Run preflight
+    rc2, stdout2, stderr2 = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--ext-push-preflight", "--approval-id", approval_id, "--json"]
+    )
+    try:
+        data2 = json.loads(stdout2)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+
+    if not data2.get("preflight_passed"):
+        return {"passed": False, "message": f"valid approval should pass: {data2.get('blockers')}"}
+    # Verify token_content_read is False
+    if data2.get("token_content_read"):
+        return {"passed": False, "message": "token_content_read must be False"}
+    # Verify token_file_metadata exists
+    if not data2.get("token_file_metadata"):
+        return {"passed": False, "message": "missing token_file_metadata"}
+    return {"passed": True, "message": "valid approved approval passes preflight"}
+
+
+def _test_ext_push_preflight_token_not_read(script_dir):
+    """Test 121: preflight NEVER reads token content."""
+    # Create and approve
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "create",
+         "--approval-repo", "test-org/test-repo",
+         "--approval-branch", "canary/test",
+         "--approval-operation", "push",
+         "--approval-base-sha", "mno345",
+         "--approval-changed-paths", "docs/test.md", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"create failed: {rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    approval_id = data.get("approval_id")
+
+    _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "approve",
+         "--approval-id", approval_id, "--json"]
+    )
+
+    # Run preflight and check no token patterns in output
+    rc2, stdout2, stderr2 = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--ext-push-preflight", "--approval-id", approval_id, "--json"]
+    )
+    combined = stdout2 + stderr2
+    # Check for actual token patterns (not just the detection patterns)
+    # The output should not contain ghp_, gho_, github_pat_ as actual values
+    if "ghp_" in combined and "suspicious" not in combined:
+        return {"passed": False, "message": "token pattern found in output"}
+    try:
+        data2 = json.loads(stdout2)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data2.get("token_content_read"):
+        return {"passed": False, "message": "token_content_read must be False"}
+    return {"passed": True, "message": "token content never read or output"}
+
+
+def _test_batch_runner_version_180(script_dir):
+    """Test 122: batch runner version is 1.8.0."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py", ["--version"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"version rc={rc}"}
+    if "1.8.0" not in stdout:
+        return {"passed": False, "message": f"expected 1.8.0, got: {stdout}"}
+    return {"passed": True, "message": "version 1.8.0"}
+
+
+def _test_ext_push_preflight_status_fields(script_dir):
+    """Test 123: --status includes ext-push-preflight fields."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py", ["--status", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"rc={rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if not data.get("ext_push_preflight_supported"):
+        return {"passed": False, "message": "missing ext_push_preflight_supported"}
+    if not data.get("token_file_path"):
+        return {"passed": False, "message": "missing token_file_path"}
+    return {"passed": True, "message": "ext-push-preflight fields in status"}
 
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
@@ -4627,6 +4916,34 @@ def run_tests(jobs_dir=None):
 
     # Test 114: external policy fields in status
     tests.append(_run_test("external_policy_status_fields", lambda: _test_external_policy_status_fields(script_dir)))
+
+
+    # Test 115: ext-push-preflight in help
+    tests.append(_run_test("ext_push_preflight_help", lambda: _test_ext_push_preflight_help(script_dir)))
+
+    # Test 116: preflight without approval ID
+    tests.append(_run_test("ext_push_preflight_no_approval", lambda: _test_ext_push_preflight_no_approval(script_dir)))
+
+    # Test 117: preflight with pending approval BLOCKS
+    tests.append(_run_test("ext_push_preflight_pending", lambda: _test_ext_push_preflight_pending_approval(script_dir)))
+
+    # Test 118: preflight with expired approval BLOCKS
+    tests.append(_run_test("ext_push_preflight_expired", lambda: _test_ext_push_preflight_expired_approval(script_dir)))
+
+    # Test 119: preflight with forbidden path BLOCKS
+    tests.append(_run_test("ext_push_preflight_forbidden_path", lambda: _test_ext_push_preflight_forbidden_path(script_dir)))
+
+    # Test 120: preflight with valid approved approval passes
+    tests.append(_run_test("ext_push_preflight_approved_valid", lambda: _test_ext_push_preflight_approved_valid(script_dir)))
+
+    # Test 121: preflight never reads token content
+    tests.append(_run_test("ext_push_preflight_token_not_read", lambda: _test_ext_push_preflight_token_not_read(script_dir)))
+
+    # Test 122: batch runner version 1.8.0
+    tests.append(_run_test("batch_runner_version_180", lambda: _test_batch_runner_version_180(script_dir)))
+
+    # Test 123: ext-push-preflight fields in status
+    tests.append(_run_test("ext_push_preflight_status_fields", lambda: _test_ext_push_preflight_status_fields(script_dir)))
 
     return tests
 
