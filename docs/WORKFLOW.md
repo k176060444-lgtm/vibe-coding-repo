@@ -417,6 +417,23 @@ For pushing to external repos (not `k176060444-lgtm/vibe-coding-repo`), use the 
 
 **Standard token source:** `/home/vibeworker/.vibedev/secrets/github_privileged_token` (mode=600, owner=vibeworker)
 
+## Node / Agent Attribution (V1.11)
+
+每份最终报告必须包含 Node / Agent Attribution 段落，说明：
+
+1. **controller_node** — Windows Hermes/QQ 入口/调度侧
+2. **execution_node** — 实际执行脚本/git/测试的节点
+3. **transport** — SSH/SCP/local/none
+4. **commands_executed_on_windows** — Windows 侧关键动作
+5. **commands_executed_on_debian** — Debian 侧关键动作
+6. **git_mutation_node** — branch/commit/push/PR/merge/ref update 发生节点
+7. **token_access_node** — token 读取节点 + 类型
+8. **pr_operation_node** — PR create/update/merge/API 操作节点
+9. **failure_or_retry_node** — 失败/重试节点
+10. **evidence_location** — 证据路径
+
+原则：每份报告必须说明 Windows 主控做了什么、Debian worker 做了什么、哪个节点发生 git/token/PR/API 操作。
+
 ## Batch Queue Plan
 
 Generate batch execution plan for multiple Work Orders:

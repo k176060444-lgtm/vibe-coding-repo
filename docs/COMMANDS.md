@@ -1204,6 +1204,20 @@ python3 scripts/vibe_external_authorized_push.py --json list
 
 **Output:** would_push, blockers, warnings, remote_sha_match, push_command_safe, dry_run. Token content NEVER output.
 
+### vibe_node_attribution
+
+Node / Agent Attribution 模块 — 生成 per-node 执行归属报告。
+
+```bash
+python3 scripts/vibe_node_attribution.py --json --example
+python3 scripts/vibe_node_attribution.py --format --example
+python3 scripts/vibe_node_attribution.py --version
+```
+
+**输出字段：** controller_node, execution_node, transport, commands_executed_on_windows, commands_executed_on_debian, git_mutation_node, token_access_node, pr_operation_node, api_fallback_used, failure_or_retry_node, evidence_location.
+
+**原则：** 每份最终报告必须说明 Windows 主控做了什么、Debian worker 做了什么、哪个节点发生 git/token/PR/API 操作。
+
 ### QQ Operator Quick Reference
 
 See [QQ_OPERATOR_CHEATSHEET.md](QQ_OPERATOR_CHEATSHEET.md) for mobile QQ operation shortcuts.

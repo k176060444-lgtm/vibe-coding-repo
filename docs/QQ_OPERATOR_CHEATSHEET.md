@@ -371,3 +371,13 @@ ext-auth-push 流程:
 
 **禁止:** direct git push / GitHub API write / github.env / GITHUB_PAT / force push
 
+
+
+### Node Attribution
+
+每份报告必须包含 Node / Agent Attribution：
+- controller_node: Windows (接收指令/调度/汇总)
+- execution_node: Debian (执行 git/test/push)
+- git_mutation_node: 哪个节点执行了 git 操作
+- token_access_node: 哪个节点读取了 token
+

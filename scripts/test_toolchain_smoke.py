@@ -4955,6 +4955,14 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("ext_auth_push_token_redaction", lambda: _test_ext_auth_push_token_redaction(script_dir)))
 
 
+    # Test 131-135: Node / Agent Attribution (vibe_node_attribution.py)
+    tests.append(_run_test("node_attribution_help", lambda: _test_node_attribution_help(script_dir)))
+    tests.append(_run_test("node_attribution_version", lambda: _test_node_attribution_version(script_dir)))
+    tests.append(_run_test("node_attribution_example", lambda: _test_node_attribution_example(script_dir)))
+    tests.append(_run_test("node_attribution_token_redaction", lambda: _test_node_attribution_token_redaction(script_dir)))
+    tests.append(_run_test("node_attribution_distinguishes_nodes", lambda: _test_node_attribution_distinguishes_nodes(script_dir)))
+
+
     return tests
 
 
@@ -5115,6 +5123,79 @@ def _test_ext_auth_push_token_redaction(script_dir):
         return {"passed": True, "message": "token not in output"}
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+
+def _test_node_attribution_help(script_dir):
+    """Node attribution module responds to --help."""
+    path = os.path.join(script_dir, "vibe_node_attribution.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--help"])
+    if rc != 0:
+        return {"passed": False, "message": f"help rc={rc}"}
+    if "attribution" not in (stdout + stderr).lower():
+        return {"passed": False, "message": "missing attribution in help"}
+    return {"passed": True, "message": "help ok"}
+
+
+def _test_node_attribution_version(script_dir):
+    """Node attribution module reports version."""
+    path = os.path.join(script_dir, "vibe_node_attribution.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--version"])
+    if rc != 0:
+        return {"passed": False, "message": f"rc={rc}"}
+    if "1.0.0" not in stdout:
+        return {"passed": False, "message": f"version not in output"}
+    return {"passed": True, "message": "version 1.0.0"}
+
+
+def _test_node_attribution_example(script_dir):
+    """Node attribution example output has all required fields."""
+    path = os.path.join(script_dir, "vibe_node_attribution.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--example"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": f"invalid json: {stdout[:100]}"}
+    required = ["controller_node", "execution_node", "git_mutation_node", "token_access_node"]
+    missing = [f for f in required if f not in data]
+    if missing:
+        return {"passed": False, "message": f"missing: {missing}"}
+    return {"passed": True, "message": f"controller={data.get('controller_node')} execution={data.get('execution_node')}"}
+
+
+def _test_node_attribution_token_redaction(script_dir):
+    """Node attribution output contains no token content."""
+    path = os.path.join(script_dir, "vibe_node_attribution.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--example"])
+    combined = stdout + stderr
+    if "ghp_" in combined or "github_pat_" in combined:
+        return {"passed": False, "message": "token content in output"}
+    return {"passed": True, "message": "no token in output"}
+
+
+def _test_node_attribution_distinguishes_nodes(script_dir):
+    """Node attribution distinguishes controller from worker."""
+    path = os.path.join(script_dir, "vibe_node_attribution.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "--example"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ctrl = data.get("controller_node")
+    exec_n = data.get("execution_node")
+    if ctrl == exec_n:
+        return {"passed": False, "message": f"same node: {ctrl}"}
+    return {"passed": True, "message": f"controller={ctrl} execution={exec_n}"}
 
 
 def build_parser():
