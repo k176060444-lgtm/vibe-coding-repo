@@ -1398,3 +1398,196 @@ External writes MUST have explicit operator approval. V1.8 is dry-run only.
 **Self repo ≠ external repo.** External authorized push is ONLY for protected external repos with explicit user approval. Trusted-self repos use normal batch automation.
 
 *V1.9 External Repo Authorized Push Canary — 2026-06-16*
+
+
+## V1.12.1 Pytest Harness Accuracy + Repo Profiles
+
+### Import Classification (v1.1.0)
+
+The external test harness now accurately classifies imports into 5 categories:
+
+| Category | Description | Example |
+|----------|-------------|---------|
+|  | Python standard library modules | json, tempfile, os, sys, typing |
+|  | Modules found in the target repo | gateway, agent, tools, plugins |
+|  | External packages (pip-installable) | pytest, httpx, requests |
+|  | Relative/local imports | .foo, ..bar |
+|  | Not found anywhere | nonexistent_module |
+
+**Critical:** , , ,  are NEVER reported as missing. They are stdlib.
+
+Uses  (Python 3.10+) with manual fallback for 3.9 and earlier.
+
+### Repo Profiles
+
+Repo profiles configure the harness for specific repositories:
+
+
+
+Or repo-local:
+
+
+Profile fields:
+- : Repository name
+- : List of repo-internal module names
+- : Default test files to diagnose
+- : Command template with , , 
+- : Actions that must not be performed
+
+### hermes-agent Profile
+
+The hermes-agent profile () identifies:
+-  as repo-internal (NOT missing)
+- , , , , , , , , , , , 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+┌────────────────────── Hermes Agent v0.16.0 (2026.6.5) ──────────────────────┐
+│                                   Available Tools                           │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⡀⠀⣀⣀⠀⢀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   browser: browser_back, browser_click,     │
+│  ⠀⠀⠀⠀⠀⠀⢀⣠⣴⣾⣿⣿⣇⠸⣿⣿⠇⣸⣿⣿⣷⣦⣄⡀⠀⠀⠀⠀⠀⠀   ...                                       │
+│  ⠀⢀⣠⣴⣶⠿⠋⣩⡿⣿⡿⠻⣿⡇⢠⡄⢸⣿⠟⢿⣿⢿⣍⠙⠿⣶⣦⣄⡀⠀   browser-cdp: browser_cdp, browser_dialog  │
+│  ⠀⠀⠉⠉⠁⠶⠟⠋⠀⠉⠀⢀⣈⣁⡈⢁⣈⣁⡀⠀⠉⠀⠙⠻⠶⠈⠉⠉⠀⠀   clarify: clarify                          │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣴⣿⡿⠛⢁⡈⠛⢿⣿⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   code_execution: execute_code              │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠿⣿⣦⣤⣈⠁⢠⣴⣿⠿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   computer_use: computer_use                │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠻⢿⣿⣦⡉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   cronjob: cronjob                          │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢷⣦⣈⠛⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   delegation: delegate_task                 │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣴⠦⠈⠙⠿⣦⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   discord: discord                          │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣿⣤⡈⠁⢤⣿⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   (and 21 more toolsets...)                 │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠛⠷⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                                             │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠑⢶⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   Available Skills                          │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⠁⢰⡆⠈⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   autonomous-ai-agents: claude-code,        │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠳⠈⣡⠞⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   codex, hermes-agent, opencode             │
+│  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   creative: architecture-diagram,           │
+│                                   ascii-art, ascii-video, b...              │
+│   mimo-v2.5-pro · Nous Research   data-science: jupyter-live-kernel         │
+│            C:\Users\KK            devops: git-task-contract,                │
+│  Session: 20260616_161157_55f475  kanban-orchestrator, kanban-...           │
+│                                   email: himalaya                           │
+│                                   general: dogfood, yuanbao                 │
+│                                   github: codebase-inspection,              │
+│                                   github-auth, github-code-r...             │
+│                                   media: gif-search, heartmula, songsee,    │
+│                                   youtube-content                           │
+│                                   mlops: huggingface-hub, llama-cpp,        │
+│                                   segment-anything-mo...                    │
+│                                   note-taking: obsidian                     │
+│                                   productivity: airtable,                   │
+│                                   google-workspace, maps, nano-pdf, not...  │
+│                                   research: arxiv, blogwatcher, llm-wiki,   │
+│                                   polymarket                                │
+│                                   smart-home: openhue                       │
+│                                   software-development:                     │
+│                                   bash-scripting-pitfalls,                  │
+│                                   hermes-agent-skill-aut...                 │
+│                                                                             │
+│                                   Profile: vibedev                          │
+│                                   31 tools · 73 skills · /help for          │
+│                                   commands                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Welcome to Hermes Agent! Type your message or /help for commands.
+✦ Tip: hermes fallback manages the fallback_model chain interactively — no 
+hand-editing config.yaml. as repo-internal
+- PYTHONPATH strategy: repo_root
+- Default target: 
+
+### Diagnosis Results
+
+When pytest cannot run, the harness reports:
+1. Missing third-party dependencies (install plan needed)
+2. Missing repo-internal modules (PYTHONPATH fix)
+3. Missing venv (dependency installation needed)
+4. Suggested pytest command with PYTHONPATH
+
+**Install dependencies require separate approval.** Never sudo, never global pip install.
+
+### Usage
+
+
+
+*V1.12.1 Pytest Harness Accuracy + Repo Profiles — 2026-06-16*
+
+
+## V1.12.1 Pytest Harness Accuracy + Repo Profiles
+
+### Import Classification (v1.1.0)
+
+The external test harness now accurately classifies imports into 5 categories:
+
+| Category | Description | Example |
+|----------|-------------|---------|
+| stdlib_detected | Python standard library modules | json, tempfile, os, sys, typing |
+| repo_internal | Modules found in the target repo | gateway, agent, tools, plugins |
+| third_party | External packages (pip-installable) | pytest, httpx, requests |
+| relative_imports | Relative/local imports | .foo, ..bar |
+| unknown_imports | Not found anywhere | nonexistent_module |
+
+**Critical:** json, tempfile, os, sys are NEVER reported as missing. They are stdlib.
+
+Uses `sys.stdlib_module_names` (Python 3.10+) with manual fallback for 3.9 and earlier.
+
+### Repo Profiles
+
+Repo profiles configure the harness for specific repositories:
+
+```
+configs/external_test_profiles/<repo-name>.json
+```
+
+Or repo-local:
+
+```
+<repo>/.vibedev/test_profile.json
+```
+
+Profile fields:
+- repo_name: Repository name
+- known_internal_modules: List of repo-internal module names
+- default_targets: Default test files to diagnose
+- test_command_template: Command template
+- forbidden_actions: Actions that must not be performed
+
+### hermes-agent Diagnosis Results
+
+The hermes-agent profile identifies gateway, agent, tools, plugins, skills, voice, config, providers, models, sessions, memory, scheduler, hermes as repo-internal modules.
+
+PYTHONPATH strategy: repo_root. Default target: tests/tools/test_send_message_tool.py.
+
+When pytest cannot run, the harness reports:
+1. Missing third-party dependencies (install plan needed)
+2. Missing repo-internal modules (PYTHONPATH fix)
+3. Missing venv (dependency installation needed)
+4. Suggested pytest command with PYTHONPATH
+
+**Install dependencies require separate approval.** Never sudo, never global pip install.
+
+### Usage
+
+```bash
+python3 scripts/vibe_external_test_harness.py --json diagnose --repo-path /path/to/repo
+python3 scripts/vibe_external_test_harness.py --json build-cmd --repo-path /path/to/repo --target tests/foo.py
+python3 scripts/vibe_external_test_harness.py --json self-check
+```
+
+*V1.12.1 Pytest Harness Accuracy + Repo Profiles - 2026-06-16*

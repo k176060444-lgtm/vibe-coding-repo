@@ -1423,3 +1423,23 @@ python3 scripts/vibe_batch_runner.py --ext-push-preflight --approval-id <id> --j
 6. Verify: fetch remote, check branch + commit
 7. Evidence: run-report with all artifacts
 ```
+
+
+### external-harness v1.1.0 (Accuracy + Repo Profiles)
+
+```bash
+# Diagnose repo with accurate import classification
+python3 scripts/vibe_external_test_harness.py --json diagnose --repo-path /path/to/repo
+
+# Build targeted pytest command with profile
+python3 scripts/vibe_external_test_harness.py --json build-cmd --repo-path /path/to/repo --target tests/foo.py
+
+# Self-check (verifies stdlib accuracy)
+python3 scripts/vibe_external_test_harness.py --json self-check
+```
+
+Import categories: stdlib_detected, repo_internal, third_party, relative_imports, unknown_imports.
+
+Repo profiles: `configs/external_test_profiles/<repo>.json` or `<repo>/.vibedev/test_profile.json`.
+
+hermes-agent: gateway = repo-internal (not missing). PYTHONPATH = repo_root.

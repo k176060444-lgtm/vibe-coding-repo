@@ -381,3 +381,18 @@ ext-auth-push 流程:
 - git_mutation_node: 哪个节点执行了 git 操作
 - token_access_node: 哪个节点读取了 token
 
+
+
+### Pytest Harness (v1.1.0)
+
+诊断外部仓库的 pytest 可用性。Import 分类：stdlib（不误报）、repo_internal、third_party、unknown。
+
+```bash
+harness diagnose --repo-path /path    # 完整诊断
+harness build-cmd --repo-path /path --target tests/x.py  # 构造命令
+harness self-check                     # 自检
+```
+
+Repo profile: `configs/external_test_profiles/<repo>.json`
+
+关键：gateway 等内部模块通过 PYTHONPATH 解决，不报 missing。依赖安装需单独批准。

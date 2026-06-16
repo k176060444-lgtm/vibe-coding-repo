@@ -1,0 +1,34 @@
+{
+  "repo_name": "hermes-agent",
+  "repo_url": "NousResearch/hermes-agent",
+  "pythonpath_strategy": "repo_root",
+  "known_internal_modules": [
+    "gateway",
+    "agent",
+    "tools",
+    "plugins",
+    "skills",
+    "voice",
+    "config",
+    "providers",
+    "models",
+    "sessions",
+    "memory",
+    "scheduler",
+    "hermes"
+  ],
+  "default_targets": [
+    "tests/tools/test_send_message_tool.py"
+  ],
+  "test_command_template": "PYTHONPATH={repo_root} {python} -m pytest {target} -q --tb=short",
+  "forbidden_actions": [
+    "install",
+    "sudo",
+    "global_pip",
+    "push",
+    "merge",
+    "force_push",
+    "delete_branch"
+  ],
+  "notes": "hermes-agent uses repo-internal modules (gateway, agent, tools, etc.) that require PYTHONPATH=<repo_root>. Do NOT treat these as missing third-party dependencies. venv or dependency installation may be needed for full test execution."
+}
