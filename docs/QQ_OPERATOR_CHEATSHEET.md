@@ -301,3 +301,28 @@ br --status --json                                     # 查看支持的模式
 **质量验证可合并，安全边界检查不可合并。fast 模式：每 WO 快速检查，batch 末尾完整验证。**
 
 *V1.7 Fast Batch Validation Mode — 2026-06-16*
+
+## V1.8 External Repo Policy
+
+### 查看外部仓库策略
+```
+br --external-policy --ext-repo org/repo --ext-operation push --json
+br --external-policy --ext-repo org/repo --ext-operation fetch --json
+```
+
+### 审批流程
+```
+br --external-approval --approval-action create --approval-repo org/repo --approval-branch main --approval-operation push --approval-base-sha abc123 --json
+br --external-approval --approval-action approve --approval-id <id> --json
+br --external-approval --approval-action expire --approval-id <id> --json
+br --external-approval --approval-action list --json
+```
+
+### 信任等级
+- `k176060444-lgtm/vibe-coding-repo` = trusted-self（自动允许）
+- 其他所有仓库 = protected-external（需授权）
+
+### V1.8 一句话原则
+**Self repo 自动化优先；external repo 授权优先。读取不需 token，写入必须 approve，V1.8 只 dry-run。**
+
+*V1.8 External Repo Protected Dry-Run — 2026-06-16*
