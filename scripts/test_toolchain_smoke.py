@@ -4975,6 +4975,10 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("harness_third_party_separated", lambda: _test_harness_third_party_separated(script_dir)))
     tests.append(_run_test("harness_repo_profile", lambda: _test_harness_repo_profile_exists(script_dir)))
     tests.append(_run_test("harness_import_categories", lambda: _test_harness_import_classification_categories(script_dir)))
+    tests.append(_run_test("token_policy_self_repo_gh_cached", lambda: _test_token_policy_self_repo_gh_cached(script_dir)))
+    tests.append(_run_test("token_policy_external_push_blocked", lambda: _test_token_policy_external_push_blocked(script_dir)))
+    tests.append(_run_test("token_policy_self_check", lambda: _test_token_policy_self_check(script_dir)))
+    tests.append(_run_test("test_env_manager_self_check", lambda: _test_env_manager_self_check(script_dir)))
     return tests
 
 
@@ -5380,6 +5384,62 @@ def _test_harness_import_classification_categories(script_dir):
     present = [k for k in required if k in ic]
     return {"passed": len(present) == len(required), "message": f"categories: {len(present)}/{len(required)}"}
 
+
+
+def _test_token_policy_self_repo_gh_cached(script_dir):
+    """Token policy: self repo push allows gh cached credentials."""
+    path = os.path.join(script_dir, "vibe_token_source_policy.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "check", "--repo", "k176060444-lgtm/vibe-coding-repo", "--operation", "push"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("gh_cached_credentials_allowed") is True
+    return {"passed": ok, "message": f"gh_cached={data.get('gh_cached_credentials_allowed')} policy={data.get('token_source_policy')}"}
+
+
+def _test_token_policy_external_push_blocked(script_dir):
+    """Token policy: external push with gh cached is blocked."""
+    path = os.path.join(script_dir, "vibe_token_source_policy.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "check", "--repo", "NousResearch/hermes-agent", "--operation", "push"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("gh_cached_credentials_allowed") is False
+    return {"passed": ok, "message": f"gh_cached={data.get('gh_cached_credentials_allowed')} policy={data.get('token_source_policy')}"}
+
+
+def _test_token_policy_self_check(script_dir):
+    """Token source policy self-check passes."""
+    path = os.path.join(script_dir, "vibe_token_source_policy.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "self-check"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_env_manager_self_check(script_dir):
+    """Test env manager self-check passes."""
+    path = os.path.join(script_dir, "vibe_test_env_manager.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "self-check"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
 if __name__ == "__main__":
     sys.exit(main())
 

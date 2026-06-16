@@ -396,3 +396,30 @@ harness self-check                     # 自检
 Repo profile: `configs/external_test_profiles/<repo>.json`
 
 关键：gateway 等内部模块通过 PYTHONPATH 解决，不报 missing。依赖安装需单独批准。
+
+
+### Hermetic Test Env (v1.0.0)
+
+为外部仓库创建隔离 venv，不触碰系统 Python。
+
+```bash
+test-env-manager create --profile hermes-agent    # 创建 venv
+test-env-manager install --profile X --packages Y  # 安装依赖
+test-env-manager info --profile X                   # 查看 venv 信息
+```
+
+路径：`~/.vibedev/test-envs/<profile>/<hash>/venv`
+
+规则：不 sudo，不全局 pip，每次安装需批准。
+
+### Token Source Policy (v1.0.0)
+
+```bash
+token-source-policy check --repo org/repo --operation push  # 检查策略
+```
+
+self repo = gh cached 允许（需报告）；external push = standard token + approval。
+
+### Node Attribution
+
+每份报告必须说明：Windows 主控做了什么、Debian worker 做了什么、哪个节点发生 git/token/PR/API 操作。

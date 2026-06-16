@@ -1443,3 +1443,39 @@ Import categories: stdlib_detected, repo_internal, third_party, relative_imports
 Repo profiles: `configs/external_test_profiles/<repo>.json` or `<repo>/.vibedev/test_profile.json`.
 
 hermes-agent: gateway = repo-internal (not missing). PYTHONPATH = repo_root.
+
+
+### test-env-manager v1.0.0 (Hermetic Venv)
+
+```bash
+# Create per-repo venv
+python3 scripts/vibe_test_env_manager.py --json create --profile hermes-agent
+
+# Install approved packages
+python3 scripts/vibe_test_env_manager.py --json install --profile hermes-agent --packages pytest-timeout
+
+# Show venv info
+python3 scripts/vibe_test_env_manager.py --json info --profile hermes-agent
+
+# Self-check
+python3 scripts/vibe_test_env_manager.py --json self-check
+```
+
+Venv path: `~/.vibedev/test-envs/<profile>/<hash>/venv`
+system_python_touched always false. No sudo. No global pip.
+
+### token-source-policy v1.0.0
+
+```bash
+# Check token policy for a repo/operation
+python3 scripts/vibe_token_source_policy.py --json check --repo org/repo --operation push
+
+# Self-check
+python3 scripts/vibe_token_source_policy.py --json self-check
+```
+
+Self repo: gh_cached_credentials_allowed. External write: standard_token_required_with_approval.
+
+### Node / Agent Attribution
+
+Every final report includes 10-field per-node attribution.
