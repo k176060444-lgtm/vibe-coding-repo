@@ -1183,6 +1183,27 @@ Privileged Push Wrapper — controlled push with repo trust policy (self-repo au
 \
 **Output:** would_push (true/false), blockers, warnings, dry_run=true. Never reads GitHub Key. Never pushes.
 
+### ext-auth-push (eap)
+
+External Authorized Push Wrapper — controlled push to external repos with full validation chain.
+
+```bash
+python3 scripts/vibe_external_authorized_push.py --json validate --approval-id <id>
+python3 scripts/vibe_external_authorized_push.py --json --approval-dir <dir> validate --approval-id <id>
+python3 scripts/vibe_external_authorized_push.py --json dry-run --approval-id <id>
+python3 scripts/vibe_external_authorized_push.py --json push --approval-id <id>
+python3 scripts/vibe_external_authorized_push.py --json token-preflight
+python3 scripts/vibe_external_authorized_push.py --json list
+```
+
+**Validation checks:** repo, branch, operation, base_sha, remote_branch_current_sha, local_commit_sha, changed_paths, patch_sha256, expires_at, force_push, delete_branch, tag/release/deploy, forbidden paths (.github/workflows/, secrets/, .env, ssh/), non-standard token env vars.
+
+**Token source:** ONLY `/home/vibeworker/.vibedev/secrets/github_privileged_token`. NEVER reads `~/.vibedev-secrets/github.env` or any `GITHUB_PAT`/`GITHUB_TOKEN` env var.
+
+**Token injection:** Temporary GIT_ASKPASS helper script, cleaned up after push. Token NEVER in argv, env, or output.
+
+**Output:** would_push, blockers, warnings, remote_sha_match, push_command_safe, dry_run. Token content NEVER output.
+
 ### QQ Operator Quick Reference
 
 See [QQ_OPERATOR_CHEATSHEET.md](QQ_OPERATOR_CHEATSHEET.md) for mobile QQ operation shortcuts.

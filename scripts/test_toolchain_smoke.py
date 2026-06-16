@@ -4945,7 +4945,176 @@ def run_tests(jobs_dir=None):
     # Test 123: ext-push-preflight fields in status
     tests.append(_run_test("ext_push_preflight_status_fields", lambda: _test_ext_push_preflight_status_fields(script_dir)))
 
+    # Test 124-130: External authorized push wrapper (vibe_external_authorized_push.py)
+    tests.append(_run_test("ext_auth_push_help", lambda: _test_ext_auth_push_help(script_dir)))
+    tests.append(_run_test("ext_auth_push_version", lambda: _test_ext_auth_push_version(script_dir)))
+    tests.append(_run_test("ext_auth_push_token_preflight", lambda: _test_ext_auth_push_token_preflight(script_dir)))
+    tests.append(_run_test("ext_auth_push_list", lambda: _test_ext_auth_push_list(script_dir)))
+    tests.append(_run_test("ext_auth_push_forbidden_force", lambda: _test_ext_auth_push_forbidden_force(script_dir)))
+    tests.append(_run_test("ext_auth_push_non_standard_env", lambda: _test_ext_auth_push_non_standard_env(script_dir)))
+    tests.append(_run_test("ext_auth_push_token_redaction", lambda: _test_ext_auth_push_token_redaction(script_dir)))
+
+
     return tests
+
+
+
+def _test_ext_auth_push_help(script_dir):
+    """External authorized push wrapper responds to --help."""
+    push_path = os.path.join(script_dir, "vibe_external_authorized_push.py")
+    if not os.path.exists(push_path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(push_path, ["--help"])
+    if rc != 0:
+        return {"passed": False, "message": f"help rc={rc}"}
+    if "External Authorized Push" not in stdout + stderr:
+        return {"passed": False, "message": "missing description in help"}
+    return {"passed": True, "message": "help ok"}
+
+
+def _test_ext_auth_push_version(script_dir):
+    """External authorized push wrapper reports version."""
+    push_path = os.path.join(script_dir, "vibe_external_authorized_push.py")
+    if not os.path.exists(push_path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(push_path, ["--version"])
+    if rc != 0:
+        return {"passed": False, "message": f"rc={rc}"}
+    if "1.0.0" not in stdout:
+        return {"passed": False, "message": f"version not in output: {stdout[:50]}"}
+    return {"passed": True, "message": "version 1.0.0"}
+
+
+def _test_ext_auth_push_token_preflight(script_dir):
+    """External authorized push token preflight works."""
+    push_path = os.path.join(script_dir, "vibe_external_authorized_push.py")
+    if not os.path.exists(push_path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(push_path, ["--json", "token-preflight"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": f"invalid json: {stdout[:100]}"}
+    if "token_preflight" not in data:
+        return {"passed": False, "message": "missing token_preflight field"}
+    return {"passed": True, "message": f"ok={data.get('ok')}"}
+
+
+def _test_ext_auth_push_list(script_dir):
+    """External authorized push list command works."""
+    push_path = os.path.join(script_dir, "vibe_external_authorized_push.py")
+    if not os.path.exists(push_path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(push_path, ["--json", "list"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": f"invalid json: {stdout[:100]}"}
+    if "total" not in data:
+        return {"passed": False, "message": "missing total field"}
+    return {"passed": True, "message": f"total={data.get('total')}"}
+
+
+def _test_ext_auth_push_forbidden_force(script_dir):
+    """External authorized push blocks force push."""
+    push_path = os.path.join(script_dir, "vibe_external_authorized_push.py")
+    if not os.path.exists(push_path):
+        return {"passed": False, "message": "script not found"}
+    import tempfile, shutil
+    tmpdir = tempfile.mkdtemp(prefix="smoke-eap-")
+    try:
+        record = {
+            "approval_id": "smoke-force-test",
+            "repo": "some-org/some-repo",
+            "branch": "feat/test",
+            "operation": "push",
+            "base_sha": "abc123",
+            "local_commit_sha": "def456",
+            "changed_paths": ["tools/test.py"],
+            "patch_sha256": "aabb",
+            "expires_at": 9999999999,
+            "force_push": True,
+        }
+        with open(os.path.join(tmpdir, "smoke-force-test.json"), "w") as f:
+            json.dump(record, f)
+        rc, stdout, stderr = _run_script(push_path, [
+            "--json", "--approval-dir", tmpdir,
+            "validate", "--approval-id", "smoke-force-test"
+        ])
+        try:
+            data = json.loads(stdout)
+        except (json.JSONDecodeError, ValueError):
+            return {"passed": False, "message": f"invalid json: {stdout[:100]}"}
+        if data.get("would_push") is not False:
+            return {"passed": False, "message": f"should block: {data.get('would_push')}"}
+        blockers = data.get("blockers", [])
+        if not any("force" in b.lower() for b in blockers):
+            return {"passed": False, "message": f"no force blocker: {blockers[:2]}"}
+        return {"passed": True, "message": f"blocked: {blockers[0][:60]}"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_ext_auth_push_non_standard_env(script_dir):
+    """External authorized push detects non-standard token env."""
+    push_path = os.path.join(script_dir, "vibe_external_authorized_push.py")
+    if not os.path.exists(push_path):
+        return {"passed": False, "message": "script not found"}
+    import tempfile, shutil
+    tmpdir = tempfile.mkdtemp(prefix="smoke-eap-")
+    try:
+        record = {
+            "approval_id": "smoke-env-test",
+            "repo": "some-org/some-repo",
+            "branch": "feat/test",
+            "operation": "push",
+            "base_sha": "abc123",
+            "local_commit_sha": "def456",
+            "changed_paths": ["tools/test.py"],
+            "patch_sha256": "aabb",
+            "expires_at": 9999999999,
+        }
+        with open(os.path.join(tmpdir, "smoke-env-test.json"), "w") as f:
+            json.dump(record, f)
+        env = os.environ.copy()
+        env["GITHUB_PAT"] = "fake_token_for_smoke_test"
+        proc = subprocess.run(
+            [sys.executable, push_path, "--json", "--approval-dir", tmpdir,
+             "validate", "--approval-id", "smoke-env-test"],
+            capture_output=True, text=True, timeout=30, env=env,
+        )
+        try:
+            data = json.loads(proc.stdout)
+        except (json.JSONDecodeError, ValueError):
+            return {"passed": False, "message": f"invalid json: {proc.stdout[:100]}"}
+        if data.get("non_standard_env_clean") is not False:
+            return {"passed": False, "message": f"should detect env: {data.get('non_standard_env_clean')}"}
+        return {"passed": True, "message": "violations detected"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _test_ext_auth_push_token_redaction(script_dir):
+    """External authorized push never outputs token content."""
+    push_path = os.path.join(script_dir, "vibe_external_authorized_push.py")
+    if not os.path.exists(push_path):
+        return {"passed": False, "message": "script not found"}
+    import tempfile, shutil
+    tmpdir = tempfile.mkdtemp(prefix="smoke-eap-")
+    try:
+        token_path = os.path.join(tmpdir, "test_token")
+        with open(token_path, "w") as f:
+            f.write("ghp_SUPERSECRET_SMOKE_TEST_TOKEN_12345")
+        os.chmod(token_path, 0o600)
+        rc, stdout, stderr = _run_script(push_path, [
+            "--json", "--token-file", token_path, "token-preflight"
+        ])
+        combined = stdout + stderr
+        if "ghp_SUPERSECRET_SMOKE_TEST_TOKEN_12345" in combined:
+            return {"passed": False, "message": "token leaked in output!"}
+        return {"passed": True, "message": "token not in output"}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def build_parser():

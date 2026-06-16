@@ -392,6 +392,31 @@ For detailed command specifications, permission boundaries, and prohibited behav
 | /batch | Batch queue planning | Read-only |
 
 
+## External Authorized Push Workflow (V1.10)
+
+For pushing to external repos (not `k176060444-lgtm/vibe-coding-repo`), use the dedicated wrapper:
+
+```
+1. Create approval record (JSON in ~/vibedev/privileged-approvals/)
+2. User approves (approve / confirmed / 批准 / 确认)
+3. Wrapper validates: repo, branch, operation, base_sha, changed_paths, patch_sha256, expires_at
+4. Wrapper checks: no force push, no delete branch, no tag/release/deploy, no forbidden paths
+5. Wrapper verifies: remote branch SHA matches expected
+6. Wrapper reads: standard token file ONLY (never github.env, never GITHUB_PAT)
+7. Wrapper pushes: via temporary GIT_ASKPASS helper (token never in argv/env/output)
+8. Wrapper verifies: remote branch updated to expected SHA
+9. Evidence: push record with all metadata (no token content)
+```
+
+**Forbidden:**
+- Direct `git push` to external repos without wrapper
+- Direct GitHub API write (blobs, trees, refs, update-branch)
+- Using `~/.vibedev-secrets/github.env` or `GITHUB_PAT` env var
+- Token in URL, argv, or environment
+- Force push, delete branch, tag, release, deploy
+
+**Standard token source:** `/home/vibeworker/.vibedev/secrets/github_privileged_token` (mode=600, owner=vibeworker)
+
 ## Batch Queue Plan
 
 Generate batch execution plan for multiple Work Orders:
