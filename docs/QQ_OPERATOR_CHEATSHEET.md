@@ -423,3 +423,25 @@ self repo = gh cached 允许（需报告）；external push = standard token + a
 ### Node Attribution
 
 每份报告必须说明：Windows 主控做了什么、Debian worker 做了什么、哪个节点发生 git/token/PR/API 操作。
+
+
+### Gateway Health (v1.0.0)
+
+诊断 Windows gateway 进程/任务/日志状态。
+
+```bash
+gateway-health status          # 完整状态
+gateway-health self-check      # 自检
+```
+
+default 与 vibedev 分开诊断。离线时禁止继续执行批次。
+
+### Pytest Result Classifier (v1.0.0)
+
+严格分类 pytest 结果。**exit=5 绝不等于 PASS。**
+
+```bash
+pytest-classifier classify --exit-code 5 --output "1 skipped"
+```
+
+SKIPPED_ONLY ≠ PASS。INCONSISTENT_RESULT ≠ strong_validation。

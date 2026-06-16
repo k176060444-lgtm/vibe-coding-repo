@@ -1668,3 +1668,70 @@ Every final report must include per-node attribution:
 Principle: "每份最终报告必须说明 Windows 主控做了什么、Debian worker 做了什么、哪个节点发生 git/token/PR/API 操作。"
 
 *V1.12.2 Hermetic External Test Env + Token Source Policy - 2026-06-16*
+
+
+## V1.12.3 Runtime Reliability + Pytest Result Semantics
+
+### Gateway Runtime Health
+
+Diagnostics for Windows gateway processes and scheduled tasks:
+
+```bash
+python3 scripts/vibe_gateway_health.py status [--json]
+python3 scripts/vibe_gateway_health.py self-check [--json]
+```
+
+Profiles diagnosed: default, vibedev (separately).
+
+Status values:
+| Status | Meaning |
+|--------|---------|
+| ONLINE | Process running + log fresh + WebSocket OK |
+| OFFLINE_NO_PROCESS | No gateway process found |
+| TASK_READY_NOT_RUNNING | Scheduled task ready but no process |
+| STALE_LOG | Process exists but log not updating |
+| RECONNECTING | WebSocket reconnecting |
+| SESSION_CONFLICT_SUSPECTED | Possible QQBot session conflict |
+| UNKNOWN | Cannot determine |
+
+### Gateway Watchdog Policy
+
+- Default and vibedev diagnosed separately
+- Never restart both profiles simultaneously
+- Order: default first, then vibedev
+- If both profiles conflict, report session identity conflict
+- Gateway offline: batch execution blocked, only read-only recovery checks allowed
+- Never auto-restart without separate approval
+
+### Pytest Result Classifier
+
+Strict classification of pytest results:
+
+| Category | Exit Code | Meaning |
+|----------|-----------|---------|
+| PASS | 0 | Tests passed (or skipped with allow_skipped_only) |
+| SKIPPED_ONLY | 0 | Only skipped tests, 0 passed |
+| NO_TESTS | 5 | No tests collected |
+| INCONSISTENT_RESULT | 5 | Exit=5 but output shows test activity |
+| ENV_FAIL | 1/3/4 | Import/dependency/plugin failure |
+| TEST_FAIL | 1 | Assertion/test failure |
+| INTERRUPTED | 2 | Keyboard interrupt |
+| TIMEOUT | -1 | Process timeout |
+
+**Critical rule: exit=5 is NEVER PASS.**
+
+`1 skipped in 0.05s, exit=5` → INCONSISTENT_RESULT (not strong validation).
+
+### strong_validation
+
+A result has `strong_validation=true` only when:
+- exit_code=0 AND passed>0
+
+SKIPPED_ONLY and INCONSISTENT_RESULT have `strong_validation=false`.
+
+### hermes-agent Targeted pytest Re-classification
+
+Previous: "1 skipped, exit=5" reported as PASS
+Now: **INCONSISTENT_RESULT** — exit=5 but output shows test activity. Not strong enough for code validation.
+
+*V1.12.3 Runtime Reliability + Pytest Result Semantics - 2026-06-16*

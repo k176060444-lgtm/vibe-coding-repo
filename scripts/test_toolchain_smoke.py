@@ -4979,6 +4979,11 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("token_policy_external_push_blocked", lambda: _test_token_policy_external_push_blocked(script_dir)))
     tests.append(_run_test("token_policy_self_check", lambda: _test_token_policy_self_check(script_dir)))
     tests.append(_run_test("test_env_manager_self_check", lambda: _test_env_manager_self_check(script_dir)))
+    tests.append(_run_test("gateway_health_self_check", lambda: _test_gateway_health_self_check(script_dir)))
+    tests.append(_run_test("gateway_health_status_constants", lambda: _test_gateway_health_status_constants(script_dir)))
+    tests.append(_run_test("classifier_self_check", lambda: _test_classifier_self_check(script_dir)))
+    tests.append(_run_test("classifier_exit5_not_pass", lambda: _test_classifier_exit5_not_pass(script_dir)))
+    tests.append(_run_test("classifier_strong_validation", lambda: _test_classifier_strong_validation(script_dir)))
     return tests
 
 
@@ -5440,6 +5445,80 @@ def _test_env_manager_self_check(script_dir):
         return {"passed": False, "message": "invalid json"}
     ok = data.get("overall") == "PASS"
     return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_gateway_health_self_check(script_dir):
+    """Gateway health self-check passes."""
+    path = os.path.join(script_dir, "vibe_gateway_health.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "self-check"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_gateway_health_status_constants(script_dir):
+    """Gateway health defines all 7 status constants."""
+    path = os.path.join(script_dir, "vibe_gateway_health.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gwh", path)
+    gwh = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gwh)
+    constants = [gwh.STATUS_ONLINE, gwh.STATUS_OFFLINE_NO_PROCESS,
+                 gwh.STATUS_TASK_READY_NOT_RUNNING, gwh.STATUS_STALE_LOG,
+                 gwh.STATUS_RECONNECTING, gwh.STATUS_SESSION_CONFLICT, gwh.STATUS_UNKNOWN]
+    return {"passed": len(constants) == 7, "message": f"{len(constants)} status constants"}
+
+
+def _test_classifier_self_check(script_dir):
+    """Pytest result classifier self-check passes."""
+    path = os.path.join(script_dir, "vibe_pytest_result_classifier.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "self-check"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ok = data.get("overall") == "PASS"
+    return {"passed": ok, "message": f"{data.get('overall')} ({data.get('passed')}/{data.get('total')})"}
+
+
+def _test_classifier_exit5_not_pass(script_dir):
+    """exit=5 must never be classified as PASS."""
+    path = os.path.join(script_dir, "vibe_pytest_result_classifier.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("prc", path)
+    prc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(prc)
+    r1 = prc.classify_pytest_result(5, "")
+    r2 = prc.classify_pytest_result(5, "1 skipped in 0.05s")
+    ok = r1["category"] != "PASS" and r2["category"] != "PASS"
+    return {"passed": ok, "message": f"exit5_empty={r1['category']} exit5_skipped={r2['category']}"}
+
+
+def _test_classifier_strong_validation(script_dir):
+    """Strong validation only for real passes."""
+    path = os.path.join(script_dir, "vibe_pytest_result_classifier.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("prc", path)
+    prc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(prc)
+    r1 = prc.classify_pytest_result(0, "5 passed in 1.0s")
+    r2 = prc.classify_pytest_result(0, "1 skipped in 0.05s")
+    r3 = prc.classify_pytest_result(5, "1 skipped in 0.05s")
+    ok = r1["strong_validation"] and not r2["strong_validation"] and not r3["strong_validation"]
+    return {"passed": ok, "message": f"pass={r1['strong_validation']} skipped={r2['strong_validation']} inc={r3['strong_validation']}"}
 if __name__ == "__main__":
     sys.exit(main())
 
