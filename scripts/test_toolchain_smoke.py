@@ -4002,9 +4002,9 @@ def _test_fast_validation_batch_runner_version(script_dir):
     if not path.exists():
         return {"passed": False, "message": "script not found"}
     content = path.read_text()
-    if 'VERSION = "1.6.0"' not in content:
-        return {"passed": False, "message": "expected version 1.6.0"}
-    return {"passed": True, "message": "batch runner v1.6.0"}
+    if 'VERSION = "1.7.0"' not in content:
+        return {"passed": False, "message": "expected version 1.7.0"}
+    return {"passed": True, "message": "batch runner v1.7.0"}
 
 
 def _test_batch_runner_checkpoint_status_field(script_dir):
@@ -4036,6 +4036,237 @@ def _test_batch_runner_checkpoint_status_field(script_dir):
         return {"passed": False, "message": "missing resume_status"}
     return {"passed": True, "message": "checkpoint_status=%s resume_status=%s" % (data.get("checkpoint_status"), data.get("resume_status"))}
 
+
+
+
+
+
+# ── V1.8 External Repo Policy & Approval Tests ──────────────────────────
+
+def _test_external_policy_help_flag(script_dir):
+    """Test 106: --external-policy appears in --help."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py", ["--help"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"help failed: rc={rc}"}
+    combined = stdout + stderr
+    if "--external-policy" not in combined:
+        return {"passed": False, "message": "--external-policy not in help output"}
+    return {"passed": True, "message": "external-policy in help"}
+
+
+def _test_external_approval_help_flag(script_dir):
+    """Test 107: --external-approval appears in --help."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py", ["--help"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"help failed: rc={rc}"}
+    combined = stdout + stderr
+    if "--external-approval" not in combined:
+        return {"passed": False, "message": "--external-approval not in help output"}
+    return {"passed": True, "message": "external-approval in help"}
+
+
+def _test_external_policy_self_repo(script_dir):
+    """Test 108: self-repo external-policy returns approved."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-policy", "--ext-repo", "k176060444-lgtm/vibe-coding-repo",
+         "--ext-operation", "push", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"rc={rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if not data.get("approved"):
+        return {"passed": False, "message": f"self-repo should be approved, got: {data.get('approved')}"}
+    if data.get("repo_trust_level") != "trusted-self":
+        return {"passed": False, "message": f"trust_level wrong: {data.get('repo_trust_level')}"}
+    return {"passed": True, "message": "self-repo approved"}
+
+
+def _test_external_policy_ext_read(script_dir):
+    """Test 109: external read-only ops allowed without token."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-policy", "--ext-repo", "some-org/some-repo",
+         "--ext-operation", "fetch", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"rc={rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if not data.get("approved"):
+        return {"passed": False, "message": f"read-only should be approved"}
+    if data.get("would_read_token"):
+        return {"passed": False, "message": "read-only should not read token"}
+    if data.get("repo_trust_level") != "protected-external":
+        return {"passed": False, "message": f"trust_level wrong: {data.get('repo_trust_level')}"}
+    return {"passed": True, "message": "ext read-only approved, no token"}
+
+
+def _test_external_policy_ext_write_blocked(script_dir):
+    """Test 110: external write without approval BLOCKED."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-policy", "--ext-repo", "some-org/some-repo",
+         "--ext-operation", "push", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"rc={rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data.get("approved"):
+        return {"passed": False, "message": "external write should not be approved without approval"}
+    if not data.get("requires_approval"):
+        return {"passed": False, "message": "external write should require approval"}
+    if not data.get("would_push"):
+        return {"passed": False, "message": "external write should indicate would_push"}
+    if not data.get("blockers"):
+        return {"passed": False, "message": "should have blockers"}
+    return {"passed": True, "message": "ext write blocked without approval"}
+
+
+def _test_external_approval_create_approve(script_dir):
+    """Test 111: create + approve approval, then policy check passes."""
+    # Create approval
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "create",
+         "--approval-repo", "some-org/some-repo",
+         "--approval-branch", "feature-x",
+         "--approval-operation", "push",
+         "--approval-base-sha", "abc123",
+         "--approval-changed-paths", "src/main.py", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"create rc={rc}: {stderr}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from create"}
+    approval_id = data.get("approval_id")
+    if not approval_id:
+        return {"passed": False, "message": f"no approval_id: {data.get('approval_id')}"}
+    # Approve it
+    rc2, stdout2, stderr2 = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "approve",
+         "--approval-id", approval_id, "--json"]
+    )
+    if rc2 != 0:
+        return {"passed": False, "message": f"approve rc={rc2}: {stderr2}"}
+    try:
+        data2 = json.loads(stdout2)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from approve"}
+    approval = data2.get("approval", {})
+    if approval.get("status") != "approved":
+        return {"passed": False, "message": f"not approved: {approval.get('status')}"}
+    # Check policy with approval
+    rc3, stdout3, stderr3 = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-policy", "--ext-repo", "some-org/some-repo",
+         "--ext-operation", "push", "--approval-id", approval_id, "--json"]
+    )
+    if rc3 != 0:
+        return {"passed": False, "message": f"policy rc={rc3}"}
+    try:
+        data3 = json.loads(stdout3)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON from policy"}
+    if not data3.get("approved"):
+        return {"passed": False, "message": f"should be approved with valid approval"}
+    if not data3.get("would_push"):
+        return {"passed": False, "message": "should indicate would_push"}
+    return {"passed": True, "message": "create+approve+policy check passed"}
+
+
+def _test_external_approval_expire(script_dir):
+    """Test 112: expired approval blocks external write."""
+    # Create approval
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "create",
+         "--approval-repo", "some-org/some-repo",
+         "--approval-branch", "feature-y",
+         "--approval-operation", "push",
+         "--approval-base-sha", "def456", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"create rc={rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    approval_id = data.get("approval_id")
+    # Approve then expire
+    _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "approve",
+         "--approval-id", approval_id, "--json"]
+    )
+    rc2, stdout2, stderr2 = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-approval", "--approval-action", "expire",
+         "--approval-id", approval_id, "--json"]
+    )
+    if rc2 != 0:
+        return {"passed": False, "message": f"expire rc={rc2}"}
+    # Policy check with expired approval
+    rc3, stdout3, stderr3 = _run_script(
+        script_dir / "vibe_batch_runner.py",
+        ["--external-policy", "--ext-repo", "some-org/some-repo",
+         "--ext-operation", "push", "--approval-id", approval_id, "--json"]
+    )
+    if rc3 != 0:
+        return {"passed": False, "message": f"policy rc={rc3}"}
+    try:
+        data3 = json.loads(stdout3)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    if data3.get("approved"):
+        return {"passed": False, "message": "expired approval should not approve"}
+    return {"passed": True, "message": "expired approval blocks write"}
+
+
+def _test_batch_runner_version_170(script_dir):
+    """Test 113: batch runner version is 1.7.0."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py", ["--version"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"version rc={rc}"}
+    if "1.7.0" not in stdout:
+        return {"passed": False, "message": f"expected 1.7.0, got: {stdout}"}
+    return {"passed": True, "message": "version 1.7.0"}
+
+
+def _test_external_policy_status_fields(script_dir):
+    """Test 114: --status includes external policy fields."""
+    rc, stdout, stderr = _run_script(
+        script_dir / "vibe_batch_runner.py", ["--status", "--json"]
+    )
+    if rc != 0:
+        return {"passed": False, "message": f"rc={rc}"}
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"passed": False, "message": "invalid JSON"}
+    required = ["external_policy_supported", "external_approval_supported",
+                "external_read_ops", "external_write_ops"]
+    missing = [k for k in required if k not in data]
+    if missing:
+        return {"passed": False, "message": f"missing fields: {missing}"}
+    return {"passed": True, "message": "external policy fields in status"}
 
 def run_tests(jobs_dir=None):
     """Run all smoke tests."""
@@ -4368,6 +4599,34 @@ def run_tests(jobs_dir=None):
 
     # Test 105: batch runner version 1.6.0
     tests.append(_run_test("fast_validation_batch_runner_version", lambda: _test_fast_validation_batch_runner_version(script_dir)))
+
+
+    # Test 106: external-policy in help
+    tests.append(_run_test("external_policy_help", lambda: _test_external_policy_help_flag(script_dir)))
+
+    # Test 107: external-approval in help
+    tests.append(_run_test("external_approval_help", lambda: _test_external_approval_help_flag(script_dir)))
+
+    # Test 108: self-repo external-policy approved
+    tests.append(_run_test("external_policy_self_repo", lambda: _test_external_policy_self_repo(script_dir)))
+
+    # Test 109: external read-only approved, no token
+    tests.append(_run_test("external_policy_ext_read", lambda: _test_external_policy_ext_read(script_dir)))
+
+    # Test 110: external write blocked without approval
+    tests.append(_run_test("external_policy_ext_write_blocked", lambda: _test_external_policy_ext_write_blocked(script_dir)))
+
+    # Test 111: create+approve+policy check
+    tests.append(_run_test("external_approval_create_approve", lambda: _test_external_approval_create_approve(script_dir)))
+
+    # Test 112: expired approval blocks write
+    tests.append(_run_test("external_approval_expire", lambda: _test_external_approval_expire(script_dir)))
+
+    # Test 113: batch runner version 1.7.0
+    tests.append(_run_test("batch_runner_version_170", lambda: _test_batch_runner_version_170(script_dir)))
+
+    # Test 114: external policy fields in status
+    tests.append(_run_test("external_policy_status_fields", lambda: _test_external_policy_status_fields(script_dir)))
 
     return tests
 
