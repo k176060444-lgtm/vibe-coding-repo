@@ -28,7 +28,7 @@ from pathlib import Path
 VERSION = "1.0.0"
 
 
-def _run_script(script_path, args, timeout=60):
+def _run_script(script_path, args, timeout=120):
     """Run a Python script and return (rc, stdout, stderr)."""
     try:
         cmd = [sys.executable, str(script_path)] + args

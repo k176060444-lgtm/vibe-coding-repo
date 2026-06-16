@@ -1500,3 +1500,30 @@ python3 scripts/vibe_pytest_result_classifier.py self-check [--json]
 Categories: PASS, SKIPPED_ONLY, NO_TESTS, INCONSISTENT_RESULT, ENV_FAIL, TEST_FAIL, INTERRUPTED, TIMEOUT.
 
 **exit=5 is NEVER PASS.** strong_validation requires exit=0 AND passed>0.
+
+
+### batch-dashboard v1.0.0
+
+```bash
+python3 scripts/vibe_batch_dashboard.py --json    # Full dashboard JSON
+python3 scripts/vibe_batch_dashboard.py --text     # Human readable
+python3 scripts/vibe_batch_dashboard.py --self-check
+```
+
+### resume-gate v1.0.0
+
+```bash
+python3 scripts/vibe_resume_gate.py check --batch-id <id> --worktree <path> --expected-baseline <sha>
+python3 scripts/vibe_resume_gate.py self-check
+```
+
+Decisions: RESUME_SAFE, CLEAN_RESUME_REQUIRED, BLOCK_BASELINE_MISMATCH, BLOCK_GATEWAY_OFFLINE, BLOCK_WORKER_UNREACHABLE, MANUAL_APPROVAL_REQUIRED.
+
+### health-snapshot v1.0.0
+
+```bash
+python3 scripts/vibe_health_snapshot.py --json
+python3 scripts/vibe_health_snapshot.py --self-check
+```
+
+Aggregates all subsystem checks. Verdict: OK / WARN / BLOCK.
