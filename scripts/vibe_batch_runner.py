@@ -7,6 +7,11 @@ After each WO, refreshes baseline before executing the next.
 
 Stop rules: any WO failure stops the batch immediately.
 
+V1.8: External repo protected policy dry-run.
+- External repo read-only ops (fetch/diff/merge-dry-run/patch) allowed without token.
+- External repo write ops (push/PR update/branch write) BLOCK unless approved.
+- Even with approval, only dry-run (would_push=true), not real push in V1.8.
+
 Usage:
     python3 scripts/vibe_batch_runner.py --batch <batch.json> [--json] [--compact] [--dry-run]
     python3 scripts/vibe_batch_runner.py --status [--json]
@@ -14,9 +19,11 @@ Usage:
     python3 scripts/vibe_batch_runner.py --batch-report [--checkpoint <file>] [--json] [--compact]
     python3 scripts/vibe_batch_runner.py --pause [--checkpoint <file>] [--json] [--compact]
     python3 scripts/vibe_batch_runner.py --resume [--checkpoint <file>] [--json] [--compact]
+    python3 scripts/vibe_batch_runner.py --external-policy <repo> <operation> [--json]
+    python3 scripts/vibe_batch_runner.py --external-approval <action> [--json] [--compact]
 
 Constraints:
-    - Self-repo only (k176060444-lgtm/vibe-coding-repo).
+    - Self-repo only (k176060444-lgtm/vibe-coding-repo) for automated batch.
     - External repo writes BLOCK unless approved.
     - No force push, no bare gh pr merge.
     - Wrapper merge required.
@@ -25,6 +32,7 @@ Constraints:
 """
 
 import argparse
+import hashlib
 import json
 import tempfile
 import os
@@ -33,9 +41,15 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
+
+# Repo trust levels
+REPO_TRUST_LEVELS = {
+    SELF_REPO: "trusted-self",
+}
+DEFAULT_TRUST_LEVEL = "protected-external"
 
 # Validation modes
 VALIDATION_MODES = ["full", "fast", "final-only"]
@@ -73,6 +87,31 @@ STOP_CONDITIONS = [
     "external_repo_write_without_approval",
 ]
 
+# External operations classification
+EXTERNAL_READ_OPS = [
+    "fetch",
+    "diff",
+    "merge-dry-run",
+    "patch",
+    "read-tree",
+    "log",
+    "show",
+    "status",
+]
+
+EXTERNAL_WRITE_OPS = [
+    "push",
+    "pr-update",
+    "branch-write",
+    "merge",
+    "tag",
+    "release",
+    "deploy",
+]
+
+# Approval storage directory
+APPROVAL_DIR_NAME = "privileged-approvals"
+
 
 def _run_cmd(cmd, timeout=120, cwd=None):
     """Run a command and return (rc, stdout, stderr)."""
@@ -106,6 +145,249 @@ def _check_policy_gate(changed_paths, allowed_paths):
             if not matched:
                 violations.append(f"unexpected changed_path: {cp}")
     return len(violations) == 0, violations
+
+
+def _get_repo_trust_level(repo):
+    """Get trust level for a repository."""
+    return REPO_TRUST_LEVELS.get(repo, DEFAULT_TRUST_LEVEL)
+
+
+def _is_read_only_operation(operation):
+    """Check if an operation is read-only."""
+    return operation in EXTERNAL_READ_OPS
+
+
+def _is_write_operation(operation):
+    """Check if an operation is a write operation."""
+    return operation in EXTERNAL_WRITE_OPS
+
+
+def _compute_patch_sha256(content):
+    """Compute SHA256 of content for approval binding."""
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    return hashlib.sha256(content).hexdigest()
+
+
+def _get_approval_dir():
+    """Get the approval storage directory."""
+    return Path.home() / "vibedev" / APPROVAL_DIR_NAME
+
+
+def _load_approval(approval_id):
+    """Load an approval record by ID."""
+    approval_dir = _get_approval_dir()
+    approval_file = approval_dir / f"{approval_id}.json"
+    if not approval_file.exists():
+        return None
+    try:
+        with open(approval_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_approval(approval_id, approval_data):
+    """Save an approval record (dry-run only in V1.8)."""
+    approval_dir = _get_approval_dir()
+    approval_dir.mkdir(parents=True, exist_ok=True)
+    approval_file = approval_dir / f"{approval_id}.json"
+    try:
+        tmp = approval_file.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(approval_data, f, indent=2, ensure_ascii=False)
+        tmp.replace(approval_file)
+        return True
+    except OSError:
+        return False
+
+
+def _list_approvals():
+    """List all approval records."""
+    approval_dir = _get_approval_dir()
+    if not approval_dir.exists():
+        return []
+    approvals = []
+    for f in sorted(approval_dir.glob("*.json")):
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+                data["_file"] = str(f)
+                approvals.append(data)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return approvals
+
+
+def _check_approval_valid(approval, repo, operation):
+    """Check if an approval is valid for the given repo and operation.
+
+    Returns: (valid: bool, reason: str)
+    """
+    if not approval:
+        return False, "no_approval"
+
+    if approval.get("status") != "approved":
+        return False, f"not_approved: {approval.get('status', 'unknown')}"
+
+    if approval.get("repo") != repo:
+        return False, f"repo_mismatch: expected={approval.get('repo')}, got={repo}"
+
+    allowed_ops = approval.get("allowed_operations", [])
+    if operation not in allowed_ops:
+        return False, f"operation_not_allowed: {operation} not in {allowed_ops}"
+
+    expires_at = approval.get("expires_at", 0)
+    if expires_at and time.time() > expires_at:
+        return False, "expired"
+
+    return True, "valid"
+
+
+def check_external_policy(repo, operation, approval_id=None):
+    """Check external repo policy for a given operation.
+
+    Returns a policy decision dict with all required fields.
+    """
+    trust_level = _get_repo_trust_level(repo)
+    is_self = repo == SELF_REPO
+    is_read = _is_read_only_operation(operation)
+    is_write = _is_write_operation(operation)
+
+    result = {
+        "repo": repo,
+        "repo_trust_level": trust_level,
+        "operation_type": operation,
+        "is_read_only": is_read,
+        "is_write": is_write,
+        "requires_approval": False,
+        "approved": False,
+        "approval_id": None,
+        "would_read_token": False,
+        "would_push": False,
+        "blockers": [],
+        "warnings": [],
+    }
+
+    # Self repo: auto-allow for batch operations
+    if is_self:
+        result["approved"] = True
+        if is_write:
+            result["would_push"] = True
+        return result
+
+    # External repo: check operation type
+    if is_read:
+        # Read-only operations: allowed, no token needed
+        result["requires_approval"] = False
+        result["approved"] = True
+        result["would_read_token"] = False
+        result["warnings"].append("external_read_only: no token access")
+        return result
+
+    if is_write:
+        # Write operations: require approval
+        result["requires_approval"] = True
+        result["would_push"] = True
+        result["would_read_token"] = True
+
+        # Check approval
+        if approval_id:
+            approval = _load_approval(approval_id)
+            valid, reason = _check_approval_valid(approval, repo, operation)
+            if valid:
+                result["approved"] = True
+                result["approval_id"] = approval_id
+                result["warnings"].append("approval_valid_dryrun_only: V1.8 does not execute real push")
+            else:
+                result["blockers"].append(f"approval_invalid: {reason}")
+        else:
+            result["blockers"].append("no_approval_provided: external write requires approval")
+
+        # V1.8 constraint: even approved, only dry-run
+        if result["approved"]:
+            result["warnings"].append("v18_dryrun_constraint: would_push=true but real push blocked")
+
+        return result
+
+    # Unknown operation: treat as write (conservative)
+    result["requires_approval"] = True
+    result["blockers"].append(f"unknown_operation: {operation} — treating as write")
+    return result
+
+
+def create_approval_request(repo, branch, operation, base_sha, changed_paths,
+                            patch_content=None, ttl_hours=24):
+    """Create an approval request (dry-run in V1.8).
+
+    Returns: (approval_id, approval_data)
+    """
+    patch_sha256 = _compute_patch_sha256(patch_content) if patch_content else None
+    now = time.time()
+    approval_id = f"ext-approval-{repo.replace('/', '-')}-{int(now)}"
+
+    approval_data = {
+        "approval_id": approval_id,
+        "repo": repo,
+        "branch": branch,
+        "operation": operation,
+        "allowed_operations": [operation],
+        "base_sha": base_sha,
+        "changed_paths": changed_paths,
+        "patch_sha256": patch_sha256,
+        "created_at": now,
+        "expires_at": now + (ttl_hours * 3600),
+        "ttl_hours": ttl_hours,
+        "status": "pending",
+        "approved_by": None,
+        "approved_at": None,
+        "v18_dryrun": True,
+        "note": "V1.8 dry-run approval. Real push not executed.",
+    }
+
+    return approval_id, approval_data
+
+
+def approve_approval(approval_id, approved_by="operator"):
+    """Approve a pending approval request.
+
+    Returns: (success: bool, approval_data: dict)
+    """
+    approval = _load_approval(approval_id)
+    if not approval:
+        return False, {"error": f"Approval not found: {approval_id}"}
+
+    if approval.get("status") != "pending":
+        return False, {"error": f"Approval not pending: {approval.get('status')}"}
+
+    approval["status"] = "approved"
+    approval["approved_by"] = approved_by
+    approval["approved_at"] = time.time()
+
+    saved = _save_approval(approval_id, approval)
+    if not saved:
+        return False, {"error": "Failed to save approval"}
+
+    return True, approval
+
+
+def expire_approval(approval_id):
+    """Expire an approval.
+
+    Returns: (success: bool, approval_data: dict)
+    """
+    approval = _load_approval(approval_id)
+    if not approval:
+        return False, {"error": f"Approval not found: {approval_id}"}
+
+    approval["status"] = "expired"
+    approval["expired_at"] = time.time()
+
+    saved = _save_approval(approval_id, approval)
+    if not saved:
+        return False, {"error": "Failed to save approval"}
+
+    return True, approval
 
 
 def _determine_validation_mode(repo, risk_level="low"):
@@ -488,6 +770,113 @@ def _cmd_resume(args):
     return result, rc
 
 
+def _cmd_external_policy(args):
+    """Show external repo policy for a given repo and operation.
+
+    This is a read-only dry-run check. Does not execute any write.
+    """
+    repo = args.ext_repo
+    operation = args.ext_operation
+    approval_id = getattr(args, "approval_id", None)
+
+    result = check_external_policy(repo, operation, approval_id)
+    result["command"] = "external-policy"
+    result["v18_dryrun"] = True
+    return result, 0
+
+
+def _cmd_external_approval(args):
+    """Manage external approval actions.
+
+    Subcommands: create, show, list, approve, expire
+    """
+    action = args.approval_action
+    approval_dir = _get_approval_dir()
+
+    if action == "create":
+        repo = args.approval_repo
+        branch = args.approval_branch or "main"
+        operation = args.approval_operation or "push"
+        base_sha = args.approval_base_sha or "unknown"
+        changed_paths = args.approval_changed_paths or []
+        ttl_hours = getattr(args, "approval_ttl", 24) or 24
+
+        approval_id, approval_data = create_approval_request(
+            repo, branch, operation, base_sha, changed_paths, ttl_hours=ttl_hours
+        )
+        saved = _save_approval(approval_id, approval_data)
+        if not saved:
+            return {"error": "Failed to save approval"}, 1
+
+        result = {
+            "command": "external-approval",
+            "action": "create",
+            "approval_id": approval_id,
+            "approval": approval_data,
+            "v18_dryrun": True,
+        }
+        return result, 0
+
+    elif action == "show":
+        approval_id = args.approval_id
+        if not approval_id:
+            return {"error": "approval_id required for show"}, 1
+        approval = _load_approval(approval_id)
+        if not approval:
+            return {"error": f"Approval not found: {approval_id}"}, 1
+        result = {
+            "command": "external-approval",
+            "action": "show",
+            "approval": approval,
+            "v18_dryrun": True,
+        }
+        return result, 0
+
+    elif action == "list":
+        approvals = _list_approvals()
+        result = {
+            "command": "external-approval",
+            "action": "list",
+            "count": len(approvals),
+            "approvals": approvals,
+            "v18_dryrun": True,
+        }
+        return result, 0
+
+    elif action == "approve":
+        approval_id = args.approval_id
+        if not approval_id:
+            return {"error": "approval_id required for approve"}, 1
+        success, data = approve_approval(approval_id)
+        if not success:
+            return {"error": data.get("error", "approve failed")}, 1
+        result = {
+            "command": "external-approval",
+            "action": "approve",
+            "approval": data,
+            "v18_dryrun": True,
+        }
+        return result, 0
+
+    elif action == "expire":
+        approval_id = args.approval_id
+        if not approval_id:
+            return {"error": "approval_id required for expire"}, 1
+        success, data = expire_approval(approval_id)
+        if not success:
+            return {"error": data.get("error", "expire failed")}, 1
+        result = {
+            "command": "external-approval",
+            "action": "expire",
+            "approval": data,
+            "v18_dryrun": True,
+        }
+        return result, 0
+
+    else:
+        return {"error": f"Unknown approval action: {action}"}, 1
+
+
 def _execute_wo(wo, script_dir, repo_dir, repo_root, dry_run=False):
     """Execute a single Work Order."""
     wo_id = wo.get("wo_id", "unknown")
@@ -799,12 +1188,22 @@ def _cmd_status(args):
         "repo_trust_level": "trusted-self",
         "max_batch_size": 5,
         "stop_conditions": STOP_CONDITIONS,
-        "supported_commands": ["run", "status", "batch-status", "batch-report", "pause", "resume", "cancel", "abort"],
+        "supported_commands": [
+            "run", "status", "batch-status", "batch-report",
+            "pause", "resume", "cancel", "abort",
+            "external-policy", "external-approval",
+        ],
         "dry_run_supported": True,
         "pause_resume_supported": True,
         "validation_modes": VALIDATION_MODES,
         "quick_checks": QUICK_CHECKS,
         "default_validation_mode": "fast",
+        "external_policy_supported": True,
+        "external_approval_supported": True,
+        "external_read_ops": EXTERNAL_READ_OPS,
+        "external_write_ops": EXTERNAL_WRITE_OPS,
+        "repo_trust_levels": dict(REPO_TRUST_LEVELS),
+        "default_trust_level": DEFAULT_TRUST_LEVEL,
     }, 0
 
 
@@ -831,6 +1230,26 @@ def build_parser():
     group.add_argument("--resume", action="store_true", help="Resume batch with reconcile")
     group.add_argument("--cancel", action="store_true", help="Cancel batch (before mutation only)")
     group.add_argument("--abort", action="store_true", help="Abort batch (no destructive cleanup)")
+    group.add_argument("--external-policy", action="store_true",
+                       help="Check external repo policy (dry-run)")
+    group.add_argument("--external-approval", action="store_true",
+                       help="Manage external approval actions (dry-run)")
+
+    # External policy args
+    parser.add_argument("--ext-repo", metavar="REPO", help="External repo (owner/name)")
+    parser.add_argument("--ext-operation", metavar="OP", help="Operation to check")
+    parser.add_argument("--approval-id", metavar="ID", help="Approval ID")
+
+    # External approval args
+    parser.add_argument("--approval-action", choices=["create", "show", "list", "approve", "expire"],
+                        default=None, help="Approval sub-action")
+    parser.add_argument("--approval-repo", metavar="REPO", help="Repo for approval")
+    parser.add_argument("--approval-branch", metavar="BRANCH", help="Branch for approval")
+    parser.add_argument("--approval-operation", metavar="OP", help="Operation for approval")
+    parser.add_argument("--approval-base-sha", metavar="SHA", help="Base SHA for approval")
+    parser.add_argument("--approval-changed-paths", nargs="*", default=[],
+                        help="Changed paths for approval")
+    parser.add_argument("--approval-ttl", type=int, default=24, help="TTL in hours")
 
     return parser
 
@@ -848,6 +1267,12 @@ def _format_compact(result):
     wo = result.get("current_wo", "")
     if wo:
         return f"BATCH {status} | wo={wo} | {completed} done"
+    # External policy compact
+    if result.get("command") == "external-policy":
+        approved = "APPROVED" if result.get("approved") else "BLOCKED"
+        return f"EXT_POLICY {result.get('repo_trust_level', '?')} | {result.get('operation_type', '?')} | {approved}"
+    if result.get("command") == "external-approval":
+        return f"EXT_APPROVAL {result.get('action', '?')} | {result.get('approval_id', '?')}"
     return f"BATCH {status} | {completed}/{total} done"
 
 
@@ -872,6 +1297,10 @@ def main(argv=None):
         result, rc = _cmd_cancel(args)
     elif args.abort:
         result, rc = _cmd_abort(args)
+    elif args.external_policy:
+        result, rc = _cmd_external_policy(args)
+    elif args.external_approval:
+        result, rc = _cmd_external_approval(args)
     else:
         parser.print_help()
         return 1
