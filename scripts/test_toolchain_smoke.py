@@ -4970,6 +4970,11 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("external_harness_self_check", lambda: _test_external_harness_self_check(script_dir)))
 
 
+    tests.append(_run_test("harness_stdlib_accuracy", lambda: _test_harness_stdlib_not_false_positive(script_dir)))
+    tests.append(_run_test("harness_gateway_repo_internal", lambda: _test_harness_gateway_repo_internal(script_dir)))
+    tests.append(_run_test("harness_third_party_separated", lambda: _test_harness_third_party_separated(script_dir)))
+    tests.append(_run_test("harness_repo_profile", lambda: _test_harness_repo_profile_exists(script_dir)))
+    tests.append(_run_test("harness_import_categories", lambda: _test_harness_import_classification_categories(script_dir)))
     return tests
 
 
@@ -5306,5 +5311,76 @@ def main(argv=None):
     return 0 if overall == "PASS" else 1
 
 
+def _test_harness_stdlib_not_false_positive(script_dir):
+    """Harness v1.1.0: json/tempfile not in missing_modules."""
+    path = os.path.join(script_dir, "vibe_external_test_harness.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    rc, stdout, stderr = _run_script(path, ["--json", "self-check"])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    checks = {c["name"]: c for c in data.get("checks", [])}
+    bad = checks.get("no_stdlib_in_missing", {})
+    return {"passed": bad.get("passed", False), "message": bad.get("message", "check not found")}
+
+
+def _test_harness_gateway_repo_internal(script_dir):
+    """Harness v1.1.0: gateway classified as repo_internal with profile."""
+    path = os.path.join(script_dir, "vibe_external_test_harness.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("harness", path)
+    harness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(harness)
+    known = {"gateway", "agent", "tools"}
+    cat = harness._classify_import("gateway", ".", known)
+    return {"passed": cat == "repo_internal", "message": f"gateway={cat}"}
+
+
+def _test_harness_third_party_separated(script_dir):
+    """Harness v1.1.0: pytest classified as third_party, not missing."""
+    path = os.path.join(script_dir, "vibe_external_test_harness.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("harness", path)
+    harness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(harness)
+    cat = harness._classify_import("pytest", ".", set())
+    return {"passed": cat == "third_party", "message": f"pytest={cat}"}
+
+
+def _test_harness_repo_profile_exists(script_dir):
+    """External repo profile for hermes-agent exists."""
+    profile_path = os.path.join(os.path.dirname(script_dir), "configs", "external_test_profiles", "hermes-agent.json")
+    if not os.path.isfile(profile_path):
+        return {"passed": False, "message": "profile not found"}
+    with open(profile_path) as f:
+        data = json.load(f)
+    ok = data.get("repo_name") == "hermes-agent" and "gateway" in data.get("known_internal_modules", [])
+    return {"passed": ok, "message": f"repo={data.get('repo_name')} internal={len(data.get('known_internal_modules', []))}"}
+
+
+def _test_harness_import_classification_categories(script_dir):
+    """Harness v1.1.0: diagnose output has all 5 import categories."""
+    path = os.path.join(script_dir, "vibe_external_test_harness.py")
+    if not os.path.exists(path):
+        return {"passed": False, "message": "script not found"}
+    repo_path = os.path.dirname(script_dir)
+    rc, stdout, stderr = _run_script(path, ["--json", "diagnose", "--repo-path", repo_path])
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"passed": False, "message": "invalid json"}
+    ic = data.get("import_classification", {})
+    required = ["stdlib_detected", "repo_internal", "third_party", "unknown_imports", "missing_third_party"]
+    present = [k for k in required if k in ic]
+    return {"passed": len(present) == len(required), "message": f"categories: {len(present)}/{len(required)}"}
+
 if __name__ == "__main__":
     sys.exit(main())
+
+
