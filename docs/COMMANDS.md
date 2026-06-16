@@ -1566,3 +1566,11 @@ python3 scripts/vibe_report_schema.py --self-check
 ```
 
 Required: pr_merge, changed_paths, baseline, validation, node_attribution, token_status, ext_write_status.
+
+### Iteration Policy
+```bash
+python3 scripts/vibe_iteration_policy.py profiles           # List all profiles
+python3 scripts/vibe_iteration_policy.py self-check          # Run self-check
+python3 scripts/vibe_iteration_policy.py recommend --read-only  # Recommend for task
+python3 scripts/vibe_iteration_policy.py recommend --multi-wo --external
+```

@@ -511,3 +511,14 @@ report-schema --json validate --input report.json
 ```
 
 必填：PR/merge、changed_paths、baseline、validation、node_attribution、token_status、ext_write_status。
+
+### Iteration Budget
+| Task Type | Profile | Steps |
+|-----------|---------|-------|
+| Read-only scout | short | 200 |
+| Self repo fix | standard | 300 |
+| Multi-WO batch | long | 500 |
+| Very large batch | extended | 800 |
+
+429/timeout → no auto model switch, report to operator.
+401/config → BLOCK. Extended → must record reason.

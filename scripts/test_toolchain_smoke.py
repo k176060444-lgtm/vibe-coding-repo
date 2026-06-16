@@ -4994,6 +4994,16 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("model_routing_self_check", lambda: _test_model_routing_self_check(script_dir)))
     tests.append(_run_test("report_schema_self_check", lambda: _test_report_schema_self_check(script_dir)))
     tests.append(_run_test("task_intake_classifies_risk", lambda: _test_task_intake_classifies_risk(script_dir)))
+    # V1.13.1 iteration policy tests
+    tests.append(_run_test("v1131_iteration_profiles", test_v1131_iteration_profiles))
+    tests.append(_run_test("v1131_readonly_short", test_v1131_readonly_short))
+    tests.append(_run_test("v1131_standard_selfrepo", test_v1131_standard_selfrepo))
+    tests.append(_run_test("v1131_long_multiwo", test_v1131_long_multiwo))
+    tests.append(_run_test("v1131_external_push_approval", test_v1131_external_push_approval))
+    tests.append(_run_test("v1131_429_no_auto_switch", test_v1131_429_no_auto_switch))
+    tests.append(_run_test("v1131_401_blocked", test_v1131_401_blocked))
+    tests.append(_run_test("v1131_intake_iteration_field", test_v1131_intake_iteration_field))
+    tests.append(_run_test("v1131_compiler_iteration_field", test_v1131_compiler_iteration_field))
     return tests
 
 
@@ -5655,6 +5665,93 @@ def _test_task_intake_classifies_risk(script_dir):
     except: return {"passed": False, "message": "invalid json"}
     ok = data.get("risk_level") == "low" and data.get("repo_scope") == "trusted-self"
     return {"passed": ok, "message": f"risk={data.get('risk_level')} scope={data.get('repo_scope')}"}
+
+
+# ── V1.13.1 Iteration Policy Tests ──────────────────────────────
+
+
+def test_v1131_iteration_profiles():
+    """V1.13.1-01: iteration profiles short/standard/long/extended."""
+    from vibe_iteration_policy import PROFILES
+    ok = (PROFILES["short"]["steps"] == 200 and
+          PROFILES["standard"]["steps"] == 300 and
+          PROFILES["long"]["steps"] == 500 and
+          PROFILES["extended"]["steps"] == 800)
+    return {"passed": ok, "message": f"s={PROFILES['short']['steps']} std={PROFILES['standard']['steps']} l={PROFILES['long']['steps']} e={PROFILES['extended']['steps']}"}
+
+
+def test_v1131_readonly_short():
+    """V1.13.1-02: read-only → short=200."""
+    from vibe_iteration_policy import recommend_profile
+    r = recommend_profile("investigation", risk_level="low", is_read_only=True)
+    return {"passed": r["profile"] == "short" and r["steps"] == 200,
+            "message": f"profile={r['profile']} steps={r['steps']}"}
+
+
+def test_v1131_standard_selfrepo():
+    """V1.13.1-03: self repo → standard=300."""
+    from vibe_iteration_policy import recommend_profile
+    r = recommend_profile("fix", risk_level="low", is_external=False)
+    return {"passed": r["profile"] == "standard" and r["steps"] == 300,
+            "message": f"profile={r['profile']} steps={r['steps']}"}
+
+
+def test_v1131_long_multiwo():
+    """V1.13.1-04: multi-WO → long=500."""
+    from vibe_iteration_policy import recommend_profile
+    r = recommend_profile("batch", is_multi_wo=True)
+    return {"passed": r["profile"] == "long" and r["steps"] == 500,
+            "message": f"profile={r['profile']} steps={r['steps']}"}
+
+
+def test_v1131_external_push_approval():
+    """V1.13.1-05: external push → approval required."""
+    from vibe_iteration_policy import recommend_profile, check_approval_gate
+    r = recommend_profile("push", risk_level="high", is_external=True)
+    gate = check_approval_gate("external_push", "high", "standard")
+    return {"passed": not r["auto_approve"] and gate["requires_approval"],
+            "message": f"auto_approve={r['auto_approve']} gate_approval={gate['requires_approval']}"}
+
+
+def test_v1131_429_no_auto_switch():
+    """V1.13.1-06: 429/timeout → no auto model switch."""
+    from vibe_iteration_policy import check_model_switch
+    r429 = check_model_switch("429 rate limit")
+    rto = check_model_switch("timeout exceeded")
+    return {"passed": (not r429["auto_switch"] and r429["action"] == "REPORT_TO_OPERATOR" and
+                       not rto["auto_switch"] and rto["action"] == "REPORT_TO_OPERATOR"),
+            "message": f"429={r429['action']} timeout={rto['action']}"}
+
+
+def test_v1131_401_blocked():
+    """V1.13.1-07: 401/config error → BLOCK."""
+    from vibe_iteration_policy import check_model_switch
+    r = check_model_switch("401 unauthorized")
+    return {"passed": r["action"] == "BLOCK",
+            "message": f"action={r['action']}"}
+
+
+def test_v1131_intake_iteration_field():
+    """V1.13.1-08: task intake outputs iteration_policy."""
+    from vibe_task_intake import classify_task
+    spec = classify_task("read-only investigation of dashboard")
+    ip = spec.get("iteration_policy", {})
+    return {"passed": "recommended_profile" in ip and "recommended_steps" in ip,
+            "message": f"profile={ip.get('recommended_profile')} steps={ip.get('recommended_steps')}"}
+
+
+def test_v1131_compiler_iteration_field():
+    """V1.13.1-09: WO compiler outputs iteration_policy."""
+    from vibe_wo_compiler import compile_wo
+    spec = {"task_id": "task-test", "summary": "test", "repo_scope": "trusted-self",
+            "operation_type": "planning", "risk_level": "low",
+            "iteration_policy": {"recommended_profile": "long", "recommended_steps": 500,
+                                  "auto_approve": True, "reason": "test"}}
+    plan = compile_wo(spec)
+    ip = plan.get("iteration_policy", {})
+    return {"passed": ip.get("profile") == "long" and ip.get("steps") == 500,
+            "message": f"profile={ip.get('profile')} steps={ip.get('steps')} source={ip.get('source')}"}
+
 if __name__ == "__main__":
     sys.exit(main())
 
