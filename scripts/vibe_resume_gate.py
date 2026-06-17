@@ -18,8 +18,10 @@ VERSION = "1.1.0"
 
 try:
     from vibe_toolchain_lifecycle import gate_check_for_dispatch
+    _LIFECYCLE_GATE_AVAILABLE = True
 except ImportError:
     gate_check_for_dispatch = None
+    _LIFECYCLE_GATE_AVAILABLE = False
 
 # Decision constants
 RESUME_SAFE = "RESUME_SAFE"
@@ -53,6 +55,22 @@ def check(batch_id, worktree, expected_baseline, current_main=None,
           external_write_pending=None, jobs_dir=None):
     """Evaluate resume safety. Returns decision dict."""
     jobs_dir = jobs_dir or os.path.expanduser("~/vibedev/jobs")
+
+    # Lifecycle gate check (V1.17.5 fail-closed)
+    if not _LIFECYCLE_GATE_AVAILABLE:
+        return {"version": VERSION, "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                "batch_id": batch_id, "decision": "BLOCK_LIFECYCLE_GATE_UNAVAILABLE",
+                "blockers": ["lifecycle gate import failed"], "warnings":[],
+                "checks": [{"name": "lifecycle_gate", "passed": False, "message": "import failed"}],
+                "next_safe_command": "fix lifecycle gate import"}
+    _lg = gate_check_for_dispatch()
+    if not _lg.get("allowed"):
+        return {"version": VERSION, "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                "batch_id": batch_id, "decision": "BLOCK_LIFECYCLE_GATE",
+                "blockers": ["lifecycle gate: " + _lg.get("reason", "unknown") + " " + _lg.get("detail", "")], "warnings":[],
+                "checks": [{"name": "lifecycle_gate", "passed": False, "message": _lg.get("reason", "unknown")}],
+                "next_safe_command": "resolve lifecycle gate issue"}
+
     bare_repo = os.path.expanduser("~/vibedev/repos/vibe-coding-repo.git")
 
     # Get current main if not provided

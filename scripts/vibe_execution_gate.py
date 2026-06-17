@@ -25,8 +25,10 @@ VERSION = "1.1.0"
 
 try:
     from vibe_toolchain_lifecycle import gate_check_for_dispatch
+    _LIFECYCLE_GATE_AVAILABLE = True
 except ImportError:
     gate_check_for_dispatch = None
+    _LIFECYCLE_GATE_AVAILABLE = False
 
 # High-risk forbidden actions that trigger BLOCK
 HIGH_RISK_ACTIONS = {
@@ -84,6 +86,27 @@ def _compute_package_digest(package_data):
 
 def cmd_check(args):
     """Run execution gate checks."""
+    # Lifecycle gate check (V1.17.5 fail-closed)
+    if not _LIFECYCLE_GATE_AVAILABLE:
+        result = {"verdict": "BLOCK", "workorder_id": getattr(args, "id", "unknown"),
+                  "checks": [{"name": "lifecycle_gate", "result": "BLOCK", "detail": "lifecycle gate import failed"}],
+                  "errors": ["lifecycle gate unavailable: cannot verify system integrity"]}
+        if getattr(args, "json", False):
+            import json as _json; print(_json.dumps(result, indent=2))
+        else:
+            print("BLOCK: lifecycle gate import failed")
+        return 1
+    _lg = gate_check_for_dispatch()
+    if not _lg.get("allowed"):
+        result = {"verdict": "BLOCK", "workorder_id": getattr(args, "id", "unknown"),
+                  "checks": [{"name": "lifecycle_gate", "result": "BLOCK", "detail": f"gate: {_lg.get('reason')}"}],
+                  "errors": [f"lifecycle gate: {_lg.get('reason')} {_lg.get('detail', '')}"]}
+        if getattr(args, "json", False):
+            import json as _json; print(_json.dumps(result, indent=2))
+        else:
+            print(f"BLOCK: lifecycle gate {_lg.get('reason')}")
+        return 1
+
     registry_dir = _registry_dir_path(args)
     if not registry_dir:
         print("ERROR: --registry-dir or VIBEDEV_REGISTRY_DIR required", file=sys.stderr)

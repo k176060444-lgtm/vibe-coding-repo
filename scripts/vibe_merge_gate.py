@@ -21,6 +21,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from vibe_toolchain_lifecycle import gate_check_for_dispatch
+    _LIFECYCLE_GATE_AVAILABLE = True
+except ImportError:
+    gate_check_for_dispatch = None
+    _LIFECYCLE_GATE_AVAILABLE = False
+
 
 def _run_cmd(*args, check=False):
     """Run a command and return (stdout, stderr, returncode)."""
@@ -122,6 +130,15 @@ def run_gate(args):
     """Run the merge gate checks."""
     blockers = []
     warnings = []
+
+    # Lifecycle gate check (V1.17.5 fail-closed)
+    if not _LIFECYCLE_GATE_AVAILABLE:
+        blockers.append("lifecycle gate import failed")
+        return _build_result(False, blockers, warnings, {}, {}, {})
+    _lg = gate_check_for_dispatch()
+    if not _lg.get("allowed"):
+        blockers.append(f"lifecycle gate: {_lg.get('reason', 'unknown')} {_lg.get('detail', '')}")
+        return _build_result(False, blockers, warnings, {}, {}, {})
     pr_info = {}
     job_info = {}
     checks_info = {}
