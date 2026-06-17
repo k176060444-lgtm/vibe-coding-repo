@@ -38,6 +38,7 @@ class TaskType(str, Enum):
     READ_ONLY = "read-only"
     IMPLEMENTER = "implementer"
     REVIEWER = "reviewer"
+    CODE_SEARCH = "code-search"
 
 
 @dataclass

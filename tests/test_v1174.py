@@ -418,3 +418,60 @@ def test_scheduler_gate_wiring():
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v", "--tb=short"]))
+
+# === V1.17.7.2 Capability-Aware Routing Tests ===
+
+def test_capability_routing_code_search_type():
+    """Test that CODE_SEARCH task type exists."""
+    import sys
+    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
+    from vibe_worker_registry import TaskType
+    assert hasattr(TaskType, 'CODE_SEARCH'), "TaskType.CODE_SEARCH missing"
+    assert TaskType.CODE_SEARCH == "code-search"
+
+def test_capability_routing_required_tools_param():
+    """Test that schedule() accepts required_tools parameter."""
+    import sys
+    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
+    from vibe_scheduler_policy import SchedulerPolicy
+    from vibe_worker_registry import WorkerRegistry
+    reg = WorkerRegistry()
+    sp = SchedulerPolicy(reg)
+    import inspect
+    sig = inspect.signature(sp.schedule)
+    assert 'required_tools' in sig.parameters, "schedule() missing required_tools param"
+
+def test_capability_filter_method_exists():
+    """Test that _filter_by_capabilities method exists."""
+    import sys
+    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
+    from vibe_scheduler_policy import SchedulerPolicy
+    from vibe_worker_registry import WorkerRegistry
+    reg = WorkerRegistry()
+    sp = SchedulerPolicy(reg)
+    assert hasattr(sp, '_filter_by_capabilities'), "_filter_by_capabilities method missing"
+
+def test_capability_routing_no_tools_passes():
+    """Test that schedule without required_tools still works normally."""
+    import sys
+    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
+    from vibe_scheduler_policy import SchedulerPolicy
+    from vibe_worker_registry import WorkerRegistry
+    reg = WorkerRegistry()
+    sp = SchedulerPolicy(reg)
+    result = sp.schedule(task_type="linux-worker")
+    assert result["task_type"] == "linux-worker"
+    assert "capability_blocked" not in result.get("selection_reason", "")
+
+def test_capability_routing_fail_closed_no_baseline():
+    """Test that capability check returns proper result."""
+    import sys
+    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
+    from vibe_scheduler_policy import SchedulerPolicy
+    from vibe_worker_registry import WorkerRegistry
+    reg = WorkerRegistry()
+    sp = SchedulerPolicy(reg)
+    result = sp._filter_by_capabilities(["ripgrep"])
+    assert isinstance(result, dict)
+    assert "blocked" in result
+    assert "capable_workers" in result

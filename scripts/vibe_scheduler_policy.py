@@ -10,7 +10,7 @@ Usage:
     python3 scripts/vibe_scheduler_policy.py --self-check
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import json
 import sys
@@ -20,10 +20,11 @@ from typing import Optional
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent))
 from vibe_worker_registry import WorkerRegistry, WorkerNode, NodeStatus, TaskType
 try:
-    from vibe_toolchain_lifecycle import gate_check_for_dispatch
+    from vibe_toolchain_lifecycle import gate_check_for_dispatch, StateStore
     _LIFECYCLE_GATE_AVAILABLE = True
 except ImportError:
     gate_check_for_dispatch = None
+    StateStore = None
     _LIFECYCLE_GATE_AVAILABLE = False
 
 
@@ -41,10 +42,72 @@ class SchedulerPolicy:
     def __init__(self, registry: WorkerRegistry):
         self.registry = registry
 
+    def _filter_by_capabilities(self, required_tools: list) -> dict:
+        """Check if any online non-maintenance worker has the required tools.
+
+        Queries the lifecycle approved_baselines to determine tool availability
+        per node. Fail-closed: if baseline data is missing or tool info is
+        unavailable, the worker is excluded.
+
+        Returns:
+            {"blocked": bool, "reason": str, "capable_workers": list}
+        """
+        if not _LIFECYCLE_GATE_AVAILABLE or StateStore is None:
+            return {"blocked": True, "reason": "lifecycle_unavailable_fail_closed",
+                    "capable_workers": []}
+
+        try:
+            store = StateStore()
+            state = store.load()
+            approved = state.get("approved_baselines", {})
+        except Exception as e:
+            return {"blocked": True, "reason": f"state_load_failed: {e}",
+                    "capable_workers": []}
+
+        if not approved:
+            return {"blocked": True, "reason": "no_approved_baselines",
+                    "capable_workers": []}
+
+        online_workers = self.registry.online_workers()
+        capable = []
+        for w in online_workers:
+            if w.maintenance_status == "maintenance":
+                continue
+            # Find this worker's approved baseline
+            node_baseline = approved.get(w.worker_id)
+            if not node_baseline:
+                # No baseline for this worker — fail-closed
+                continue
+            fp = node_baseline.get("fingerprint", {})
+            node_specific = fp.get("node_specific", {}).get(w.worker_id, {})
+            # Check each required tool
+            has_all = True
+            for tool in required_tools:
+                if tool == "ripgrep":
+                    rg_status = node_specific.get("ripgrep", "UNKNOWN")
+                    if rg_status in ("UNKNOWN", None, ""):
+                        has_all = False  # fail-closed on unknown
+                    elif rg_status == "NOT_INSTALLED":
+                        has_all = False
+                    # else: version string means installed
+                else:
+                    # Unknown tool requirement — fail-closed
+                    has_all = False
+                    break
+            if has_all:
+                capable.append(w.worker_id)
+
+        if not capable:
+            return {"blocked": True,
+                    "reason": f"no_worker_has_all_tools_{required_tools}",
+                    "capable_workers": []}
+        return {"blocked": False, "reason": "ok", "capable_workers": capable}
+
     def schedule(self, task_type: str = "linux-worker",
                  branch: Optional[str] = None,
                  requires_merge: bool = False,
-                 model: Optional[str] = None) -> dict:
+                 model: Optional[str] = None,
+                 required_tools: Optional[list] = None) -> dict:
         """Schedule a task to the best available worker.
 
         V2.3.0: Lifecycle gate check before any scheduling.
@@ -112,6 +175,20 @@ class SchedulerPolicy:
                     "health_reason": mh.health_reason,
                     "pending": True,
                     "pending_reason": f"model_{model}_quarantined_{mh.health_reason}",
+                }
+
+        # Capability-aware tool filtering (V1.17.7.2)
+        if required_tools:
+            cap_result = self._filter_by_capabilities(required_tools)
+            if cap_result.get("blocked"):
+                return {
+                    "worker_id": None,
+                    "selection_reason": f"capability_blocked: {cap_result.get('reason')}",
+                    "task_type": task_type,
+                    "required_tools": required_tools,
+                    "capability_detail": cap_result,
+                    "pending": True,
+                    "pending_reason": f"no_capable_worker_for_{required_tools}",
                 }
 
         # Select worker
