@@ -21,8 +21,10 @@ sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent))
 from vibe_worker_registry import WorkerRegistry, WorkerNode, NodeStatus, TaskType
 try:
     from vibe_toolchain_lifecycle import gate_check_for_dispatch
+    _LIFECYCLE_GATE_AVAILABLE = True
 except ImportError:
     gate_check_for_dispatch = None
+    _LIFECYCLE_GATE_AVAILABLE = False
 
 
 
@@ -50,7 +52,17 @@ class SchedulerPolicy:
         """
         # Lifecycle gate check (V2.3.0)
         write_task_types = {"linux-worker", "implementer", "reviewer"}
-        if gate_check_for_dispatch and task_type in write_task_types:
+        if task_type in write_task_types:
+            if not _LIFECYCLE_GATE_AVAILABLE:
+                return {
+                    "worker_id": None,
+                    "selection_reason": "lifecycle_gate_import_failed",
+                    "task_type": task_type,
+                    "branch_locked": False,
+                    "merge_locked": False,
+                    "pending": True,
+                    "pending_reason": "lifecycle_gate_unavailable_fail_closed",
+                }
             gate = gate_check_for_dispatch()
             if not gate.get("allowed"):
                 return {
