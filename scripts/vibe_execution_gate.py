@@ -21,7 +21,12 @@ import os
 import sys
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+
+try:
+    from vibe_toolchain_lifecycle import gate_check_for_dispatch
+except ImportError:
+    gate_check_for_dispatch = None
 
 # High-risk forbidden actions that trigger BLOCK
 HIGH_RISK_ACTIONS = {
