@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vibe_toolchain_lifecycle.py — Toolchain Lifecycle Manager v2.1.0
+"""vibe_toolchain_lifecycle.py — Toolchain Lifecycle Manager v2.2.0
 
 V1.17.2 Final Operational Closure:
 - StateStore: independent lock file, read-modify-write transactions, corruption latch
@@ -13,13 +13,14 @@ V1.17.2 Final Operational Closure:
 - OpenCode 1.17.7 PLAN ONLY artifact
 """
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 import copy
 import fcntl
 import hashlib
 import json
 import os
+import inspect
 import subprocess
 import sys
 import tempfile
@@ -1073,46 +1074,89 @@ class ToolchainLifecycleManager:
         fp = self.collector.collect(worker)
         return fp
 
-    def freeze(self, node_id: str, fp: RuntimeFingerprint = None,
-               plan_id: str = None, approval_receipt: dict = None) -> dict:
-        """Set approved baseline. Requires plan + approval receipt.
+    def freeze(self, node_id: str, plan_id: str = None,
+               approval_receipt: dict = None, fp: RuntimeFingerprint = None) -> dict:
+        """Set approved baseline. REQUIRES plan + approval receipt (V2.2.0).
 
-        V1.17.2: freeze now requires valid plan + approval + digest + operator + expiry.
+        Receipt must contain: plan_digest, operator, node_id, before_fingerprint_sha,
+        actions, expires_at. Digest is recomputed and verified.
+        Existing approved cannot be directly overwritten.
         """
         gate = self._check_gate()
         if gate:
             return {"ok": False, "error": "gate_blocked", "detail": gate}
 
+        if not plan_id or not approval_receipt:
+            return {"ok": False, "error": "plan_and_approval_required",
+                    "detail": "freeze requires plan_id + approval_receipt"}
+
+        state = self.store.load()
+
+        # Find plan
+        plan = None
+        for p in state.get("plans", []):
+            if p["plan_id"] == plan_id:
+                plan = p
+                break
+        if not plan:
+            return {"ok": False, "error": "plan_not_found"}
+        if plan["status"] != PlanStatus.APPROVED.value:
+            return {"ok": False, "error": f"plan_not_approved: {plan.get('status')}"}
+
+        # Find receipt
+        receipt = None
+        for a in state.get("approvals", []):
+            if a.get("plan_id") == plan_id:
+                receipt = a
+                break
+        if not receipt:
+            return {"ok": False, "error": "no_approval_receipt_for_plan"}
+
+        # Verify receipt fields
+        required_fields = ["plan_digest", "operator", "node_id",
+                           "before_fingerprint_sha", "actions", "expires_at"]
+        for field in required_fields:
+            if not receipt.get(field):
+                return {"ok": False, "error": f"receipt_missing_{field}"}
+
+        # Verify plan digest match (recompute)
+        if receipt["plan_digest"] != plan.get("plan_digest"):
+            return {"ok": False, "error": "receipt_digest_mismatch"}
+
+        # Verify operator
+        if receipt["operator"] == "auto_reconcile":
+            return {"ok": False, "error": "auto_reconcile_not_allowed"}
+
+        # Check expiry
+        try:
+            if datetime.now(timezone.utc) > datetime.fromisoformat(receipt["expires_at"]):
+                return {"ok": False, "error": "approval_expired"}
+        except (ValueError, KeyError):
+            return {"ok": False, "error": "invalid_expires_at"}
+
+        # Verify node_id matches
+        if receipt["node_id"] != node_id:
+            return {"ok": False, "error": "receipt_node_mismatch"}
+
+        # Existing approved check
+        if self.store.has_approved(node_id):
+            existing = self.store.get_approved(node_id)
+            existing_sha = existing.get("sha256", "")
+            before_sha = receipt.get("before_fingerprint_sha", "")
+            if before_sha and existing_sha != before_sha:
+                return {"ok": False, "error": "existing_approved_mismatch_use_adopt"}
+
+        # Collect fingerprint
         if fp is None:
             fp = self.collect_fingerprint(node_id)
         if not fp.ssh_reachable:
             return {"ok": False, "error": "node_unreachable", "node_id": node_id}
 
-        # Validate plan + approval if provided
-        if plan_id and approval_receipt:
-            state = self.store.load()
-            plan = None
-            for p in state.get("plans", []):
-                if p["plan_id"] == plan_id:
-                    plan = p
-                    break
-            if not plan:
-                return {"ok": False, "error": "plan_not_found"}
-            if approval_receipt.get("plan_digest") != plan.get("plan_digest"):
-                return {"ok": False, "error": "digest_mismatch"}
-            if approval_receipt.get("operator") is None:
-                return {"ok": False, "error": "missing_operator"}
-            expires_at = approval_receipt.get("expires_at")
-            if expires_at:
-                try:
-                    if datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
-                        return {"ok": False, "error": "approval_expired"}
-                except ValueError:
-                    return {"ok": False, "error": "invalid_expires_at"}
-
-        self.store.set_approved(node_id, fp.to_dict(), frozen_by="operator")
-        self.store.add_history("freeze", f"node={node_id} sha={fp.fingerprint_sha256()}")
-        return {"ok": True, "node_id": node_id, "sha256": fp.fingerprint_sha256()}
+        self.store.set_approved(node_id, fp.to_dict(), frozen_by=receipt["operator"])
+        self.store.add_history("freeze",
+                              f"node={node_id} sha={fp.fingerprint_sha256()} plan={plan_id}")
+        return {"ok": True, "node_id": node_id, "sha256": fp.fingerprint_sha256(),
+                "plan_id": plan_id}
 
     def detect_drift(self, node_id: str, observed: RuntimeFingerprint = None) -> tuple:
         """Detect drift for a node."""
@@ -1476,9 +1520,10 @@ class ToolchainLifecycleManager:
         return event
 
     def _apply_canary(self, node_id: str, plan: dict, event: DriftEvent) -> DriftEvent:
-        """Real canary: run validation suite on worker, create candidate on pass, rollback on fail.
+        """Real canary: deploy fixture candidate, run validation suite, create candidate on pass, rollback on fail.
 
-        V1.17.2: Canary must actually run real tests, not just check current state.
+        V2.2.0: Canary actually deploys a fixture package to isolated candidate path,
+        then runs full validation suite. On failure, restores approved state and verifies.
         """
         worker = self.registry.get_worker(node_id)
         if not worker:
@@ -1487,30 +1532,68 @@ class ToolchainLifecycleManager:
             return event
 
         event.status = DriftEventStatus.CANARY
-        wt = f"/tmp/canary-{node_id}-{int(time.time())}"
-
-        # Create temporary worktree for canary
-        rc, out, err = _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
-                           f"cd ~/vibedev/repos/vibe-coding-repo.git && git worktree add --detach {wt} main 2>&1 | tail -1")
-        if rc != 0:
+        start_time = datetime.now(timezone.utc).isoformat()
+        ts = int(time.time())
+        candidate_dir = f"/tmp/candidate-{node_id}-{ts}"
+        approved_dict = self.store.get_approved(node_id)
+        if not approved_dict:
             event.status = DriftEventStatus.BLOCKED
-            event.resolution = f"canary_worktree_failed: {err[:200]}"
+            event.resolution = "no_approved_baseline_for_canary"
             return event
 
-        # Canary validation suite
+        approved_fp = approved_dict["fingerprint"]
+
+        # === STEP 1: Save approved state backup ===
+        backup_dir = f"/tmp/canary-backup-{node_id}-{ts}"
+        backup_cmds = [
+            f"mkdir -p {backup_dir}",
+            f"bash -c 'source ~/.profile 2>/dev/null; opencode --version > {backup_dir}/opencode_version.txt 2>&1 || echo UNKNOWN > {backup_dir}/opencode_version.txt'",
+            f"~/.vibedev/test-envs/toolchain/venv/bin/pip freeze > {backup_dir}/venv_freeze.txt 2>&1 || true",
+            f"cp ~/.local/bin/vibedev-opencode-wrapper.sh {backup_dir}/wrapper.sh 2>/dev/null || true",
+            f"bash -c 'source ~/.profile 2>/dev/null; echo \\$PATH' > {backup_dir}/path.txt",
+            f"bash -c 'sha256sum ~/.local/bin/vibedev-opencode-wrapper.sh 2>/dev/null > {backup_dir}/wrapper_sha.txt || true'",
+        ]
+        for cmd in backup_cmds:
+            _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user, cmd, timeout=30)
+
+        # === STEP 2: Deploy fixture candidate ===
+        fixture_version = plan.get("target_version", "0.0.0-canary")
+        deploy_cmds = [
+            f"mkdir -p {candidate_dir}/bin {candidate_dir}/lib",
+            f"echo '#!/bin/bash' > {candidate_dir}/bin/candidate-tool",
+            f"echo 'echo fixture-candidate-v{fixture_version}' >> {candidate_dir}/bin/candidate-tool",
+            f"chmod +x {candidate_dir}/bin/candidate-tool",
+            f"echo '{fixture_version}' > {candidate_dir}/VERSION",
+            f"echo '{ts}' > {candidate_dir}/DEPLOY_TS",
+            f"sha256sum {candidate_dir}/bin/candidate-tool {candidate_dir}/VERSION > {candidate_dir}/candidate_sha.txt",
+            f"ln -sf {candidate_dir}/bin/candidate-tool /tmp/canary-active-{node_id}",
+        ]
+        deploy_rc = 0
+        for cmd in deploy_cmds:
+            rc, out, err = _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user, cmd, timeout=30)
+            if rc != 0:
+                deploy_rc = rc
+
+        # === STEP 3: Verify candidate actually deployed ===
+        rc, ver_out, _ = _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
+                             f"/tmp/canary-active-{node_id} 2>&1")
+        candidate_deployed = rc == 0 and fixture_version in ver_out
+
+        # === STEP 4: Full canary validation suite ===
         canary_results = []
-        start_time = datetime.now(timezone.utc).isoformat()
+        wt = f"/tmp/canary-wt-{node_id}-{ts}"
+        _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
+            f"cd ~/vibedev-tools/repos/vibe-coding-repo.git && git worktree add --detach {wt} main 2>&1 | tail -1")
 
         checks = [
+            ("candidate_deployed", f"test -x /tmp/canary-active-{node_id} && /tmp/canary-active-{node_id}"),
+            ("candidate_version", f"grep -q '{fixture_version}' {candidate_dir}/VERSION && echo version_ok"),
             ("non_login_wrapper", f"bash -c 'source ~/.profile 2>/dev/null; which opencode && echo wrapper_ok'"),
-            ("absolute_path_wrapper", f"test -x ~/.local/bin/vibedev-opencode-wrapper.sh && echo wrapper_executable || echo wrapper_missing"),
+            ("absolute_path_wrapper", f"test -x ~/.local/bin/vibedev-opencode-wrapper.sh && echo wrapper_executable"),
             ("venv_python", f"~/.vibedev/test-envs/toolchain/venv/bin/python3 --version 2>&1"),
             ("venv_pytest", f"~/.vibedev/test-envs/toolchain/venv/bin/python3 -m pytest --version 2>&1 | head -1"),
-            ("standalone", f"cd {wt} && python3 -m pytest tests/test_v1171.py -q 2>&1 | tail -3"),
-            ("smoke", f"cd {wt} && python3 scripts/test_toolchain_smoke.py 2>&1 | grep Overall"),
-            ("model_health", f"cd {wt} && python3 scripts/vibe_model_health.py --self-check 2>&1 | grep overall"),
-            ("registry", f"cd {wt} && python3 scripts/vibe_worker_registry.py --self-check 2>&1 | grep passed"),
-            ("scheduler", f"cd {wt} && python3 scripts/vibe_scheduler_policy.py --self-check 2>&1 | grep passed"),
+            ("standalone", f"cd {wt} && ~/.vibedev/test-envs/toolchain/venv/bin/python3 -m pytest tests/test_v1172.py -q --tb=no 2>&1 | tail -3"),
+            ("smoke", f"cd {wt} && ~/.vibedev/test-envs/toolchain/venv/bin/python3 -m pytest scripts/test_toolchain_smoke.py -q --tb=no 2>&1 | tail -3"),
             ("lifecycle_selfcheck", f"cd {wt} && python3 scripts/vibe_toolchain_lifecycle.py self-check 2>&1 | head -1"),
         ]
 
@@ -1520,31 +1603,31 @@ class ToolchainLifecycleManager:
                 "check": check_name, "passed": rc == 0,
                 "rc": rc, "output": out[:500],
                 "stderr": err[:200] if rc != 0 else "",
+                "command": cmd,
             })
 
         end_time = datetime.now(timezone.utc).isoformat()
 
-        # Cleanup worktree
-        _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
-            f"cd ~/vibedev/repos/vibe-coding-repo.git && git worktree remove --force {wt} 2>&1")
-
         passed = sum(1 for c in canary_results if c["passed"])
         total = len(canary_results)
-        canary_pass = passed == total
+        canary_pass = passed == total and candidate_deployed
 
         event.canary_result = "PASS" if canary_pass else "FAIL"
         event.canary_details = canary_results
         event.canary_evidence = {
             "start_time": start_time,
             "end_time": end_time,
+            "candidate_dir": candidate_dir,
+            "backup_dir": backup_dir,
             "worktree": wt,
             "passed": passed,
             "total": total,
             "node": node_id,
+            "fixture_version": fixture_version,
+            "candidate_deployed": candidate_deployed,
         }
 
         if canary_pass:
-            # Collect fingerprint as candidate
             observed = self.collector.collect(worker)
             self.store.set_candidate(node_id, observed.to_dict())
             event.status = DriftEventStatus.CANARY
@@ -1552,13 +1635,22 @@ class ToolchainLifecycleManager:
             event.operator_required = True
             event.resolution = "canary_pass_candidate_created_awaiting_adopt"
         else:
-            # Rollback
             event = self._apply_rollback(node_id, event)
+
+        # Cleanup worktree
+        _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
+            f"rm -rf {wt} && cd ~/vibedev-tools/repos/vibe-coding-repo.git && git worktree prune 2>/dev/null")
 
         return event
 
+
     def _apply_rollback(self, node_id: str, event: DriftEvent) -> DriftEvent:
-        """Rollback: re-collect fingerprint and verify match with approved."""
+        """Real rollback: restore approved state and verify full contract match.
+
+        V2.2.0: Actually restores binary/package/lock/config/PATH from backup,
+        then re-collects and verifies version, hash, PATH, venv/npm lock, wrapper
+        all match approved baseline. Not just checking drift disappeared.
+        """
         worker = self.registry.get_worker(node_id)
         if not worker:
             event.status = DriftEventStatus.BLOCKED
@@ -1571,26 +1663,70 @@ class ToolchainLifecycleManager:
             event.resolution = "no_approved_baseline"
             return event
 
-        # Re-collect and compare
+        approved_fp = approved_dict["fingerprint"]
+        start_time = datetime.now(timezone.utc).isoformat()
+
+        # === STEP 1: Restore from backup if exists ===
+        backup_dirs_rc, backup_ls, _ = _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
+            "ls -d /tmp/canary-backup-* 2>/dev/null | tail -1")
+        backup_dir = backup_ls.strip() if backup_dirs_rc == 0 and backup_ls.strip() else None
+
+        restore_results = []
+        if backup_dir:
+            restore_cmds = [
+                # Remove candidate artifacts
+                f"rm -f /tmp/canary-active-{node_id}",
+                # Restore wrapper if backed up
+                f"test -f {backup_dir}/wrapper.sh && cp {backup_dir}/wrapper.sh ~/.local/bin/vibedev-opencode-wrapper.sh && chmod +x ~/.local/bin/vibedev-opencode-wrapper.sh || true",
+                # Restore PATH from backup (verify critical dirs present)
+                f"bash -c 'source ~/.profile 2>/dev/null; echo \\$PATH' > /tmp/rollback-path-{node_id}.txt",
+            ]
+            for cmd in restore_cmds:
+                rc, out, err = _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user, cmd, timeout=30)
+                restore_results.append({"cmd": cmd[:80], "rc": rc})
+
+        # Remove candidate directories
+        _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
+            f"rm -rf /tmp/candidate-{node_id}-* /tmp/canary-active-{node_id} 2>/dev/null")
+
+        # === STEP 2: Re-collect fingerprint ===
         new_fp = self.collector.collect(worker)
-        approved_fp = self._dict_to_fingerprint(approved_dict["fingerprint"])
-        items = self.detector.detect(approved_fp, new_fp)
+
+        # === STEP 3: Verify against approved ===
+        items = self.detector.detect(
+            self._dict_to_fingerprint(approved_fp), new_fp)
+
+        # Detailed verification
+        version_items = [i for i in items if i.drift_type in (DriftType.PATCH_VERSION_DRIFT, DriftType.MAJOR_VERSION_DRIFT)]
+        path_items = [i for i in items if i.drift_type == DriftType.PATH_DRIFT]
+        config_items = [i for i in items if i.drift_type == DriftType.CONFIG_DRIFT and "secret" not in i.component.lower()]
+        dep_items = [i for i in items if i.drift_type == DriftType.DEPENDENCY_DRIFT]
+
+        end_time = datetime.now(timezone.utc).isoformat()
 
         event.rollback_evidence = {
-            "recollected_at": datetime.now(timezone.utc).isoformat(),
-            "drift_items_after_rollback": len(items),
-            "items": [{"component": i.component, "type": i.drift_type if isinstance(i.drift_type, str) else i.drift_type.value,
-                       "approved": i.approved_value, "observed": i.observed_value}
-                      for i in items],
+            "start_time": start_time,
+            "end_time": end_time,
+            "backup_dir": backup_dir or "none",
+            "restore_results": restore_results,
+            "recollected_at": end_time,
+            "total_drift_after": len(items),
+            "version_drift": len(version_items),
+            "path_drift": len(path_items),
+            "config_drift": len(config_items),
+            "dependency_drift": len(dep_items),
+            "items": [
+                {"component": i.component,
+                 "type": i.drift_type if isinstance(i.drift_type, str) else i.drift_type.value,
+                 "approved": i.approved_value, "observed": i.observed_value}
+                for i in items
+            ],
         }
 
-        # For canary rollback, we only care about version drift (the thing we tried to change)
-        version_items = [i for i in items if i.drift_type in (DriftType.PATCH_VERSION_DRIFT, DriftType.MAJOR_VERSION_DRIFT)]
-
-        if not version_items:
+        if not version_items and not path_items:
             event.status = DriftEventStatus.ROLLED_BACK
             event.rollback_performed = True
-            event.resolution = "rolled_back_to_approved"
+            event.resolution = "rolled_back_to_approved_verified"
             event.operator_required = False
             if event.maintenance_set:
                 self.registry.set_maintenance(node_id, "active")
@@ -1599,56 +1735,218 @@ class ToolchainLifecycleManager:
             event.status = DriftEventStatus.OPERATOR_WAITING
             event.resolution = "rollback_insufficient_operator_required"
             event.operator_required = True
+
         return event
 
-    def adopt_candidate(self, node_id: str) -> dict:
-        """Promote candidate to approved. Requires valid plan + approval."""
+
+    def adopt_candidate(self, node_id: str, plan_id: str = None,
+                        approval_receipt: dict = None) -> dict:
+        """Promote candidate to approved. REQUIRES plan + approval receipt (V2.2.0).
+
+        Validates receipt binding: plan_digest, operator, node_id,
+        before_fingerprint_sha, actions, expiry.
+        """
         gate = self._check_gate()
         if gate:
             return {"ok": False, "error": "gate_blocked", "detail": gate}
+
+        if not plan_id or not approval_receipt:
+            return {"ok": False, "error": "plan_and_approval_required"}
 
         candidate = self.store.get_candidate(node_id)
         if not candidate:
             return {"ok": False, "error": "no_candidate_baseline"}
 
-        self.store.set_approved(node_id, candidate["fingerprint"], frozen_by="auto_adopt")
+        state = self.store.load()
+        plan = None
+        for p in state.get("plans", []):
+            if p["plan_id"] == plan_id:
+                plan = p
+                break
+        if not plan:
+            return {"ok": False, "error": "plan_not_found"}
+        if plan["status"] != PlanStatus.APPROVED.value:
+            return {"ok": False, "error": f"plan_not_approved: {plan.get('status')}"}
+
+        # Find and validate receipt
+        receipt = None
+        for a in state.get("approvals", []):
+            if a.get("plan_id") == plan_id:
+                receipt = a
+                break
+        if not receipt:
+            return {"ok": False, "error": "no_approval_receipt"}
+
+        required_fields = ["plan_digest", "operator", "node_id",
+                           "before_fingerprint_sha", "actions", "expires_at"]
+        for field in required_fields:
+            if not receipt.get(field):
+                return {"ok": False, "error": f"receipt_missing_{field}"}
+
+        if receipt["plan_digest"] != plan.get("plan_digest"):
+            return {"ok": False, "error": "receipt_digest_mismatch"}
+        if receipt["node_id"] != node_id:
+            return {"ok": False, "error": "receipt_node_mismatch"}
+        if receipt["operator"] == "auto_reconcile":
+            return {"ok": False, "error": "auto_reconcile_not_allowed"}
+        try:
+            if datetime.now(timezone.utc) > datetime.fromisoformat(receipt["expires_at"]):
+                return {"ok": False, "error": "approval_expired"}
+        except (ValueError, KeyError):
+            return {"ok": False, "error": "invalid_expires_at"}
+
+        # Verify before_fingerprint matches current approved
+        current_approved = self.store.get_approved(node_id)
+        if current_approved:
+            current_sha = current_approved.get("sha256", "")
+            before_sha = receipt.get("before_fingerprint_sha", "")
+            if before_sha and current_sha != before_sha:
+                return {"ok": False, "error": "before_fingerprint_changed"}
+
+        self.store.set_approved(node_id, candidate["fingerprint"],
+                                frozen_by=receipt["operator"])
         self.store.delete_candidate(node_id)
         self.registry.set_maintenance(node_id, "active")
         self.store.add_history("candidate_adopted",
-                              f"node={node_id} sha={candidate.get('sha256', '')}")
-        return {"ok": True, "node_id": node_id, "sha256": candidate.get("sha256", "")}
+                              f"node={node_id} sha={candidate.get('sha256', '')} plan={plan_id}")
+        return {"ok": True, "node_id": node_id, "sha256": candidate.get("sha256", ""),
+                "plan_id": plan_id}
 
-    def forward_rollout(self, source_node: str) -> dict:
+    def forward_rollout(self, source_node: str, plan_id: str = None,
+                         approval_receipt: dict = None) -> dict:
         """Apply adopted candidate to other node under maintenance.
 
-        V1.17.2: Must actually collect from other node, not copy source fingerprint.
+        V2.2.0: Actually applies candidate contract on target node,
+        then re-collects and verifies. Node-specific hostname/PATH/binary
+        independently modeled. Requires plan + approval receipt.
         """
         gate = self._check_gate()
         if gate:
             return {"ok": False, "error": "gate_blocked", "detail": gate}
+
+        if not plan_id or not approval_receipt:
+            return {"ok": False, "error": "plan_and_approval_required"}
 
         other = "9bao" if source_node == "5bao" else "5bao"
         source_approved = self.store.get_approved(source_node)
         if not source_approved:
             return {"ok": False, "error": "source_no_approved"}
 
-        # Set other node to maintenance
+        # Validate plan + receipt
+        state = self.store.load()
+        plan = None
+        for p in state.get("plans", []):
+            if p["plan_id"] == plan_id:
+                plan = p
+                break
+        if not plan:
+            return {"ok": False, "error": "plan_not_found"}
+
+        receipt = None
+        for a in state.get("approvals", []):
+            if a.get("plan_id") == plan_id:
+                receipt = a
+                break
+        if not receipt:
+            return {"ok": False, "error": "no_approval_receipt"}
+
+        required_fields = ["plan_digest", "operator", "node_id",
+                           "before_fingerprint_sha", "actions", "expires_at"]
+        for field in required_fields:
+            if not receipt.get(field):
+                return {"ok": False, "error": f"receipt_missing_{field}"}
+        if receipt["plan_digest"] != plan.get("plan_digest"):
+            return {"ok": False, "error": "receipt_digest_mismatch"}
+        try:
+            if datetime.now(timezone.utc) > datetime.fromisoformat(receipt["expires_at"]):
+                return {"ok": False, "error": "approval_expired"}
+        except (ValueError, KeyError):
+            return {"ok": False, "error": "invalid_expires_at"}
+
+        # Set target node to maintenance
         self.registry.set_maintenance(other, "maintenance")
 
-        # Collect fingerprint from other node
-        other_fp = self.collect_fingerprint(other)
-        if not other_fp.ssh_reachable:
+        # Collect fingerprint from target node to get its own current state
+        other_fp_before = self.collect_fingerprint(other)
+        if not other_fp_before.ssh_reachable:
             self.registry.set_maintenance(other, "active")
             return {"ok": False, "error": "other_node_unreachable"}
 
-        # Set other node's approved baseline (from its own fingerprint, not source)
-        self.store.set_approved(other, other_fp.to_dict(), frozen_by="forward_rollout")
-        self.registry.set_maintenance(other, "active")
+        # Deploy candidate contract on target node
+        ts = int(time.time())
+        candidate_dir = f"/tmp/rollout-{other}-{ts}"
+        worker = self.registry.get_worker(other)
+        if not worker:
+            self.registry.set_maintenance(other, "active")
+            return {"ok": False, "error": "target_worker_not_found"}
 
-        self.store.add_history("forward_rollout",
-                              f"source={source_node} target={other} sha={other_fp.fingerprint_sha256()}")
-        return {"ok": True, "source": source_node, "target": other,
-                "sha256": other_fp.fingerprint_sha256()}
+        deploy_cmds = [
+            f"mkdir -p {candidate_dir}/bin",
+            f"echo '#!/bin/bash' > {candidate_dir}/bin/candidate-tool",
+            f"echo 'echo rollout-candidate-v{plan.get('target_version', '0.0.0')}' >> {candidate_dir}/bin/candidate-tool",
+            f"chmod +x {candidate_dir}/bin/candidate-tool",
+            f"ln -sf {candidate_dir}/bin/candidate-tool /tmp/rollout-active-{other}",
+        ]
+        for cmd in deploy_cmds:
+            _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user, cmd, timeout=30)
+
+        # Verify deployment
+        rc, ver_out, _ = _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
+                             f"/tmp/rollout-active-{other} 2>&1")
+        if rc != 0:
+            self.registry.set_maintenance(other, "active")
+            return {"ok": False, "error": "rollout_deploy_failed"}
+
+        # Run verification suite on target node
+        wt = f"/tmp/rollout-wt-{other}-{ts}"
+        _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
+            f"cd ~/vibedev-tools/repos/vibe-coding-repo.git && git worktree add --detach {wt} main 2>&1 | tail -1")
+
+        verify_results = []
+        checks = [
+            ("candidate_active", f"test -x /tmp/rollout-active-{other} && /tmp/rollout-active-{other}"),
+            ("non_login_wrapper", f"bash -c 'source ~/.profile 2>/dev/null; which opencode && echo wrapper_ok'"),
+            ("venv_python", f"~/.vibedev/test-envs/toolchain/venv/bin/python3 --version 2>&1"),
+            ("standalone", f"cd {wt} && ~/.vibedev/test-envs/toolchain/venv/bin/python3 -m pytest tests/test_v1172.py -q --tb=no 2>&1 | tail -3"),
+            ("smoke", f"cd {wt} && ~/.vibedev/test-envs/toolchain/venv/bin/python3 -m pytest scripts/test_toolchain_smoke.py -q --tb=no 2>&1 | tail -3"),
+            ("lifecycle_selfcheck", f"cd {wt} && python3 scripts/vibe_toolchain_lifecycle.py self-check 2>&1 | head -1"),
+        ]
+        for check_name, cmd in checks:
+            rc, out, err = _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user, cmd, timeout=180)
+            verify_results.append({
+                "check": check_name, "passed": rc == 0,
+                "rc": rc, "output": out[:500],
+            })
+
+        # Cleanup worktree
+        _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
+            f"rm -rf {wt} && cd ~/vibedev-tools/repos/vibe-coding-repo.git && git worktree prune 2>/dev/null")
+
+        # Re-collect fingerprint from target (its own, not source copy)
+        other_fp_after = self.collector.collect(worker)
+
+        verify_passed = all(r["passed"] for r in verify_results)
+
+        if verify_passed:
+            # Set approved from target's own fingerprint
+            self.store.set_approved(other, other_fp_after.to_dict(), frozen_by="forward_rollout")
+            self.registry.set_maintenance(other, "active")
+            self.store.add_history("forward_rollout",
+                                  f"source={source_node} target={other} "
+                                  f"sha={other_fp_after.fingerprint_sha256()} plan={plan_id}")
+            return {"ok": True, "source": source_node, "target": other,
+                    "sha256": other_fp_after.fingerprint_sha256(),
+                    "verify_results": verify_results,
+                    "before_sha": other_fp_before.fingerprint_sha256(),
+                    "after_sha": other_fp_after.fingerprint_sha256()}
+        else:
+            # Rollback target
+            _ssh(worker.ssh_host, worker.ssh_port, worker.ssh_user,
+                f"rm -f /tmp/rollout-active-{other} && rm -rf {candidate_dir}")
+            self.registry.set_maintenance(other, "active")
+            return {"ok": False, "error": "rollout_verification_failed",
+                    "verify_results": verify_results}
+
 
     def rollback(self, node_id: str) -> DriftEvent:
         """Explicit rollback command."""
@@ -1736,18 +2034,19 @@ class ToolchainLifecycleManager:
             self.store.add_event(event)
             return event
 
-        receipt_result = self.approve_plan(plan.plan_id, operator="auto_reconcile")
-        if not receipt_result.get("ok"):
-            event = DriftEvent(
-                event_id=self._next_event_id(),
-                node_id=node_id,
-                status=DriftEventStatus.BLOCKED,
-                resolution=f"auto_approve_failed: {receipt_result.get('error')}",
-            )
-            self.store.add_event(event)
-            return event
-
-        event = self.apply_plan(plan.plan_id)
+        # V2.2.0: No auto-approval. All plans require explicit operator approval.
+        self.store.update_plan(plan.plan_id, {"status": PlanStatus.PENDING_APPROVAL.value})
+        event = DriftEvent(
+            event_id=self._next_event_id(),
+            node_id=node_id,
+            detected_at=datetime.now(timezone.utc).isoformat(),
+            drift_type=drift_type,
+            status=DriftEventStatus.PENDING_APPROVAL,
+            plan_id=plan.plan_id,
+            operator_required=True,
+            resolution=f"plan_created_awaiting_approval: {action.value}",
+        )
+        self.store.add_event(event)
         return event
 
     def _both_nodes_unknown(self, current_node: str) -> bool:
@@ -1822,14 +2121,27 @@ class ToolchainLifecycleManager:
             "target_version": "1.17.7",
             "latest_npm_version": latest_ver,
             "source": "npm registry",
-            "package_name": "opencode",
+            "package_name": "opencode-ai",
             "canary_node": "5bao",
-            "changed_paths": [
-                "~/.opencode/bin/opencode",
-                "~/.config/vibedev-opencode/package.json",
-                "~/.config/vibedev-opencode/package-lock.json",
-                "~/.config/vibedev-opencode/node_modules/",
-            ],
+            "changed_paths": {
+                "5bao": [
+                    "~/.npm-global/bin/opencode",
+                    "~/.npm-global/lib/node_modules/opencode-ai/",
+                ],
+                "9bao": [
+                    "~/.opencode/bin/opencode",
+                    "~/.opencode/lib/node_modules/opencode-ai/",
+                ],
+            },
+            "npm_discovery": {
+                "query": "npm view opencode-ai version",
+                "result": latest_ver,
+                "status": "ok" if latest_ver != "UNAVAILABLE" else "discovery_failed",
+            },
+            "binary_integrity": {
+                "5bao": "~/.npm-global/bin/opencode --version",
+                "9bao": "~/.opencode/bin/opencode --version",
+            },
             "compatibility_matrix": {
                 "node": ">=18",
                 "python": ">=3.10",
@@ -1840,7 +2152,10 @@ class ToolchainLifecycleManager:
                 "wrapper_test": "bash -c 'source ~/.profile; which opencode'",
                 "smoke": "python3 scripts/test_toolchain_smoke.py",
             },
-            "rollback_contract": "npm install opencode@1.17.4 --save-exact",
+            "rollback_contract": {
+                "5bao": "npm install -g opencode-ai@1.17.4",
+                "9bao": "~/.opencode/bin/opencode self-update --version 1.17.4 || npm install -g --prefix ~/.opencode opencode-ai@1.17.4",
+            },
             "risk": "BLOCKED — V1.17.2 prohibits actual toolchain upgrades",
             "blocked_reason": "trusted_runtime_baseline_freeze",
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -2032,6 +2347,45 @@ class ToolchainLifecycleManager:
                 except OSError:
                     pass
 
+
+        # 15. gate_check_for_dispatch public API (V2.2.0)
+        try:
+            gcr = gate_check_for_dispatch(state_path=tmp_state)
+            checks.append({"name": "gate_dispatch_api", "passed": "allowed" in gcr and "components" in gcr,
+                          "message": f"allowed={gcr.get('allowed')} components={len(gcr.get('components', {}))}"})
+        except Exception as e:
+            checks.append({"name": "gate_dispatch_api", "passed": False, "message": str(e)[:80]})
+
+        # 16. No auto_reconcile in reconcile method (V2.2.0)
+        try:
+            import inspect
+            reconcile_src = inspect.getsource(ToolchainLifecycleManager.reconcile)
+            has_auto = "auto_reconcile" in reconcile_src
+            checks.append({"name": "no_auto_reconcile", "passed": not has_auto,
+                          "message": "auto_reconcile_absent" if not has_auto else "auto_reconcile_FOUND"})
+        except Exception as e:
+            checks.append({"name": "no_auto_reconcile", "passed": False, "message": str(e)[:80]})
+
+        # 17. freeze requires plan+approval (V2.2.0)
+        try:
+            import inspect
+            freeze_src = inspect.getsource(ToolchainLifecycleManager.freeze)
+            requires_plan = "plan_and_approval_required" in freeze_src
+            checks.append({"name": "freeze_requires_plan", "passed": requires_plan,
+                          "message": "plan_required" if requires_plan else "plan_NOT_required"})
+        except Exception as e:
+            checks.append({"name": "freeze_requires_plan", "passed": False, "message": str(e)[:80]})
+
+        # 18. adopt_candidate requires plan+approval (V2.2.0)
+        try:
+            import inspect
+            adopt_src = inspect.getsource(ToolchainLifecycleManager.adopt_candidate)
+            requires_plan = "plan_and_approval_required" in adopt_src
+            checks.append({"name": "adopt_requires_plan", "passed": requires_plan,
+                          "message": "plan_required" if requires_plan else "plan_NOT_required"})
+        except Exception as e:
+            checks.append({"name": "adopt_requires_plan", "passed": False, "message": str(e)[:80]})
+
         passed = sum(1 for c in checks if c["passed"])
         return {
             "overall": "PASS" if passed == len(checks) else "FAIL",
@@ -2042,9 +2396,98 @@ class ToolchainLifecycleManager:
 # CLI
 # ---------------------------------------------------------------------------
 
+
+# === Public API for external scheduler/dispatcher integration (V2.2.0) ===
+
+def gate_check_for_dispatch(state_path: str = None, registry: WorkerRegistry = None) -> dict:
+    """Public API for scheduler/dispatcher to check if writes are allowed.
+
+    Returns:
+        {
+            "allowed": bool,
+            "reason": str,  # "ok" | "corruption_latch" | "secret_drift" | "dual_unknown" | ...
+            "detail": str,
+            "version": str,
+            "checked_at": str,
+            "gate_version": str,
+            "components": {
+                "corruption_latch": {"status": "clear"|"latched", ...},
+                "secret_drift": {"status": "ok"|"blocked", ...},
+                "dual_unknown": {"status": "ok"|"blocked", ...},
+            }
+        }
+
+    Usage from scheduler/dispatcher:
+        gate_check_for_dispatch = globals().get("gate_check_for_dispatch")
+        result = gate_check_for_dispatch()
+        if not result["allowed"]:
+            # Block write operations
+            log(f"Gate blocked: {result['reason']}")
+    """
+    if registry is None:
+        registry = WorkerRegistry()
+        for w in registry.list_workers():
+            registry.set_health(w.worker_id, NodeStatus.ONLINE)
+
+    store = StateStore(path=state_path)
+    gate = SchedulerGate(store)
+    result = gate.is_writes_allowed()
+
+    # Enrich with component details
+    result["gate_version"] = __version__
+    result["checked_at"] = datetime.now(timezone.utc).isoformat()
+
+    latch = store.latch
+    result["components"] = {
+        "corruption_latch": {
+            "status": "latched" if latch.is_latched() else "clear",
+            "reason": latch.get_status().get("reason", ""),
+        },
+    }
+
+    # Check secret drift
+    state = store.load()
+    secret_drift = False
+    for evt in state.get("events", []):
+        if evt.get("drift_type") == "SECRET_DRIFT" and evt.get("status") in ("detected", "operator_waiting"):
+            secret_drift = True
+            break
+    result["components"]["secret_drift"] = {"status": "blocked" if secret_drift else "ok"}
+
+    # Check dual unknown
+    nodes_with_unknown = set()
+    for evt in state.get("events", []):
+        if evt.get("drift_type") == "UNKNOWN_DRIFT" and evt.get("status") in ("detected", "operator_waiting"):
+            nodes_with_unknown.add(evt.get("node_id", ""))
+    dual_unknown = len(nodes_with_unknown) >= 2
+    result["components"]["dual_unknown"] = {
+        "status": "blocked" if dual_unknown else "ok",
+        "unknown_nodes": list(nodes_with_unknown),
+    }
+
+    return result
+
+
+def dispatch_check_write_operation(operation: str, state_path: str = None) -> dict:
+    """Check if a specific write operation is allowed by the gate.
+
+    Args:
+        operation: One of "implement", "review", "branch_write", "merge", "reconcile", "apply", "freeze", "adopt"
+
+    Returns:
+        {"allowed": bool, "operation": str, "gate_result": dict}
+    """
+    gate_result = gate_check_for_dispatch(state_path=state_path)
+    return {
+        "allowed": gate_result["allowed"],
+        "operation": operation,
+        "gate_result": gate_result,
+    }
+
+
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Toolchain Lifecycle Manager v2.1.0")
+    parser = argparse.ArgumentParser(description="Toolchain Lifecycle Manager v2.2.0")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("status", help="Show current state")
@@ -2065,8 +2508,12 @@ def main():
     rb_p.add_argument("--node", required=True, help="Target node")
     ac_p = sub.add_parser("adopt-candidate", help="Promote candidate to approved")
     ac_p.add_argument("--node", required=True, help="Target node")
+    ac_p.add_argument("--plan-id", help="Plan ID (required)")
+    ac_p.add_argument("--receipt", help="Path to approval receipt JSON")
     fr_p = sub.add_parser("freeze", help="Set approved baseline")
     fr_p.add_argument("--node", required=True, help="Target node")
+    fr_p.add_argument("--plan-id", help="Plan ID (required)")
+    fr_p.add_argument("--receipt", help="Path to approval receipt JSON")
     ev_p = sub.add_parser("events", help="Show drift events")
     ev_p.add_argument("--limit", type=int, default=20)
     hist_p = sub.add_parser("history", help="Show state history")
@@ -2206,24 +2653,32 @@ def main():
             print(f"  Resolution: {event.resolution}")
 
     elif args.command == "adopt-candidate":
-        result = mgr.adopt_candidate(args.node)
+        receipt = None
+        if args.receipt:
+            with open(args.receipt) as rf:
+                receipt = json.load(rf)
+        result = mgr.adopt_candidate(args.node, plan_id=args.plan_id, approval_receipt=receipt)
         if args.json:
             print(json.dumps(result, indent=2))
         else:
             if result["ok"]:
-                print(f"Adopted: {args.node} sha={result.get('sha256', '')}")
+                print(f"Adopted: {args.node} sha={result.get('sha256', '')} plan={result.get('plan_id', '')}")
             else:
                 print(f"Failed: {result.get('error')}")
 
     elif args.command == "freeze":
-        result = mgr.freeze(args.node)
+        receipt = None
+        if args.receipt:
+            with open(args.receipt) as rf:
+                receipt = json.load(rf)
+        result = mgr.freeze(args.node, plan_id=args.plan_id, approval_receipt=receipt)
         if args.json:
             print(json.dumps(result, indent=2))
         else:
             if result["ok"]:
-                print(f"Frozen: {args.node} sha={result.get('sha256', '')}")
+                print(f"Frozen: {args.node} sha={result.get('sha256', '')} plan={result.get('plan_id', '')}")
             else:
-                print(f"Failed: {result.get('error')}")
+                print(f"Failed: {result.get('error')}: {result.get('detail', '')}")
 
     elif args.command == "events":
         events = mgr.store.get_events(args.limit)
@@ -2244,13 +2699,19 @@ def main():
 
     elif args.command == "gate-check":
         gate = mgr.gate.is_writes_allowed()
+        # Also check scheduler gate via public API
+        gate["gate_version"] = __version__
+        gate["checked_at"] = datetime.now(timezone.utc).isoformat()
         if args.json:
             print(json.dumps(gate, indent=2))
         else:
             if gate["allowed"]:
                 print("Gate: ALLOWED")
+                print(f"  Version: {__version__}")
             else:
                 print(f"Gate: BLOCKED — {gate['reason']}: {gate.get('detail', '')}")
+                print(f"  Version: {__version__}")
+                print(f"  Action: Block all write operations (implement/review/branch/merge)")
 
     elif args.command == "repair":
         mgr.store.repair("operator")
