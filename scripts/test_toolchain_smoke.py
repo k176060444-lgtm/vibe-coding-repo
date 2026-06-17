@@ -57,6 +57,63 @@ def _run_test(name, test_fn):
     except Exception as e:
         return (name, False, str(e))
 
+# -- Capability-Aware Test Support (V1.14.6) --
+
+def _find_test_python():
+    from pathlib import Path
+    venv = Path.home() / ".vibedev" / "test-envs" / "toolchain" / "venv"
+    for c in [venv / "bin" / "python3", venv / "bin" / "python"]:
+        if c.is_file():
+            return str(c)
+    return None
+
+def _can_import_pytest(python_path=None):
+    import subprocess as _sp
+    py = python_path or _find_test_python() or sys.executable
+    try:
+        r = _sp.run([py, "-c", "import pytest"], capture_output=True, text=True, timeout=10)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+def _get_worker_caps():
+    import os, socket
+    wid = os.environ.get("VIBEDEV_WORKER_ID", "")
+    if not wid:
+        h = socket.gethostname()
+        wid = "5bao" if "5bao" in h else ("9bao" if "9bao" in h else ("controller" if h.startswith("KK") else "unknown"))
+    test_py = _find_test_python()
+    return {
+        "worker_id": wid,
+        "is_controller": wid in ("windows", "controller"),
+        "has_privileged_token": os.path.isfile(os.path.expanduser("~/.vibedev-secrets/github_privileged_token")),
+        "has_audit_tainted_lock": os.path.isfile(os.path.expanduser("~/vibedev/jobs/wo-code-repo-status-001/work-order.json")),
+        "pytest_importable": _can_import_pytest(test_py),
+    }
+
+_CONTROLLER_ONLY = frozenset(["release_notes_safety"])
+_PRIVILEGED_TOKEN_ONLY = frozenset(["ext_push_preflight_approved_valid"])
+_PYTEST_REQUIRED = frozenset(["harness_third_party_separated", "dashboard_self_check"])
+
+def _cap_check(name, caps):
+    if name in _CONTROLLER_ONLY and not caps.get("is_controller"):
+        return False, "NOT_APPLICABLE", "controller-only"
+    if name in _PRIVILEGED_TOKEN_ONLY and not caps.get("has_privileged_token"):
+        return False, "NOT_APPLICABLE", "privileged-token-required"
+    if name in _PYTEST_REQUIRED and not caps.get("pytest_importable"):
+        return False, "BLOCKED", "pytest-not-importable"
+    return True, None, None
+
+def _run_test_with_cap(name, test_fn, caps):
+    ok, rtype, reason = _cap_check(name, caps)
+    if not ok:
+        return (name, True, reason, rtype)
+    try:
+        result = test_fn()
+        rt = "PASS" if result["passed"] else "FAIL"
+        return (name, result["passed"], result.get("message", ""), rt)
+    except Exception as e:
+        return (name, False, str(e), "FAIL")
 
 def _run_script(script_path, args, timeout=30):
     """Run a script and return (returncode, stdout, stderr)."""
@@ -4563,6 +4620,7 @@ def run_tests(jobs_dir=None):
         jobs_dir = os.path.expanduser("~/vibedev/jobs")
     
     script_dir = Path(__file__).parent
+    _wcaps = _get_worker_caps()
     
     tests = []
     
@@ -4621,7 +4679,7 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("release_notes_json", lambda: _test_release_notes_json(script_dir)))
     
     # Test 19: Release Notes - safety
-    tests.append(_run_test("release_notes_safety", lambda: _test_release_notes_safety(script_dir)))
+    tests.append(_run_test_with_cap("release_notes_safety", lambda: _test_release_notes_safety(script_dir), _wcaps))
     
     # Test 20: Release Notes - router
     tests.append(_run_test("release_notes_router", lambda: _test_release_notes_router(script_dir)))
@@ -4934,7 +4992,7 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("ext_push_preflight_forbidden_path", lambda: _test_ext_push_preflight_forbidden_path(script_dir)))
 
     # Test 120: preflight with valid approved approval passes
-    tests.append(_run_test("ext_push_preflight_approved_valid", lambda: _test_ext_push_preflight_approved_valid(script_dir)))
+    tests.append(_run_test_with_cap("ext_push_preflight_approved_valid", lambda: _test_ext_push_preflight_approved_valid(script_dir), _wcaps))
 
     # Test 121: preflight never reads token content
     tests.append(_run_test("ext_push_preflight_token_not_read", lambda: _test_ext_push_preflight_token_not_read(script_dir)))
@@ -4972,7 +5030,7 @@ def run_tests(jobs_dir=None):
 
     tests.append(_run_test("harness_stdlib_accuracy", lambda: _test_harness_stdlib_not_false_positive(script_dir)))
     tests.append(_run_test("harness_gateway_repo_internal", lambda: _test_harness_gateway_repo_internal(script_dir)))
-    tests.append(_run_test("harness_third_party_separated", lambda: _test_harness_third_party_separated(script_dir)))
+    tests.append(_run_test_with_cap("harness_third_party_separated", lambda: _test_harness_third_party_separated(script_dir), _wcaps))
     tests.append(_run_test("harness_repo_profile", lambda: _test_harness_repo_profile_exists(script_dir)))
     tests.append(_run_test("harness_import_categories", lambda: _test_harness_import_classification_categories(script_dir)))
     tests.append(_run_test("token_policy_self_repo_gh_cached", lambda: _test_token_policy_self_repo_gh_cached(script_dir)))
@@ -4984,7 +5042,7 @@ def run_tests(jobs_dir=None):
     tests.append(_run_test("classifier_self_check", lambda: _test_classifier_self_check(script_dir)))
     tests.append(_run_test("classifier_exit5_not_pass", lambda: _test_classifier_exit5_not_pass(script_dir)))
     tests.append(_run_test("classifier_strong_validation", lambda: _test_classifier_strong_validation(script_dir)))
-    tests.append(_run_test("dashboard_self_check", lambda: _test_dashboard_self_check(script_dir)))
+    tests.append(_run_test_with_cap("dashboard_self_check", lambda: _test_dashboard_self_check(script_dir), _wcaps))
     tests.append(_run_test("resume_gate_self_check", lambda: _test_resume_gate_self_check(script_dir)))
     tests.append(_run_test("health_snapshot_self_check", lambda: _test_health_snapshot_self_check(script_dir)))
     tests.append(_run_test("health_snapshot_verdict", lambda: _test_health_snapshot_verdict(script_dir)))
@@ -5324,35 +5382,48 @@ def main(argv=None):
     
     tests = run_tests(jobs_dir)
     
-    # Count results
-    passed_count = sum(1 for _, passed, _ in tests if passed)
-    failed_count = sum(1 for _, passed, _ in tests if not passed)
-    
-    # Determine overall result
+    # Count results (support 3-tuple and 4-tuple)
+    passed_count = failed_count = skip_count = na_count = blocked_count = 0
+    test_results = []
+    for t in tests:
+        if len(t) == 4:
+            name, p, m, rt = t
+        else:
+            name, p, m = t
+            rt = "PASS" if p else "FAIL"
+        {"PASS": lambda: None, "FAIL": lambda: None, "SKIP": lambda: None, "NOT_APPLICABLE": lambda: None, "BLOCKED": lambda: None}[rt]()  # noop
+        if rt == "PASS": passed_count += 1
+        elif rt == "FAIL": failed_count += 1
+        elif rt == "SKIP": skip_count += 1
+        elif rt == "NOT_APPLICABLE": na_count += 1
+        elif rt == "BLOCKED": blocked_count += 1
+        test_results.append((name, p, m, rt))
     overall = "PASS" if failed_count == 0 else "FAIL"
     
     if args.output_json:
         result = {
             "overall": overall,
-            "passed": passed_count,
-            "failed": failed_count,
-            "tests": [
-                {"name": name, "passed": passed, "message": msg}
-                for name, passed, msg in tests
-            ],
+            "passed": passed_count, "failed": failed_count,
+            "skipped": skip_count, "not_applicable": na_count, "blocked": blocked_count,
+            "total": len(test_results),
+            "tests": [{"name": n, "passed": p, "message": m, "result_type": r} for n, p, m, r in test_results],
         }
         print(json.dumps(result, indent=2))
     else:
-        print("=" * 40)
-        print("  Toolchain Smoke Suite v1")
-        print("=" * 40)
-        for name, passed, msg in tests:
-            icon = "✓" if passed else "✗"
-            status = "PASS" if passed else "FAIL"
-            print(f"  {icon} {name}: {status} - {msg}")
-        print("-" * 40)
-        print(f"  Overall: {overall} ({passed_count} passed, {failed_count} failed)")
-        print("=" * 40)
+        print("=" * 50)
+        print("  Toolchain Smoke Suite v1 (capability-aware)")
+        print("=" * 50)
+        for name, passed, msg, rt in test_results:
+            icon = "✓" if rt == "PASS" else "⊘" if rt in ("NOT_APPLICABLE","SKIP","BLOCKED") else "✗"
+            print(f"  {icon} {name}: {rt} - {msg}")
+        print("-" * 50)
+        s = f"  Overall: {overall} ({passed_count} passed"
+        if failed_count: s += f", {failed_count} failed"
+        if na_count: s += f", {na_count} n/a"
+        if blocked_count: s += f", {blocked_count} blocked"
+        s += ")"
+        print(s)
+        print("=" * 50)
     
     return 0 if overall == "PASS" else 1
 

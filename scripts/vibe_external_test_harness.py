@@ -83,6 +83,16 @@ def _get_stdlib_modules():
     return _STDLIB_MODULES
 
 
+
+def _find_test_python():
+    """Find the test venv Python if available."""
+    from pathlib import Path
+    venv = Path.home() / '.vibedev' / 'test-envs' / 'toolchain' / 'venv'
+    for candidate in [venv / 'bin' / 'python3', venv / 'bin' / 'python']:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
 def _classify_import(module_name, repo_path, known_internal=None):
     """Classify a top-level module name into a category.
 
@@ -116,8 +126,18 @@ def _classify_import(module_name, repo_path, known_internal=None):
         return 'repo_internal'
 
     # Try import to distinguish third-party from truly unknown
-    rc, _, _ = _run_cmd([sys.executable, '-c', f'import {top}'], cwd=repo_path)
+    # Prefer test venv Python for import checks
+    test_py = _find_test_python()
+    import_py = test_py or sys.executable
+    rc, _, _ = _run_cmd([import_py, '-c', f'import {top}'], cwd=repo_path)
     if rc == 0:
+        return 'third_party'
+
+    # Well-known PyPI packages: classify as third_party even if not importable
+    _KNOWN_THIRD_PARTY = {'pytest', 'pytest_timeout', 'pytest_asyncio', 'hypothesis',
+                          'requests', 'flask', 'django', 'numpy', 'pandas', 'torch',
+                          'tensorflow', 'click', 'rich', 'httpx', 'aiohttp'}
+    if top in _KNOWN_THIRD_PARTY:
         return 'third_party'
 
     return 'unknown'
