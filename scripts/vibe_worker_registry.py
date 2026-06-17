@@ -115,16 +115,27 @@ class WorkerRegistry:
     def online_workers(self) -> list[WorkerNode]:
         return [w for w in self.workers.values() if w.health_status == NodeStatus.ONLINE]
 
-    def available_workers(self, task_type: str = "linux-worker") -> list[WorkerNode]:
-        """Workers available for a task: ONLINE, not maintenance, has capacity, capability match."""
-        return [
+    def available_workers(self, task_type: str = "linux-worker",
+                          allowed_worker_ids: Optional[list] = None) -> list[WorkerNode]:
+        """Workers available for a task: ONLINE, not maintenance, has capacity, capability match.
+
+        If allowed_worker_ids is provided, only workers whose worker_id is in
+        that list are considered. This ensures capability filtering and final
+        selection use the same candidate set.
+        """
+        candidates = [
             w for w in self.online_workers()
             if w.maintenance_status != "maintenance"
             and w.active_jobs < w.max_parallel_jobs
             and task_type in w.capabilities
         ]
+        if allowed_worker_ids is not None:
+            allowed_set = set(allowed_worker_ids)
+            candidates = [w for w in candidates if w.worker_id in allowed_set]
+        return candidates
 
-    def select_worker(self, task_type: str = "linux-worker") -> Optional[WorkerNode]:
+    def select_worker(self, task_type: str = "linux-worker",
+                      allowed_worker_ids: Optional[list] = None) -> Optional[WorkerNode]:
         """Select best worker using scheduling policy:
         1. capability match
         2. ONLINE
@@ -133,8 +144,11 @@ class WorkerRegistry:
         5. least active_jobs
         6. lower recent_failure_count
         7. weighted round-robin tie-break
+
+        If allowed_worker_ids is provided, only those workers are considered.
+        This ensures capability filtering and final selection use the same set.
         """
-        candidates = self.available_workers(task_type)
+        candidates = self.available_workers(task_type, allowed_worker_ids=allowed_worker_ids)
         if not candidates:
             return None
 

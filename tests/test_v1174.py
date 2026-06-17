@@ -419,59 +419,160 @@ if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v", "--tb=short"]))
 
-# === V1.17.7.2 Capability-Aware Routing Tests ===
+# === V1.17.7.3 Capability-Aware Routing Tests (Closed-Loop) ===
 
-def test_capability_routing_code_search_type():
-    """Test that CODE_SEARCH task type exists."""
-    import sys
-    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
-    from vibe_worker_registry import TaskType
-    assert hasattr(TaskType, 'CODE_SEARCH'), "TaskType.CODE_SEARCH missing"
-    assert TaskType.CODE_SEARCH == "code-search"
+import sys, os, json, tempfile
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
 
-def test_capability_routing_required_tools_param():
-    """Test that schedule() accepts required_tools parameter."""
-    import sys
-    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
+def _make_policy_with_state(state_data, online_nodes=None):
+    """Create a SchedulerPolicy with injected state for testing."""
+    from vibe_worker_registry import WorkerRegistry, NodeStatus
     from vibe_scheduler_policy import SchedulerPolicy
-    from vibe_worker_registry import WorkerRegistry
-    reg = WorkerRegistry()
-    sp = SchedulerPolicy(reg)
-    import inspect
-    sig = inspect.signature(sp.schedule)
-    assert 'required_tools' in sig.parameters, "schedule() missing required_tools param"
+    import vibe_scheduler_policy as sp_mod
 
-def test_capability_filter_method_exists():
-    """Test that _filter_by_capabilities method exists."""
-    import sys
-    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
-    from vibe_scheduler_policy import SchedulerPolicy
-    from vibe_worker_registry import WorkerRegistry
-    reg = WorkerRegistry()
-    sp = SchedulerPolicy(reg)
-    assert hasattr(sp, '_filter_by_capabilities'), "_filter_by_capabilities method missing"
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+    json.dump(state_data, tmp)
+    tmp.close()
 
-def test_capability_routing_no_tools_passes():
-    """Test that schedule without required_tools still works normally."""
-    import sys
-    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
-    from vibe_scheduler_policy import SchedulerPolicy
-    from vibe_worker_registry import WorkerRegistry
-    reg = WorkerRegistry()
-    sp = SchedulerPolicy(reg)
-    result = sp.schedule(task_type="linux-worker")
-    assert result["task_type"] == "linux-worker"
-    assert "capability_blocked" not in result.get("selection_reason", "")
+    orig_store = sp_mod.StateStore
+    class MockStore:
+        def __init__(self, path=None):
+            self.path = tmp.name
+        def load(self):
+            with open(self.path) as f:
+                return json.load(f)
+    sp_mod.StateStore = MockStore
 
-def test_capability_routing_fail_closed_no_baseline():
-    """Test that capability check returns proper result."""
-    import sys
-    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
-    from vibe_scheduler_policy import SchedulerPolicy
-    from vibe_worker_registry import WorkerRegistry
     reg = WorkerRegistry()
-    sp = SchedulerPolicy(reg)
-    result = sp._filter_by_capabilities(["ripgrep"])
-    assert isinstance(result, dict)
-    assert "blocked" in result
-    assert "capable_workers" in result
+    if online_nodes:
+        for n in online_nodes:
+            reg.set_health(n, NodeStatus.ONLINE)
+    else:
+        for w in reg.list_workers():
+            reg.set_health(w.worker_id, NodeStatus.ONLINE)
+
+    policy = SchedulerPolicy(reg)
+    return policy, reg, tmp.name
+
+
+def _base_state(ripgrep_5bao="NOT_INSTALLED", ripgrep_9bao="13.0.0"):
+    return {
+        "schema_version": 2, "checksum": "test",
+        "approved_baselines": {
+            "5bao": {"fingerprint": {"node_specific": {"5bao": {"ripgrep": ripgrep_5bao}, "9bao": {"ripgrep": ripgrep_9bao}}}, "sha256": "test"},
+            "9bao": {"fingerprint": {"node_specific": {"5bao": {"ripgrep": ripgrep_5bao}, "9bao": {"ripgrep": ripgrep_9bao}}}, "sha256": "test"}
+        },
+        "events": [], "plans": [], "approvals": [], "history": []
+    }
+
+
+def test_cap_ripgrep_selects_9bao():
+    state = _base_state()
+    policy, reg, tmp = _make_policy_with_state(state)
+    result = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
+    assert result["worker_id"] == "9bao", f"Expected 9bao, got {result}"
+    assert result["pending"] is False
+    os.unlink(tmp)
+
+
+def test_cap_5bao_idle_still_9bao():
+    state = _base_state()
+    policy, reg, tmp = _make_policy_with_state(state)
+    result = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
+    assert result["worker_id"] == "9bao"
+    os.unlink(tmp)
+
+
+def test_cap_9bao_maintenance_blocks():
+    state = _base_state()
+    policy, reg, tmp = _make_policy_with_state(state)
+    reg.set_maintenance("9bao", "maintenance")
+    result = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
+    assert result["worker_id"] is None
+    assert result["pending"] is True
+    os.unlink(tmp)
+
+
+def test_cap_9bao_offline_blocks():
+    from vibe_worker_registry import NodeStatus
+    state = _base_state()
+    policy, reg, tmp = _make_policy_with_state(state)
+    reg.set_health("9bao", NodeStatus.OFFLINE)
+    result = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
+    assert result["worker_id"] is None
+    assert result["pending"] is True
+    os.unlink(tmp)
+
+
+def test_cap_9bao_at_capacity_blocks():
+    state = _base_state()
+    policy, reg, tmp = _make_policy_with_state(state)
+    for w in reg.list_workers():
+        if w.worker_id == "9bao":
+            w.active_jobs = w.max_parallel_jobs
+    result = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
+    assert result["worker_id"] is None
+    assert result["pending"] is True
+    os.unlink(tmp)
+
+
+def test_cap_9bao_restored_selects_9bao():
+    state = _base_state()
+    policy, reg, tmp = _make_policy_with_state(state)
+    reg.set_maintenance("9bao", "maintenance")
+    r1 = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
+    assert r1["worker_id"] is None
+    reg.set_maintenance("9bao", "active")
+    r2 = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
+    assert r2["worker_id"] == "9bao"
+    os.unlink(tmp)
+
+
+def test_cap_no_tools_load_balance():
+    state = _base_state()
+    policy, reg, tmp = _make_policy_with_state(state)
+    result = policy.schedule(task_type="linux-worker")
+    assert result["worker_id"] in ("5bao", "9bao")
+    assert result["pending"] is False
+    os.unlink(tmp)
+
+
+def test_cap_unknown_tool_blocks():
+    state = _base_state()
+    policy, reg, tmp = _make_policy_with_state(state)
+    result = policy.schedule(task_type="linux-worker", required_tools=["nonexistent_tool"])
+    assert result["worker_id"] is None
+    assert result["pending"] is True
+    os.unlink(tmp)
+
+
+def test_cap_missing_baseline_blocks():
+    state = {"schema_version": 2, "checksum": "test",
+             "approved_baselines": {}, "events": [], "plans": [],
+             "approvals": [], "history": []}
+    policy, reg, tmp = _make_policy_with_state(state)
+    result = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
+    assert result["worker_id"] is None
+    assert result["pending"] is True
+    os.unlink(tmp)
+
+
+def test_cap_selected_in_capable_set():
+    state = _base_state()
+    policy, reg, tmp = _make_policy_with_state(state)
+    cap = policy._filter_by_capabilities(["ripgrep"])
+    assert "9bao" in cap["capable_workers"]
+    assert "5bao" not in cap["capable_workers"]
+    result = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
+    assert result["worker_id"] in cap["capable_workers"]
+    os.unlink(tmp)
+
+
+def test_cap_fallback_cannot_bypass_tools():
+    from vibe_worker_registry import NodeStatus
+    state = _base_state()
+    policy, reg, tmp = _make_policy_with_state(state, online_nodes=["5bao"])
+    reg.set_health("9bao", NodeStatus.OFFLINE)
+    result = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
+    assert result["worker_id"] is None
+    os.unlink(tmp)

@@ -10,7 +10,7 @@ Usage:
     python3 scripts/vibe_scheduler_policy.py --self-check
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import json
 import sys
@@ -177,7 +177,8 @@ class SchedulerPolicy:
                     "pending_reason": f"model_{model}_quarantined_{mh.health_reason}",
                 }
 
-        # Capability-aware tool filtering (V1.17.7.2)
+        # Capability-aware tool filtering (V1.17.7.3 — closed-loop)
+        capable_worker_ids = None
         if required_tools:
             cap_result = self._filter_by_capabilities(required_tools)
             if cap_result.get("blocked"):
@@ -190,9 +191,10 @@ class SchedulerPolicy:
                     "pending": True,
                     "pending_reason": f"no_capable_worker_for_{required_tools}",
                 }
+            capable_worker_ids = cap_result.get("capable_workers", [])
 
-        # Select worker
-        worker = self.registry.select_worker(task_type)
+        # Select worker from capability-filtered candidate set
+        worker = self.registry.select_worker(task_type, allowed_worker_ids=capable_worker_ids)
         if worker is None:
             return {
                 "worker_id": None,
@@ -205,7 +207,7 @@ class SchedulerPolicy:
             }
 
         # Determine selection reason
-        available = self.registry.available_workers(task_type)
+        available = self.registry.available_workers(task_type, allowed_worker_ids=capable_worker_ids)
         if len(available) == 1:
             reason = "single_worker_available"
         elif worker.active_jobs == 0 and all(w.active_jobs == 0 for w in available):
