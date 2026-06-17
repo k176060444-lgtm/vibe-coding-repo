@@ -45,61 +45,57 @@ class SchedulerPolicy:
     def _filter_by_capabilities(self, required_tools: list) -> dict:
         """Check if any online non-maintenance worker has the required tools.
 
-        Queries the lifecycle approved_baselines to determine tool availability
-        per node. Fail-closed: if baseline data is missing or tool info is
-        unavailable, the worker is excluded.
+        Primary source: worker registry tools_installed (authoritative per-node).
+        Fallback: lifecycle approved_baselines node_specific data.
+        Fail-closed: if both sources are unavailable or tool info is unknown,
+        the worker is excluded.
 
         Returns:
             {"blocked": bool, "reason": str, "capable_workers": list}
         """
-        if not _LIFECYCLE_GATE_AVAILABLE or StateStore is None:
-            return {"blocked": True, "reason": "lifecycle_unavailable_fail_closed",
-                    "capable_workers": []}
-
-        try:
-            store = StateStore()
-            state = store.load()
-            approved = state.get("approved_baselines", {})
-        except Exception as e:
-            return {"blocked": True, "reason": f"state_load_failed: {e}",
-                    "capable_workers": []}
-
-        if not approved:
-            return {"blocked": True, "reason": "no_approved_baselines",
-                    "capable_workers": []}
+        # Load baseline fallback data if available
+        approved = {}
+        if _LIFECYCLE_GATE_AVAILABLE and StateStore is not None:
+            try:
+                store = StateStore()
+                state = store.load()
+                approved = state.get("approved_baselines", {})
+            except Exception:
+                pass  # baseline unavailable, rely on registry
 
         online_workers = self.registry.online_workers()
         capable = []
         for w in online_workers:
             if w.maintenance_status == "maintenance":
                 continue
-            # Find this worker's approved baseline
-            node_baseline = approved.get(w.worker_id)
-            if not node_baseline:
-                # No baseline for this worker — fail-closed
-                continue
-            fp = node_baseline.get("fingerprint", {})
-            node_specific = fp.get("node_specific", {}).get(w.worker_id, {})
-            # Check each required tool
             has_all = True
             for tool in required_tools:
-                if tool == "ripgrep":
-                    rg_status = node_specific.get("ripgrep", "UNKNOWN")
-                    if rg_status in ("UNKNOWN", None, ""):
-                        has_all = False  # fail-closed on unknown
-                    elif rg_status == "NOT_INSTALLED":
+                # Primary: check registry tools_installed
+                reg_tool = w.tools_installed.get(tool)
+                if reg_tool is not None:
+                    if reg_tool in ("NOT_INSTALLED", "UNKNOWN", None, ""):
                         has_all = False
                     # else: version string means installed
-                else:
-                    # Unknown tool requirement — fail-closed
-                    has_all = False
+                    continue
+                # Fallback: check approved baseline
+                node_baseline = approved.get(w.worker_id)
+                if not node_baseline:
+                    has_all = False  # no data at all -- fail-closed
                     break
+                fp = node_baseline.get("fingerprint", {})
+                node_specific = fp.get("node_specific", {}).get(w.worker_id, {})
+                baseline_tool = node_specific.get(tool, "UNKNOWN")
+                if baseline_tool in ("UNKNOWN", None, ""):
+                    has_all = False
+                elif baseline_tool == "NOT_INSTALLED":
+                    has_all = False
+                # else: version string means installed
             if has_all:
                 capable.append(w.worker_id)
 
         if not capable:
             return {"blocked": True,
-                    "reason": f"no_worker_has_all_tools_{required_tools}",
+                    "reason": "no_worker_has_all_tools_%s" % required_tools,
                     "capable_workers": []}
         return {"blocked": False, "reason": "ok", "capable_workers": capable}
 
