@@ -9,6 +9,8 @@ import json
 import os
 import sys
 import tempfile
+import hashlib
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -20,7 +22,7 @@ from vibe_toolchain_lifecycle import (
     RemediationAction, PlanStatus, BaselineState,
     DriftDetector, DriftClassifier, RemediationPlanner,
     ToolchainLifecycleManager, StateStore, CorruptionLatch, SchedulerGate,
-    __version__,
+    __version__, PlanRecord,
 )
 
 
@@ -61,6 +63,21 @@ def _fp(node_id="5bao", ver="1.17.4", hash_="abc123", secret="s1",
         },
         path_dirs=path_dirs,
     )
+
+
+
+def _freeze_with_plan(mgr, node_id, fp):
+    existing = mgr.store.get_approved(node_id)
+    before_sha = existing.get("sha256", "") if existing else ""
+    plan_id = f"P-{node_id}-{int(time.time()*1000)}"
+    plan = PlanRecord(plan_id=plan_id, node_id=node_id,
+        drift_type=DriftType.PATCH_VERSION_DRIFT, status=PlanStatus.PENDING_APPROVAL,
+        actions=[RemediationAction.AUTO_FIX], before_fingerprint_sha=before_sha)
+    plan.plan_digest = hashlib.sha256(json.dumps({"actions": [a.value for a in plan.actions], "node_id": node_id, "drift_type": plan.drift_type.value}, sort_keys=True).encode()).hexdigest()
+    mgr.store.add_plan(plan)
+    r = mgr.approve_plan(plan_id, operator="test")
+    assert r["ok"], f"approve failed: {r}"
+    return mgr.freeze(node_id, plan_id=plan_id, approval_receipt=r["receipt"], fp=fp)
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +266,7 @@ def test_freeze_sets_approved():
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
         fp = _fp()
-        result = mgr.freeze("5bao", fp)
+        result = _freeze_with_plan(mgr, "5bao", fp)
         assert result["ok"] is True
         assert mgr.store.has_approved("5bao")
     finally:
@@ -266,7 +283,7 @@ def test_plan_approve_apply_separation():
     try:
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
-        mgr.freeze("5bao", _fp())
+        _freeze_with_plan(mgr, "5bao", _fp())
         observed = _fp(ver="1.17.5")
         items, dtype = mgr.detect_drift("5bao", observed)
         assert dtype == DriftType.PATCH_VERSION_DRIFT
@@ -295,7 +312,7 @@ def test_secret_drift_blocks():
     try:
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
-        mgr.freeze("5bao", _fp(secret="original"))
+        _freeze_with_plan(mgr, "5bao", _fp(secret="original"))
         observed = _fp(secret="changed")
         items, dtype = mgr.detect_drift("5bao", observed)
         assert dtype == DriftType.SECRET_DRIFT
@@ -316,7 +333,7 @@ def test_approval_receipt_binding():
     try:
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
-        mgr.freeze("5bao", _fp())
+        _freeze_with_plan(mgr, "5bao", _fp())
         observed = _fp(ver="1.17.5")
         items, dtype = mgr.detect_drift("5bao", observed)
         plan = mgr.create_plan("5bao", items, dtype)
@@ -340,7 +357,7 @@ def test_plan_digest_tamper():
     try:
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
-        mgr.freeze("5bao", _fp())
+        _freeze_with_plan(mgr, "5bao", _fp())
         observed = _fp(ver="1.17.5")
         items, dtype = mgr.detect_drift("5bao", observed)
         plan = mgr.create_plan("5bao", items, dtype)
@@ -364,7 +381,7 @@ def test_approval_expiration():
     try:
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
-        mgr.freeze("5bao", _fp())
+        _freeze_with_plan(mgr, "5bao", _fp())
         observed = _fp(ver="1.17.5")
         items, dtype = mgr.detect_drift("5bao", observed)
         plan = mgr.create_plan("5bao", items, dtype)
@@ -388,13 +405,13 @@ def test_before_fingerprint_change():
     try:
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
-        mgr.freeze("5bao", _fp())
+        _freeze_with_plan(mgr, "5bao", _fp())
         observed = _fp(ver="1.17.5")
         items, dtype = mgr.detect_drift("5bao", observed)
         plan = mgr.create_plan("5bao", items, dtype)
         receipt = mgr.approve_plan(plan.plan_id, operator="test")
         # Change approved baseline (simulating another freeze)
-        mgr.freeze("5bao", _fp(ver="1.17.6"))
+        _freeze_with_plan(mgr, "5bao", _fp(ver="1.17.6"))
         # Apply should fail (before fingerprint changed)
         event = mgr.apply_plan(plan.plan_id)
         assert event.status == DriftEventStatus.BLOCKED
@@ -413,7 +430,7 @@ def test_gate_blocks_reconcile():
     try:
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
-        mgr.freeze("5bao", _fp())
+        _freeze_with_plan(mgr, "5bao", _fp())
         mgr.store.latch.latch("test")
         event = mgr.reconcile("5bao")
         assert event.status == DriftEventStatus.BLOCKED
@@ -432,9 +449,15 @@ def test_adopt_candidate():
     try:
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
+        _freeze_with_plan(mgr, "5bao", _fp())
         fp = _fp(ver="1.17.5")
         mgr.store.set_candidate("5bao", fp.to_dict())
-        result = mgr.adopt_candidate("5bao")
+        plan_ad = PlanRecord(plan_id=f"P-adopt-{int(time.time()*1000)}", node_id="5bao", drift_type=DriftType.PATCH_VERSION_DRIFT, status=PlanStatus.PENDING_APPROVAL, actions=[RemediationAction.CANARY_VALIDATION], before_fingerprint_sha=mgr.store.get_approved("5bao").get("sha256", ""))
+        plan_ad.plan_digest = hashlib.sha256(json.dumps({"actions": [a.value for a in plan_ad.actions], "node_id": "5bao", "drift_type": plan_ad.drift_type.value}, sort_keys=True).encode()).hexdigest()
+        mgr.store.add_plan(plan_ad)
+        r_ad = mgr.approve_plan(plan_ad.plan_id, operator="test")
+        assert r_ad["ok"]
+        result = mgr.adopt_candidate("5bao", plan_id=plan_ad.plan_id, approval_receipt=r_ad["receipt"])
         assert result["ok"] is True
         assert mgr.store.has_approved("5bao")
         assert mgr.store.get_candidate("5bao") is None
@@ -452,7 +475,13 @@ def test_adopt_no_candidate():
     try:
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
-        result = mgr.adopt_candidate("5bao")
+        _freeze_with_plan(mgr, "5bao", _fp())
+        plan_ad = PlanRecord(plan_id=f"P-adopt-{int(time.time()*1000)}", node_id="5bao", drift_type=DriftType.PATCH_VERSION_DRIFT, status=PlanStatus.PENDING_APPROVAL, actions=[RemediationAction.CANARY_VALIDATION], before_fingerprint_sha=mgr.store.get_approved("5bao").get("sha256", ""))
+        plan_ad.plan_digest = hashlib.sha256(json.dumps({"actions": [a.value for a in plan_ad.actions], "node_id": "5bao", "drift_type": plan_ad.drift_type.value}, sort_keys=True).encode()).hexdigest()
+        mgr.store.add_plan(plan_ad)
+        r_ad = mgr.approve_plan(plan_ad.plan_id, operator="test")
+        assert r_ad["ok"]
+        result = mgr.adopt_candidate("5bao", plan_id=plan_ad.plan_id, approval_receipt=r_ad["receipt"])
         assert result["ok"] is False
         assert "no_candidate" in result["error"]
     finally:
@@ -516,7 +545,7 @@ def test_drift_detection():
     try:
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
-        mgr.freeze("5bao", _fp())
+        _freeze_with_plan(mgr, "5bao", _fp())
         observed = _fp(ver="1.17.5")
         items, dtype = mgr.detect_drift("5bao", observed)
         assert dtype == DriftType.PATCH_VERSION_DRIFT
@@ -584,7 +613,7 @@ def test_status_report():
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
         report = mgr.status_report()
-        assert report["version"] == "2.1.0"
+        assert report["version"] == "2.2.0"
         assert report["schema_version"] == 2
         assert "corruption_latch" in report
         assert "gate" in report
@@ -598,8 +627,8 @@ def test_status_report():
 # ---------------------------------------------------------------------------
 
 def test_version():
-    assert __version__ == "2.1.0"
-    return {"passed": True, "message": "version=2.1.0"}
+    assert __version__ == "2.2.0"
+    return {"passed": True, "message": "version=2.2.0"}
 
 
 # ---------------------------------------------------------------------------

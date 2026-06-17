@@ -1112,12 +1112,14 @@ class ToolchainLifecycleManager:
         if not receipt:
             return {"ok": False, "error": "no_approval_receipt_for_plan"}
 
-        # Verify receipt fields
-        required_fields = ["plan_digest", "operator", "node_id",
-                           "before_fingerprint_sha", "actions", "expires_at"]
+        # Verify receipt fields (before_fingerprint_sha optional for initial freeze)
+        has_existing = self.store.has_approved(node_id)
+        required_fields = ["plan_digest", "operator", "node_id", "actions", "expires_at"]
         for field in required_fields:
             if not receipt.get(field):
                 return {"ok": False, "error": f"receipt_missing_{field}"}
+        if has_existing and not receipt.get("before_fingerprint_sha"):
+            return {"ok": False, "error": "receipt_missing_before_fingerprint_sha"}
 
         # Verify plan digest match (recompute)
         if receipt["plan_digest"] != plan.get("plan_digest"):
