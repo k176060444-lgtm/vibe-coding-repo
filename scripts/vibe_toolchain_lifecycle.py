@@ -13,7 +13,7 @@ V1.17.2 Final Operational Closure:
 - OpenCode 1.17.7 PLAN ONLY artifact
 """
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 
 import copy
 import fcntl
@@ -1631,7 +1631,16 @@ class ToolchainLifecycleManager:
 
         if canary_pass:
             observed = self.collector.collect(worker)
-            self.store.set_candidate(node_id, observed.to_dict())
+            obs_dict = observed.to_dict()
+            obs_dict["components"]["fixture_candidate"] = {
+                "version": fixture_version,
+                "candidate_dir": candidate_dir,
+                "binary_path": f"/tmp/canary-active-{node_id}",
+                "deploy_ts": str(ts),
+                "sha256": "fixture_marker",
+                "node": node_id,
+            }
+            self.store.set_candidate(node_id, obs_dict)
             event.status = DriftEventStatus.CANARY
             event.runtime_baseline_sha = observed.fingerprint_sha256()
             event.operator_required = True
@@ -1725,7 +1734,9 @@ class ToolchainLifecycleManager:
             ],
         }
 
-        if not version_items and not path_items:
+        wrapper_items = [i for i in items if "wrapper" in i.component.lower()]
+        residual = version_items + path_items + config_items + dep_items + wrapper_items
+        if not residual:
             event.status = DriftEventStatus.ROLLED_BACK
             event.rollback_performed = True
             event.resolution = "rolled_back_to_approved_verified"
@@ -1735,7 +1746,7 @@ class ToolchainLifecycleManager:
                 event.maintenance_set = False
         else:
             event.status = DriftEventStatus.OPERATOR_WAITING
-            event.resolution = "rollback_insufficient_operator_required"
+            event.resolution = f"rollback_residual_{len(residual)}_drift_items_operator_required"
             event.operator_required = True
 
         return event
@@ -2113,13 +2124,29 @@ class ToolchainLifecycleManager:
         Does NOT install, modify PATH, or update candidate/approved.
         """
         # Query npm for latest opencode version
-        rc, out, err = _ssh("192.168.5.6", 22222, "vibeworker",
-                           "npm view opencode version 2>/dev/null || echo QUERY_FAILED")
-        latest_ver = out.strip() if rc == 0 and "QUERY_FAILED" not in out else "UNAVAILABLE"
+        import subprocess as _sp
+        try:
+            npm_r = _sp.run(["npm", "view", "opencode-ai", "version"], capture_output=True, text=True, timeout=15)
+            latest_ver = npm_r.stdout.strip() if npm_r.returncode == 0 else "UNAVAILABLE"
+        except Exception:
+            latest_ver = "UNAVAILABLE"
+
+        ver_5bao = "UNAVAILABLE"
+        for _cmd in ["opencode --version", "~/.opencode/bin/opencode --version", "/home/vibeworker/bin/opencode --version"]:
+            try:
+                _r = _sp.run(["bash", "-c", "source ~/.profile 2>/dev/null; " + _cmd], capture_output=True, text=True, timeout=10)
+                if _r.returncode == 0 and _r.stdout.strip():
+                    ver_5bao = _r.stdout.strip()
+                    break
+            except Exception:
+                pass
+        rc9v, out9v, _ = _ssh("192.168.9.6", 22222, "vibeworker", "~/.opencode/bin/opencode --version 2>/dev/null || echo UNAVAILABLE")
+        ver_9bao = out9v.strip() if rc9v == 0 and out9v.strip() else "UNAVAILABLE"
 
         artifact = {
             "type": "PLAN_ONLY",
-            "current_version": "1.17.4",
+            "current_version_5bao": ver_5bao,
+            "current_version_9bao": ver_9bao,
             "target_version": "1.17.7",
             "latest_npm_version": latest_ver,
             "source": "npm registry",
@@ -2387,6 +2414,33 @@ class ToolchainLifecycleManager:
                           "message": "plan_required" if requires_plan else "plan_NOT_required"})
         except Exception as e:
             checks.append({"name": "adopt_requires_plan", "passed": False, "message": str(e)[:80]})
+
+
+        # 19. Scheduler gate wiring (V2.3.0)
+        try:
+            from vibe_scheduler_policy import SchedulerPolicy
+            import inspect
+            sched_src = inspect.getsource(SchedulerPolicy.schedule)
+            has_gate = "lifecycle_gate" in sched_src or "gate_check_for_dispatch" in sched_src
+            checks.append({"name": "scheduler_gate_wired", "passed": has_gate,
+                          "message": "gate_wired" if has_gate else "gate_NOT_wired"})
+        except Exception as e:
+            checks.append({"name": "scheduler_gate_wired", "passed": False, "message": str(e)[:80]})
+
+        # 20. Execution gate wiring (V2.3.0)
+        try:
+            import importlib.util
+            eg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "vibe_execution_gate.py")
+            if os.path.exists(eg_path):
+                with open(eg_path) as f:
+                    eg_src = f.read()
+                has_gate = "gate_check_for_dispatch" in eg_src
+            else:
+                has_gate = False
+            checks.append({"name": "execution_gate_wired", "passed": has_gate,
+                          "message": "gate_wired" if has_gate else "gate_NOT_wired"})
+        except Exception as e:
+            checks.append({"name": "execution_gate_wired", "passed": False, "message": str(e)[:80]})
 
         passed = sum(1 for c in checks if c["passed"])
         return {
@@ -2725,7 +2779,10 @@ def main():
             print(json.dumps(artifact, indent=2))
         else:
             print(f"OpenCode PLAN ONLY:")
-            print(f"  Current: {artifact['current_version']}")
+            cv5 = artifact.get("current_version_5bao", "N/A")
+            cv9 = artifact.get("current_version_9bao", "N/A")
+            print(f"  Current 5bao: {cv5}")
+            print(f"  Current 9bao: {cv9}")
             print(f"  Target: {artifact['target_version']}")
             print(f"  Latest npm: {artifact['latest_npm_version']}")
             print(f"  Risk: {artifact['risk']}")

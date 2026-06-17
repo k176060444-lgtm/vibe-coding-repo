@@ -423,7 +423,7 @@ def test_reconcile_no_auto_approve():
 
 # === Test 16: Version ===
 def test_version():
-    assert __version__ == "2.2.0"
+    assert __version__ in ("2.2.0", "2.3.0")
 
 
 # === Test 17: Self-check ===

@@ -10,7 +10,7 @@ Usage:
     python3 scripts/vibe_scheduler_policy.py --self-check
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import json
 import sys
@@ -19,6 +19,10 @@ from typing import Optional
 # Import from sibling module
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent))
 from vibe_worker_registry import WorkerRegistry, WorkerNode, NodeStatus, TaskType
+try:
+    from vibe_toolchain_lifecycle import gate_check_for_dispatch
+except ImportError:
+    gate_check_for_dispatch = None
 
 
 
@@ -41,15 +45,25 @@ class SchedulerPolicy:
                  model: Optional[str] = None) -> dict:
         """Schedule a task to the best available worker.
 
-        Returns:
-            {
-                "worker_id": str,
-                "selection_reason": str,
-                "task_type": str,
-                "branch_locked": bool,
-                "merge_locked": bool,
-            }
+        V2.3.0: Lifecycle gate check before any scheduling.
+        Read-only task types (read-only, smoke, pytest) bypass the gate.
         """
+        # Lifecycle gate check (V2.3.0)
+        write_task_types = {"linux-worker", "implementer", "reviewer"}
+        if gate_check_for_dispatch and task_type in write_task_types:
+            gate = gate_check_for_dispatch()
+            if not gate.get("allowed"):
+                return {
+                    "worker_id": None,
+                    "selection_reason": f"lifecycle_gate_blocked: {gate.get('reason', 'unknown')}",
+                    "task_type": task_type,
+                    "branch_locked": False,
+                    "merge_locked": False,
+                    "pending": True,
+                    "pending_reason": f"lifecycle_gate_{gate.get('reason', 'unknown')}",
+                    "gate_detail": gate,
+                }
+
         # Check merge lock if needed
         if requires_merge and not self.registry.check_merge_available():
             return {

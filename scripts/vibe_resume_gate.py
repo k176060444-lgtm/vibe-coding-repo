@@ -14,7 +14,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+
+try:
+    from vibe_toolchain_lifecycle import gate_check_for_dispatch
+except ImportError:
+    gate_check_for_dispatch = None
 
 # Decision constants
 RESUME_SAFE = "RESUME_SAFE"

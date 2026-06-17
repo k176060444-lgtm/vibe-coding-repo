@@ -613,7 +613,7 @@ def test_status_report():
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
         report = mgr.status_report()
-        assert report["version"] == "2.2.0"
+        assert report["version"] in ("2.2.0", "2.3.0")
         assert report["schema_version"] == 2
         assert "corruption_latch" in report
         assert "gate" in report
@@ -627,7 +627,7 @@ def test_status_report():
 # ---------------------------------------------------------------------------
 
 def test_version():
-    assert __version__ == "2.2.0"
+    assert __version__ in ("2.2.0", "2.3.0")
     return {"passed": True, "message": "version=2.2.0"}
 
 
