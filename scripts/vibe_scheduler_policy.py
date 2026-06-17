@@ -99,6 +99,59 @@ class SchedulerPolicy:
                     "capable_workers": []}
         return {"blocked": False, "reason": "ok", "capable_workers": capable}
 
+    def get_eligible_candidates(self, task_type: str = "linux-worker",
+                                 required_tools: list = None,
+                                 branch: str = None,
+                                 requires_merge: bool = False) -> list:
+        """Return ordered list of (worker_id, reason) passing ALL gates.
+
+        Applies same gates as schedule(): lifecycle, merge lock, branch lock,
+        capability, health, maintenance. Returns empty list if any gate fails.
+        Workers sorted by least-loaded first.
+        """
+        import sys as _sys
+        _sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+        from vibe_worker_registry import NodeStatus
+
+        # Lifecycle gate
+        write_task_types = {"linux-worker", "implementer", "reviewer"}
+        if task_type in write_task_types:
+            if not _LIFECYCLE_GATE_AVAILABLE:
+                return []
+            try:
+                gate = gate_check_for_dispatch()
+                if not gate.get("allowed"):
+                    return []
+            except Exception:
+                return []
+
+        # Merge lock
+        if requires_merge and not self.registry.check_merge_available():
+            return []
+
+        # Branch lock
+        if branch and not self.registry.check_branch_available(branch):
+            return []
+
+        # Capability filtering
+        capable_ids = None
+        if required_tools:
+            cap_result = self._filter_by_capabilities(required_tools)
+            if cap_result.get("blocked"):
+                return []
+            capable_ids = cap_result.get("capable_workers", [])
+
+        # Get available workers
+        available = self.registry.available_workers(
+            task_type, allowed_worker_ids=capable_ids)
+        if not available:
+            return []
+
+        # Sort by least loaded
+        available.sort(key=lambda w: (
+            w.active_jobs, w.recent_failure_count, -w.weight))
+        return [(w.worker_id, "all_gates_passed") for w in available]
+
     def schedule(self, task_type: str = "linux-worker",
                  branch: Optional[str] = None,
                  requires_merge: bool = False,
