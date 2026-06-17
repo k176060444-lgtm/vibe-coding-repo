@@ -99,6 +99,79 @@ class SchedulerPolicy:
                     "capable_workers": []}
         return {"blocked": False, "reason": "ok", "capable_workers": capable}
 
+    def get_eligible_candidates(self, task_type: str = "linux-worker",
+                                 required_tools: list = None,
+                                 branch: str = None,
+                                 requires_merge: bool = False,
+                                 claim_store=None) -> list:
+        """Return ordered list of (worker_id, reason) passing ALL gates.
+
+        Applies same gates as schedule(): lifecycle, merge lock, branch lock,
+        capability, health, maintenance. Returns empty list if any gate fails.
+        Workers sorted by least-loaded first. If claim_store is provided,
+        uses actual claim counts for capacity check.
+        """
+        from vibe_worker_registry import NodeStatus
+
+        # Lifecycle gate
+        write_task_types = {"linux-worker", "implementer", "reviewer"}
+        if task_type in write_task_types:
+            if not _LIFECYCLE_GATE_AVAILABLE:
+                return []
+            try:
+                gate = gate_check_for_dispatch()
+                if not gate.get("allowed"):
+                    return []
+            except Exception:
+                return []
+
+        # Merge lock
+        if requires_merge and not self.registry.check_merge_available():
+            return []
+
+        # Branch lock
+        if branch and not self.registry.check_branch_available(branch):
+            return []
+
+        # Capability filtering
+        capable_ids = None
+        if required_tools:
+            cap_result = self._filter_by_capabilities(required_tools)
+            if cap_result.get("blocked"):
+                return []
+            capable_ids = cap_result.get("capable_workers", [])
+
+        # Get online non-maintenance workers with capability match
+        candidates = [
+            w for w in self.registry.online_workers()
+            if w.maintenance_status != "maintenance"
+            and task_type in w.capabilities
+        ]
+        if capable_ids is not None:
+            allowed_set = set(capable_ids)
+            candidates = [w for w in candidates if w.worker_id in allowed_set]
+
+        if not candidates:
+            return []
+
+        # Capacity check: use claim store if provided, else registry active_jobs
+        eligible = []
+        for w in candidates:
+            if claim_store:
+                active = claim_store.get_active_claims(w.worker_id)
+                active_count = len(active)
+            else:
+                active_count = w.active_jobs
+            if active_count < w.max_parallel_jobs:
+                eligible.append((w, active_count))
+
+        if not eligible:
+            return []
+
+        # Sort by least loaded
+        eligible.sort(key=lambda x: (x[1], x[0].recent_failure_count, -x[0].weight))
+        return [(w.worker_id, "all_gates_passed") for w, _ in eligible]
+
     def schedule(self, task_type: str = "linux-worker",
                  branch: Optional[str] = None,
                  requires_merge: bool = False,
