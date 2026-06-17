@@ -247,6 +247,7 @@ def _resolve_ssh_key(registry=None):
     if SSH_KEY_PATH:
         return SSH_KEY_PATH
     candidates = [
+        Path.home() / ".vibedev" / "secrets" / "debian-vibeworker-ed25519",
         Path.home() / ".ssh" / "debian-vibeworker-ed25519",
         Path("/c/Users/KK/AppData/Local/vibedev-tools/ssh/debian-vibeworker-ed25519"),
     ]
@@ -663,7 +664,7 @@ class JobOrchestrator:
             _shell_quote(manifest.remote_job_dir),
             manifest.command,
         )
-        remote_cmd = 'echo REMOTE_PID=$$; exec %s' % _shell_quote(inner_cmd)
+        remote_cmd = "echo REMOTE_PID=$$; " + inner_cmd
         ssh_cmd = ["ssh"] + ssh_opts + [ssh_target, remote_cmd]
 
         try:
@@ -1105,7 +1106,7 @@ def _shell_quote(s: str) -> str:
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Job Orchestrator v" + __version__)
-    sub = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="subcommand")
 
     # submit
     p_submit = sub.add_parser("submit")
@@ -1142,11 +1143,10 @@ def main():
     # self-check
     sub.add_parser("self-check")
 
-    parser.add_argument("--json", action="store_true")
 
     args = parser.parse_args()
 
-    if args.command == "self-check":
+    if args.subcommand == "self-check":
         result = run_self_check()
         print(json.dumps(result, indent=2))
         sys.exit(0 if result["passed"] else 1)
@@ -1157,7 +1157,7 @@ def main():
     for w in orch.registry.list_workers():
         orch.registry.set_health(w.worker_id, NodeStatus.ONLINE)
 
-    if args.command == "submit":
+    if args.subcommand == "submit":
         m = orch.submit_job(
             args.task_type, args.command,
             required_tools=args.required_tools,
@@ -1171,12 +1171,12 @@ def main():
             sys.exit(0 if result.get("ok") else 1)
         sys.exit(0 if m.get("state") != "BLOCKED" else 1)
 
-    elif args.command == "execute":
+    elif args.subcommand == "execute":
         result = orch.execute_job(args.job_id, timeout=args.timeout)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("ok") else 1)
 
-    elif args.command == "status":
+    elif args.subcommand == "status":
         s = orch.get_job_status(args.job_id)
         if s:
             print(json.dumps(s, indent=2))
@@ -1184,17 +1184,17 @@ def main():
             print("Job %s not found" % args.job_id)
             sys.exit(1)
 
-    elif args.command == "cancel":
+    elif args.subcommand == "cancel":
         result = orch.cancel_job(args.job_id)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("ok") else 1)
 
-    elif args.command == "resume":
+    elif args.subcommand == "resume":
         result = orch.resume_job(args.job_id)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("ok") else 1)
 
-    elif args.command == "list":
+    elif args.subcommand == "list":
         state_filter = None
         if args.active:
             state_filter = "RUNNING"
