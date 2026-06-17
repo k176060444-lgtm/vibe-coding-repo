@@ -69,7 +69,9 @@ def _resolve_ssh_key():
     if SSH_KEY_PATH:
         return SSH_KEY_PATH
     candidates = [
+        Path.home() / ".vibedev" / "secrets" / "debian-vibeworker-ed25519",
         Path.home() / ".ssh" / "debian-vibeworker-ed25519",
+        Path("/home/vibeworker/.vibedev/secrets/debian-vibeworker-ed25519"),
         Path("/home/vibeworker/.ssh/debian-vibeworker-ed25519"),
         Path("/c/Users/KK/AppData/Local/vibedev-tools/ssh/debian-vibeworker-ed25519"),
     ]
@@ -110,20 +112,21 @@ class ClaimStore:
             return {"claims": {}, "version": __version__}
 
     def _write_store(self, data: dict):
-        tmp = self.store_path.with_suffix(".tmp")
+        import uuid
+        tmp = self.store_path.with_suffix(".tmp." + uuid.uuid4().hex[:8])
         tmp.write_text(json.dumps(data, indent=2, default=str))
         tmp.rename(self.store_path)
 
     def acquire_lock(self, timeout=10):
-        """Acquire exclusive file lock. Raises TimeoutError."""
+        """Acquire exclusive file lock using fcntl.lockf. Raises TimeoutError."""
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock_fd = open(self.lock_path, "w")
         deadline = time.time() + timeout
         while True:
             try:
-                fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB, 0, 0)
                 return
-            except (IOError, OSError):
+            except (IOError, OSError, ValueError):
                 if time.time() > deadline:
                     raise TimeoutError("claim_store lock timeout after %ds" % timeout)
                 time.sleep(0.05)
@@ -131,7 +134,7 @@ class ClaimStore:
     def release_lock(self):
         if hasattr(self, "_lock_fd") and self._lock_fd:
             try:
-                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_UN, 0, 0)
                 self._lock_fd.close()
             except Exception:
                 pass
@@ -295,16 +298,30 @@ class JobOrchestrator:
         self.claim_store = claim_store or ClaimStore()
         self.jobs_root.mkdir(parents=True, exist_ok=True)
 
+    def _get_candidate_workers(self, task_type, required_tools=None):
+        """Get ordered list of candidate workers for a task."""
+        if required_tools:
+            cap = self.scheduler._filter_by_capabilities(required_tools)
+            if cap.get("blocked"):
+                return [], cap.get("reason", "capability_blocked")
+            capable_ids = cap.get("capable_workers", [])
+        else:
+            capable_ids = None
+
+        workers = self.registry.available_workers(
+            task_type, allowed_worker_ids=capable_ids)
+        # Sort by least loaded
+        workers.sort(key=lambda w: (w.active_jobs, w.recent_failure_count, -w.weight))
+        return workers, None
+
     def submit_job(self, task_type, command, required_tools=None,
                    optional_tools=None, job_id=None) -> dict:
         """Submit a job. Returns manifest dict. Fail-closed on no capable worker."""
         jid = job_id or "job-" + uuid.uuid4().hex[:12]
 
-        # Schedule via capability-aware scheduler
-        schedule_result = self.scheduler.schedule(
-            task_type=task_type,
-            required_tools=required_tools,
-        )
+        # Get candidate workers
+        candidates, block_reason = self._get_candidate_workers(
+            task_type, required_tools)
 
         manifest = JobManifest(
             job_id=jid,
@@ -312,31 +329,33 @@ class JobOrchestrator:
             command=command,
             required_tools=required_tools or [],
             optional_tools=optional_tools or [],
-            capability_resolution=schedule_result.get("selection_reason", ""),
         )
 
-        # Fail-closed
-        if schedule_result.get("pending") or schedule_result.get("worker_id") is None:
+        if not candidates:
             manifest.state = JobState.BLOCKED.value
-            manifest.error = schedule_result.get(
-                "pending_reason",
-                schedule_result.get("selection_reason", "unknown_block"),
-            )
+            manifest.error = block_reason or "no_candidates"
             self._persist_manifest(manifest)
             return manifest.to_dict()
 
-        worker_id = schedule_result["worker_id"]
-        manifest.requested_worker = worker_id
+        # Try each candidate until one is claimed
+        claimed = False
+        for worker in candidates:
+            manifest.requested_worker = worker.worker_id
+            manifest.capability_resolution = "selected_%s" % worker.worker_id
+            claim_result = self.claim_store.try_claim(
+                jid, worker.worker_id, os.getpid())
+            if claim_result.get("claimed"):
+                manifest.actual_worker = worker.worker_id
+                claimed = True
+                break
 
-        # Atomic claim
-        claim_result = self.claim_store.try_claim(jid, worker_id, os.getpid())
-        if not claim_result.get("claimed"):
+        if not claimed:
             manifest.state = JobState.BLOCKED.value
-            manifest.error = "claim_failed: " + claim_result.get("reason", "unknown")
+            manifest.error = "all_candidates_at_capacity"
             self._persist_manifest(manifest)
             return manifest.to_dict()
 
-        manifest.actual_worker = worker_id
+        worker_id = manifest.actual_worker
         manifest.state = JobState.CLAIMED.value
 
         # Create controller-side job dir
@@ -679,7 +698,7 @@ def _shell_quote(s: str) -> str:
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Job Orchestrator v" + __version__)
-    sub = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="subcommand")
 
     # submit
     p_submit = sub.add_parser("submit")
@@ -716,11 +735,10 @@ def main():
     # self-check
     sub.add_parser("self-check")
 
-    parser.add_argument("--json", action="store_true")
 
     args = parser.parse_args()
 
-    if args.command == "self-check":
+    if args.subcommand == "self-check":
         result = run_self_check()
         print(json.dumps(result, indent=2))
         sys.exit(0 if result["passed"] else 1)
@@ -731,7 +749,7 @@ def main():
     for w in orch.registry.list_workers():
         orch.registry.set_health(w.worker_id, NodeStatus.ONLINE)
 
-    if args.command == "submit":
+    if args.subcommand == "submit":
         m = orch.submit_job(
             args.task_type, args.command,
             required_tools=args.required_tools,
@@ -745,12 +763,12 @@ def main():
             sys.exit(0 if result.get("ok") else 1)
         sys.exit(0 if m.get("state") != "BLOCKED" else 1)
 
-    elif args.command == "execute":
+    elif args.subcommand == "execute":
         result = orch.execute_job(args.job_id, timeout=args.timeout)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("ok") else 1)
 
-    elif args.command == "status":
+    elif args.subcommand == "status":
         s = orch.get_job_status(args.job_id)
         if s:
             print(json.dumps(s, indent=2))
@@ -758,17 +776,17 @@ def main():
             print("Job %s not found" % args.job_id)
             sys.exit(1)
 
-    elif args.command == "cancel":
+    elif args.subcommand == "cancel":
         result = orch.cancel_job(args.job_id)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("ok") else 1)
 
-    elif args.command == "resume":
+    elif args.subcommand == "resume":
         result = orch.resume_job(args.job_id)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("ok") else 1)
 
-    elif args.command == "list":
+    elif args.subcommand == "list":
         state_filter = None
         if args.active:
             state_filter = "RUNNING"
