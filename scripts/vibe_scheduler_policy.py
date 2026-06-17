@@ -21,6 +21,14 @@ sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent))
 from vibe_worker_registry import WorkerRegistry, WorkerNode, NodeStatus, TaskType
 
 
+
+# Model health awareness (V1.15)
+try:
+    from vibe_model_health import ModelHealthRegistry, ModelStatus
+    _MODEL_HEALTH = ModelHealthRegistry()
+except ImportError:
+    _MODEL_HEALTH = None
+
 class SchedulerPolicy:
     """Active-active scheduling policy for worker pool."""
 
@@ -29,7 +37,8 @@ class SchedulerPolicy:
 
     def schedule(self, task_type: str = "linux-worker",
                  branch: Optional[str] = None,
-                 requires_merge: bool = False) -> dict:
+                 requires_merge: bool = False,
+                 model: Optional[str] = None) -> dict:
         """Schedule a task to the best available worker.
 
         Returns:
@@ -64,6 +73,20 @@ class SchedulerPolicy:
                 "pending": True,
                 "pending_reason": f"branch_{branch}_locked_by_another_worker",
             }
+
+        # Check model health if model specified (V1.15)
+        if model and _MODEL_HEALTH:
+            mh = _MODEL_HEALTH.get_status(model)
+            if mh.status != ModelStatus.AVAILABLE:
+                return {
+                    "worker_id": None,
+                    "selection_reason": f"model_quarantined: {mh.health_reason}",
+                    "task_type": task_type,
+                    "model_health": mh.status.value,
+                    "health_reason": mh.health_reason,
+                    "pending": True,
+                    "pending_reason": f"model_{model}_quarantined_{mh.health_reason}",
+                }
 
         # Select worker
         worker = self.registry.select_worker(task_type)
