@@ -576,3 +576,152 @@ def test_cap_fallback_cannot_bypass_tools():
     result = policy.schedule(task_type="linux-worker", required_tools=["ripgrep"])
     assert result["worker_id"] is None
     os.unlink(tmp)
+
+# === V1.17.7.4 Orchestrator + WorkOrder Schema Tests ===
+
+from vibe_workorder_schema import WorkOrder, __version__ as wo_version, VALID_FALLBACK_POLICIES
+from vibe_job_orchestrator import JobOrchestrator, JobState, __version__ as orch_version
+from vibe_scheduler_policy import SchedulerPolicy
+import tempfile as tf
+
+def test_wo_schema_has_required_tools():
+    """WorkOrder schema accepts required_tools field."""
+    wo = WorkOrder(
+        work_order_id="wo-test-001",
+        title="Test WO",
+        wo_type="code",
+        goal="Test goal for required_tools field validation",
+        required_tools=["ripgrep", "jq"],
+    )
+    assert wo.required_tools == ["ripgrep", "jq"]
+    # Round-trip via dict
+    d = wo.to_dict()
+    wo2 = WorkOrder.from_dict(d)
+    assert wo2.required_tools == ["ripgrep", "jq"]
+
+
+def test_wo_schema_has_capability_fallback_policy():
+    """WorkOrder schema has capability_fallback_policy field."""
+    wo = WorkOrder(
+        work_order_id="wo-test-002",
+        title="Test WO",
+        wo_type="code",
+        goal="Test goal for capability_fallback_policy field validation",
+        capability_fallback_policy="degrade",
+    )
+    assert wo.capability_fallback_policy == "degrade"
+    # Default is block
+    wo2 = WorkOrder(
+        work_order_id="wo-test-003",
+        title="Test WO",
+        wo_type="code",
+        goal="Test goal for default capability_fallback_policy block value",
+    )
+    assert wo2.capability_fallback_policy == "block"
+    # Invalid policy raises
+    try:
+        WorkOrder(
+            work_order_id="wo-test-004",
+            title="Test WO",
+            wo_type="code",
+            goal="Test goal for invalid fallback policy rejection",
+            capability_fallback_policy="invalid",
+        )
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "Invalid" in str(e)
+
+
+# ---- Orchestrator Tests ----
+
+def test_orchestrator_exists():
+    """JobOrchestrator module imports and class instantiates."""
+    orch = JobOrchestrator()
+    assert orch is not None
+    assert orch_version == "1.0.0"
+    assert wo_version == "1.0.0"
+
+
+def test_orchestrator_submit_requires_capability():
+    """submit with required_tools goes through capability check (fail-closed)."""
+    orch = JobOrchestrator()
+    # All offline -> should be BLOCKED
+    for w in orch.registry.list_workers():
+        orch.registry.set_health(w.worker_id, NodeStatus.OFFLINE)
+    m = orch.submit_job("linux-worker", "echo hi", required_tools=["ripgrep"])
+    assert m["state"] == "BLOCKED"
+    assert m["required_tools"] == ["ripgrep"]
+    assert m["error"] is not None
+
+
+def test_orchestrator_release_capacity():
+    """Capacity release works correctly."""
+    orch = JobOrchestrator()
+    for w in orch.registry.list_workers():
+        orch.registry.set_health(w.worker_id, NodeStatus.ONLINE)
+    m = orch.submit_job("linux-worker", "echo hi")
+    assert m["state"] == "CLAIMED"
+    wid = m["actual_worker"]
+    worker = orch.registry.get_worker(wid)
+    assert worker.active_jobs == 1
+    orch.release_capacity(wid)
+    assert worker.active_jobs == 0
+
+
+def test_full_chain_wo_to_scheduler():
+    """Full chain: WorkOrder -> parse required_tools -> scheduler -> correct worker selected."""
+    # Build a WO with required_tools
+    wo = WorkOrder(
+        work_order_id="wo-chain-001",
+        title="Full chain test",
+        wo_type="code",
+        goal="Verify full chain from work order through scheduler to worker selection",
+        required_tools=["ripgrep"],
+    )
+
+    # Mock scheduler state where only 9bao has ripgrep
+    import tempfile as tf
+    import vibe_scheduler_policy as sp_mod
+
+    state_data = {
+        "schema_version": 2, "checksum": "test",
+        "approved_baselines": {
+            "5bao": {"fingerprint": {"node_specific": {"5bao": {"ripgrep": "NOT_INSTALLED"}, "9bao": {"ripgrep": "13.0.0"}}}, "sha256": "test"},
+            "9bao": {"fingerprint": {"node_specific": {"5bao": {"ripgrep": "NOT_INSTALLED"}, "9bao": {"ripgrep": "13.0.0"}}}, "sha256": "test"}
+        },
+        "events": [], "plans": [], "approvals": [], "history": []
+    }
+
+    tmp = tf.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    json.dump(state_data, tmp)
+    tmp.close()
+
+    orig_store = sp_mod.StateStore
+    class MockStore:
+        def __init__(self, path=None):
+            self.path = tmp.name
+        def load(self):
+            with open(self.path) as f:
+                return json.load(f)
+    sp_mod.StateStore = MockStore
+
+    try:
+        reg = WorkerRegistry()
+        for w in reg.list_workers():
+            reg.set_health(w.worker_id, NodeStatus.ONLINE)
+        scheduler = SchedulerPolicy(reg)
+
+        # Schedule with the WO's required_tools
+        result = scheduler.schedule(task_type="linux-worker", required_tools=wo.required_tools)
+        assert result["worker_id"] == "9bao", f"Expected 9bao, got {result}"
+        assert result["pending"] is False
+        assert "capability" in result.get("selection_reason", "") or "ripgrep" not in result.get("selection_reason", "")
+    finally:
+        sp_mod.StateStore = orig_store
+        os.unlink(tmp.name)
+
+
+if __name__ == "__main__":
+    import pytest
+    sys.exit(pytest.main([__file__, "-v", "--tb=short"]))
+
