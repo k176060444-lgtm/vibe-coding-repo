@@ -121,10 +121,7 @@ class SchedulerPolicy:
             try:
                 gate = gate_check_for_dispatch()
                 if not gate.get("allowed"):
-                    if gate.get("reason") == "state_error":
-                        pass  # allow dispatch when state not initialized
-                    else:
-                        return []
+                    return []
             except Exception:
                 return []
 

@@ -19,7 +19,7 @@ from vibe_toolchain_lifecycle import (
     RemediationPlanner, RemediationAction, PlanRecord, PlanStatus,
     SchedulerGate, ToolchainLifecycleManager, gate_check_for_dispatch,
     dispatch_check_write_operation, SSH_OPTS,
-    STATE_CORRUPTED, STATE_NOT_INITIALIZED)
+)
 from vibe_worker_registry import WorkerRegistry, WorkerNode, NodeStatus
 
 
@@ -89,17 +89,6 @@ def _freeze_with_plan(mgr, node_id, fp):
 
 
 # === Test 1: Version ===
-
-def _make_bootstrapped_store(*args, **kwargs):
-    """Create a StateStore and bootstrap if state file doesn't exist."""
-    store = StateStore(*args, **kwargs)
-    try:
-        store.load()
-    except (STATE_NOT_INITIALIZED, STATE_CORRUPTED):
-        store.bootstrap()
-    return store
-
-
 def test_version():
     assert __version__ in ("2.3.0", "2.4.0", "2.5.0")
 
@@ -381,10 +370,8 @@ def test_concurrent_lock_no_loss():
         n_events = 50
         def writer(store_path, lock_path, latch_path, start_idx, count):
             s = StateStore(store_path, lock_path, latch_path)
-            try:
-                s.load()
-            except (STATE_NOT_INITIALIZED, STATE_CORRUPTED):
-                s.bootstrap()
+            try: s.load()
+            except: s.bootstrap()
             for i in range(count):
                 s.add_event(DriftEvent(event_id=f"evt-{start_idx+i}", node_id="5bao",
                     detected_at=datetime.now(timezone.utc).isoformat(),

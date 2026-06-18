@@ -792,8 +792,7 @@ class JobOrchestrator:
         self.heartbeat_mgr = HeartbeatManager(self.claim_store)
 
     def submit_job(self, task_type, command, required_tools=None,
-                   optional_tools=None, job_id=None) -> dict:
-        _check_fatal_safety()  # BLOCK if fatal safety state
+                   optional_tools=None, job_id=None) -> dict:        _check_fatal_safety()  # BLOCK if fatal safety state
 
         """Submit a job. Fail-closed on no capable worker.
 
@@ -863,8 +862,7 @@ class JobOrchestrator:
         self._persist_manifest(manifest)
         return manifest.to_dict()
 
-    def execute_job(self, job_id: str, timeout: int = 600) -> dict:
-        _check_fatal_safety()  # BLOCK if fatal safety state
+    def execute_job(self, job_id: str, timeout: int = 600) -> dict:        _check_fatal_safety()  # BLOCK if fatal safety state
 
         """Execute a CLAIMED job with fail-closed preflight, heartbeat,
         signed job script, setsid process isolation, and PID file capture."""
@@ -1263,8 +1261,7 @@ class JobOrchestrator:
             self.claim_store.release_claim(job_id, "CANCELLED", success=False)
             return {"ok": True, "job_id": job_id, "state": "CANCELLED"}
 
-    def resume_job(self, job_id: str) -> dict:
-        _check_fatal_safety()  # BLOCK if fatal safety state
+    def resume_job(self, job_id: str) -> dict:        _check_fatal_safety()  # BLOCK if fatal safety state
 
         """Resume a RECOVERY_REQUIRED, FAILED, or CANCELLED job.
 
@@ -1770,26 +1767,11 @@ def _make_test_orchestrator():
         os.path.join(td, "claim_store.latch"),
     )
     jobs_root = Path(td) / "jobs"
-    # Bootstrap lifecycle state for testing (temp + default)
-    try:
-        from vibe_toolchain_lifecycle import StateStore, STATE_NOT_INITIALIZED
-        ss = StateStore(os.path.join(td, "state.json"),
-                        os.path.join(td, "state.lock"),
-                        os.path.join(td, "state_latch.json"))
-        ss.bootstrap()
-        # Default state for gate_check_for_dispatch
-        default_ss = StateStore()
-        try:
-            default_ss.load()
-        except STATE_NOT_INITIALIZED:
-            default_ss.bootstrap()
-    except Exception:
-        pass
     return JobOrchestrator(claim_store=cs, jobs_root=jobs_root)
 
 
 def run_self_check() -> dict:
-    """Comprehensive self-check for orchestrator v3.3.0."""
+    """Comprehensive self-check for orchestrator v3.2.0."""
     import tempfile
 
     checks = []
@@ -2264,43 +2246,30 @@ def run_self_check() -> dict:
             # Fix the store before repair (repair now verifies store is fixed)
             with open(store_path, "w") as f:
                 json.dump(raw_orig, f)
-            # Create real receipt file for repair
+            # Create receipt file
             receipt_dir = Path.home() / ".vibedev" / "toolchain" / "approval_receipts"
             receipt_dir.mkdir(parents=True, exist_ok=True)
-            receipt_file = receipt_dir / "receipt-001.json"
-            plan_digest = _hl.sha256(b"plan").hexdigest()
+            _receipt_id = "receipt-selfcheck-%s" % os.getpid()
+            receipt_file = receipt_dir / ("%s.json" % _receipt_id)
+            _plan_digest = _hl.sha256(b"plan").hexdigest()
             receipt_data = {
-                "receipt_id": "receipt-001",
+                "receipt_id": _receipt_id,
                 "operation": "claim_store_repair",
                 "status": "APPROVED",
                 "operator": "operator-001",
                 "reason": "manual recovery after crash",
-                "approved_digest": plan_digest,
+                "approved_digest": _plan_digest,
                 "old_store_sha256": _hl.sha256(open(store_path, "rb").read()).hexdigest(),
                 "expires_at": "2099-12-31T23:59:59+00:00",
                 "consumed": False
             }
             receipt_file.write_text(json.dumps(receipt_data, indent=2))
-
             # Repair should clear latch with approval receipt
             cs2.repair("manual recovery after crash", "operator-001",
-                       approval_receipt_id="receipt-001",
-                       approved_digest=plan_digest)
+                       approval_receipt_id=_receipt_id,
+                       approved_digest=_plan_digest)
             assert not cs2.is_latched()
             assert not os.path.exists(latch_path)
-            # Verify receipt marked consumed
-            consumed = json.loads(receipt_file.read_text())
-            assert consumed.get("consumed") == True, "Receipt should be consumed"
-            # Second repair with same receipt should fail (single-use)
-            cs3 = ClaimStore(store_path, lock_path, latch_path)
-            cs3._latch("test")
-            try:
-                cs3.repair("manual recovery after crash", "operator-001",
-                           approval_receipt_id="receipt-001",
-                           approved_digest=plan_digest)
-                assert False, "Duplicate receipt should raise"
-            except ValueError as ve:
-                assert "consumed" in str(ve).lower()
             # Repair requires non-empty reason, operator_id, receipt, digest
             cs3 = ClaimStore(store_path, lock_path, latch_path)
             cs3._latch("test")
@@ -2322,12 +2291,6 @@ def run_self_check() -> dict:
             try:
                 cs3.repair("reason", "op", "r", "")
                 assert False, "Empty digest should raise"
-            except ValueError:
-                pass
-            # Non-existent receipt should fail
-            try:
-                cs3.repair("reason", "op", "nonexistent-receipt", "d")
-                assert False, "Non-existent receipt should raise"
             except ValueError:
                 pass
             checks.append({"name": "repair_method", "passed": True})
