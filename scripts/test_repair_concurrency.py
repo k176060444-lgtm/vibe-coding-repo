@@ -230,12 +230,224 @@ def test_same_sha_rejected():
         return True
 
 
+def test_crash_after_replace():
+    """Crash after atomic state replacement but before receipt consume.
+    Verify: state=repaired, receipt NOT consumed, latch still active."""
+    print("\n=== Test 5: Crash After Replace (before receipt consume) ===")
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        sp, lp = td / "state.json", td / "corruption_latch"
+        rd = td / "approval_receipts"; rd.mkdir()
+
+        sp.write_text(json.dumps(_vs(), indent=2))
+        _corrupt(str(sp))
+        old_sha = _sha(str(sp))
+
+        cp = td / "candidate.json"
+        cp.write_text(json.dumps(_vs({"repaired": True}), indent=2))
+        cand_sha = _sha(str(cp))
+
+        import secrets
+        nonce = secrets.token_hex(32)
+        rid = "crash-replace"
+        (rd / ("%s.json" % rid)).write_text(json.dumps(_mk_receipt(rid, old_sha, cand_sha, nonce), indent=2))
+
+        store = _latch(sp, lp)
+        assert store.latch.is_latched()
+
+        # Simulate crash after replace but before receipt consume:
+        # Manually do the replace step, then verify state
+        import shutil
+        backup_path = str(sp) + ".corrupted.%s" % old_sha[:16]
+        shutil.copy2(str(sp), backup_path)
+        os.chmod(backup_path, 0o444)
+
+        tmp_state = str(sp) + ".repair.tmp"
+        shutil.copy2(str(cp), tmp_state)
+        os.replace(tmp_state, str(sp))
+
+        # At this point: state is replaced, receipt NOT consumed, latch NOT cleared
+        # Verify state is now the candidate
+        new_sha = _sha(str(sp))
+        assert new_sha == cand_sha, f"State should be candidate SHA: {new_sha[:16]} vs {cand_sha[:16]}"
+        print(f"  State replaced: {new_sha[:16]} == candidate {cand_sha[:16]} ✓")
+
+        # Verify receipt is NOT consumed
+        receipt_data = json.loads(open(rd / ("%s.json" % rid)).read())
+        assert not receipt_data.get("consumed", False), "Receipt should NOT be consumed"
+        print(f"  Receipt NOT consumed ✓")
+
+        # Verify latch is still active
+        store2 = StateStore(str(sp), latch_path=str(lp))
+        assert store2.latch.is_latched(), "Latch should still be active"
+        print(f"  Latch still active ✓")
+
+        # Verify that the same receipt CANNOT be used again (old_sha mismatch)
+        store2 = StateStore(str(sp), latch_path=str(lp))
+        assert store2.latch.is_latched(), "Latch should still be active"
+        print(f"  Latch still active ✓")
+
+        # Attempting same receipt MUST fail (old_sha mismatch after replace)
+        try:
+            store2.repair(rid, "op", str(cp))
+            assert False, "Should reject: old_sha mismatch after replace"
+        except ValueError as e:
+            assert "Old artifact SHA mismatch" in str(e)
+            print(f"  Same receipt rejected (old_sha mismatch) ✓")
+
+        # Recovery: mark receipt consumed manually (operator intervention)
+        receipt_data["consumed"] = True
+        receipt_data["consumed_at"] = "2026-01-01T00:00:00+00:00"
+        tmp_r = str(rd / ("%s.json" % rid)) + ".tmp"
+        with open(tmp_r, "w") as f:
+            json.dump(receipt_data, f, indent=2)
+        os.replace(tmp_r, str(rd / ("%s.json" % rid)))
+        store2.latch.clear("operator-recovery")
+        store3 = StateStore(str(sp), latch_path=str(lp))
+        assert not store3.latch.is_latched(), "Latch cleared after recovery"
+        print(f"  Recovery: receipt consumed, latch cleared ✓")
+
+        print("  PASS")
+        return True
+
+
+def test_crash_after_receipt_consume():
+    """Crash after receipt consume but before latch clear.
+    Verify: state=repaired, receipt consumed, latch still active."""
+    print("\n=== Test 6: Crash After Receipt Consume (before latch clear) ===")
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        sp, lp = td / "state.json", td / "corruption_latch"
+        rd = td / "approval_receipts"; rd.mkdir()
+
+        sp.write_text(json.dumps(_vs(), indent=2))
+        _corrupt(str(sp))
+        old_sha = _sha(str(sp))
+
+        cp = td / "candidate.json"
+        cp.write_text(json.dumps(_vs({"repaired": True}), indent=2))
+        cand_sha = _sha(str(cp))
+
+        import secrets
+        nonce = secrets.token_hex(32)
+        rid = "crash-receipt"
+        receipt_data = _mk_receipt(rid, old_sha, cand_sha, nonce)
+        (rd / ("%s.json" % rid)).write_text(json.dumps(receipt_data, indent=2))
+
+        store = _latch(sp, lp)
+        assert store.latch.is_latched()
+
+        # Simulate crash after receipt consume but before latch clear:
+        # Manually do replace + receipt consume, but NOT latch clear
+        import shutil
+        backup_path = str(sp) + ".corrupted.%s" % old_sha[:16]
+        shutil.copy2(str(sp), backup_path)
+        os.chmod(backup_path, 0o444)
+
+        tmp_state = str(sp) + ".repair.tmp"
+        shutil.copy2(str(cp), tmp_state)
+        os.replace(tmp_state, str(sp))
+
+        # Mark receipt consumed
+        receipt_data["consumed"] = True
+        receipt_data["consumed_at"] = "2026-01-01T00:00:00+00:00"
+        receipt_data["consumed_artifact_sha"] = _sha(str(sp))
+        tmp_r = str(rd / ("%s.json" % rid)) + ".tmp"
+        with open(tmp_r, "w") as f:
+            json.dump(receipt_data, f, indent=2)
+        os.replace(tmp_r, str(rd / ("%s.json" % rid)))
+
+        # At this point: state replaced, receipt consumed, latch NOT cleared
+        # Verify state is repaired
+        new_sha = _sha(str(sp))
+        assert new_sha == cand_sha, f"State should be candidate: {new_sha[:16]} vs {cand_sha[:16]}"
+        print(f"  State replaced ✓")
+
+        # Verify receipt is consumed
+        receipt_after = json.loads(open(rd / ("%s.json" % rid)).read())
+        assert receipt_after.get("consumed", False), "Receipt should be consumed"
+        print(f"  Receipt consumed ✓")
+
+        # Verify latch is still active
+        store2 = StateStore(str(sp), latch_path=str(lp))
+        assert store2.latch.is_latched(), "Latch should still be active"
+        print(f"  Latch still active ✓")
+
+        # Clear latch manually (simulating successful completion)
+        store2.latch.clear("op")
+        store3 = StateStore(str(sp), latch_path=str(lp))
+        assert not store3.latch.is_latched(), "Latch should be cleared"
+        print(f"  Latch cleared manually ✓")
+
+        # Verify state is consistent
+        final_state = json.loads(open(str(sp)).read())
+        assert final_state.get("schema_version") == SCHEMA_VERSION
+        print(f"  State consistent ✓")
+
+        print("  PASS")
+        return True
+
+
+def test_crash_before_replace():
+    """Crash before atomic state replacement.
+    Verify: state=corrupted, receipt NOT consumed, latch active."""
+    print("\n=== Test 7: Crash Before Replace (state still corrupted) ===")
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        sp, lp = td / "state.json", td / "corruption_latch"
+        rd = td / "approval_receipts"; rd.mkdir()
+
+        sp.write_text(json.dumps(_vs(), indent=2))
+        _corrupt(str(sp))
+        old_sha = _sha(str(sp))
+
+        cp = td / "candidate.json"
+        cp.write_text(json.dumps(_vs({"repaired": True}), indent=2))
+        cand_sha = _sha(str(cp))
+
+        import secrets
+        nonce = secrets.token_hex(32)
+        rid = "crash-before"
+        (rd / ("%s.json" % rid)).write_text(json.dumps(_mk_receipt(rid, old_sha, cand_sha, nonce), indent=2))
+
+        store = _latch(sp, lp)
+        assert store.latch.is_latched()
+
+        # Crash before replace: state is still corrupted
+        # Verify state is still corrupted
+        current_sha = _sha(str(sp))
+        assert current_sha == old_sha, f"State should still be corrupted: {current_sha[:16]} vs {old_sha[:16]}"
+        print(f"  State still corrupted ✓")
+
+        # Verify receipt NOT consumed
+        receipt_data = json.loads(open(rd / ("%s.json" % rid)).read())
+        assert not receipt_data.get("consumed", False), "Receipt should NOT be consumed"
+        print(f"  Receipt NOT consumed ✓")
+
+        # Verify latch still active
+        store2 = StateStore(str(sp), latch_path=str(lp))
+        assert store2.latch.is_latched(), "Latch should still be active"
+        print(f"  Latch still active ✓")
+
+        # Now complete the repair
+        store2.repair(rid, "op", str(cp))
+        store3 = StateStore(str(sp), latch_path=str(lp))
+        assert not store3.latch.is_latched(), "Latch should be cleared"
+        print(f"  Repair completed after crash ✓")
+
+        print("  PASS")
+        return True
+
+
 if __name__ == "__main__":
     results = {
         "concurrent": test_concurrent_repair(),
         "empty_candidate": test_empty_candidate(),
         "duplicate_nonce": test_duplicate_nonce(),
         "same_sha": test_same_sha_rejected(),
+        "crash_after_replace": test_crash_after_replace(),
+        "crash_after_receipt_consume": test_crash_after_receipt_consume(),
+        "crash_before_replace": test_crash_before_replace(),
     }
     print("\n" + "=" * 50)
     for n, p in results.items():
