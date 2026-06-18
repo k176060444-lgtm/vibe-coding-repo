@@ -1089,6 +1089,9 @@ class ToolchainLifecycleManager:
         self.classifier = DriftClassifier()
         self.planner = RemediationPlanner()
         self.store = StateStore(state_path, lock_path, latch_path)
+        # Auto-bootstrap if state file does not exist
+        if not os.path.exists(self.store.path):
+            self.store.bootstrap()
         self.gate = SchedulerGate(self.store)
 
     def _next_plan_id(self) -> str:
