@@ -389,20 +389,71 @@ class ClaimStore:
         self.recover_incomplete_repairs()
 
     def _check_nonce(self, nonce: str) -> bool:
-        """Check if nonce is available (not consumed). Returns True if available."""
+        """Check if nonce is available (not RESERVED or COMMITTED). Returns True if available."""
         if not nonce:
             return False
         try:
             with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
                 if NONCE_LEDGER_PATH.exists():
                     ledger = json.loads(NONCE_LEDGER_PATH.read_text())
-                    return nonce not in ledger.get("consumed", {})
+                    consumed = ledger.get("consumed", {})
+                    entry = consumed.get(nonce)
+                    if entry is None:
+                        return True  # Not in ledger at all
+                    state = entry.get("state", "COMMITTED")
+                    if state == "ABORTED":
+                        return True  # Aborted = available for reuse
+                    return False  # RESERVED or COMMITTED = not available
                 return True
         except Exception:
             return False  # Fail-closed: assume consumed on error
 
-    def _consume_nonce(self, nonce: str, receipt_id: str) -> bool:
-        """Atomically consume a nonce. Returns True if successfully consumed."""
+    def _reserve_nonce(self, nonce: str, tx_id: str, receipt_id: str) -> bool:
+        """Atomically check + reserve a nonce. Returns True if successfully reserved.
+
+        Atomic state machine: nonce must not be RESERVED or COMMITTED.
+        On success, nonce is marked RESERVED(tx_id, receipt_id).
+        Loser gets False before any store/receipt mutation.
+        """
+        if not nonce or not tx_id:
+            return False
+        try:
+            with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                ledger = {"consumed": {}}
+                if NONCE_LEDGER_PATH.exists():
+                    ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+
+                consumed = ledger.get("consumed", {})
+                entry = consumed.get(nonce)
+                if entry is not None:
+                    state = entry.get("state", "COMMITTED")
+                    if state in ("RESERVED", "COMMITTED"):
+                        return False  # Already taken
+                    # ABORTED → can be reused
+
+                consumed[nonce] = {
+                    "state": "RESERVED",
+                    "tx_id": tx_id,
+                    "receipt_id": receipt_id,
+                    "reserved_at": _now_iso(),
+                }
+                ledger["consumed"] = consumed
+
+                tmp = NONCE_LEDGER_PATH.with_suffix(".tmp")
+                with open(str(tmp), "w") as f:
+                    json.dump(ledger, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(str(tmp), str(NONCE_LEDGER_PATH))
+                return True
+        except Exception:
+            return False  # Fail-closed
+
+    def _commit_nonce(self, nonce: str, tx_id: str) -> bool:
+        """Commit a RESERVED nonce. Returns True on success.
+
+        Only the holder of the same tx_id can commit.
+        """
         if not nonce:
             return False
         try:
@@ -411,15 +462,91 @@ class ClaimStore:
                 if NONCE_LEDGER_PATH.exists():
                     ledger = json.loads(NONCE_LEDGER_PATH.read_text())
 
-                if nonce in ledger.get("consumed", {}):
-                    return False  # Already consumed
+                consumed = ledger.get("consumed", {})
+                entry = consumed.get(nonce)
+                if entry is None:
+                    return False  # Not reserved
+                if entry.get("state") != "RESERVED":
+                    return False  # Not in RESERVED state
+                if entry.get("tx_id") != tx_id:
+                    return False  # Not our reservation
 
-                ledger.setdefault("consumed", {})[nonce] = {
+                entry["state"] = "COMMITTED"
+                entry["committed_at"] = _now_iso()
+                consumed[nonce] = entry
+                ledger["consumed"] = consumed
+
+                tmp = NONCE_LEDGER_PATH.with_suffix(".tmp")
+                with open(str(tmp), "w") as f:
+                    json.dump(ledger, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(str(tmp), str(NONCE_LEDGER_PATH))
+                return True
+        except Exception:
+            return False  # Fail-closed
+
+    def _abort_nonce(self, nonce: str, tx_id: str) -> bool:
+        """Abort a RESERVED nonce, releasing it for reuse."""
+        if not nonce:
+            return False
+        try:
+            with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                ledger = {"consumed": {}}
+                if NONCE_LEDGER_PATH.exists():
+                    ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+
+                consumed = ledger.get("consumed", {})
+                entry = consumed.get(nonce)
+                if entry is None:
+                    return True  # Nothing to abort
+                if entry.get("tx_id") != tx_id:
+                    return False  # Not our reservation
+
+                entry["state"] = "ABORTED"
+                entry["aborted_at"] = _now_iso()
+                consumed[nonce] = entry
+                ledger["consumed"] = consumed
+
+                tmp = NONCE_LEDGER_PATH.with_suffix(".tmp")
+                with open(str(tmp), "w") as f:
+                    json.dump(ledger, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(str(tmp), str(NONCE_LEDGER_PATH))
+                return True
+        except Exception:
+            return False
+
+    def _consume_nonce(self, nonce: str, receipt_id: str) -> bool:
+        """Atomically consume a nonce (legacy: marks COMMITTED directly).
+
+        V1.18.4.1: Prefer _reserve_nonce + _commit_nonce for new code.
+        This method is kept for backward compatibility with the original
+        repair flow which does check+consume in sequence.
+        """
+        if not nonce:
+            return False
+        try:
+            with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                ledger = {"consumed": {}}
+                if NONCE_LEDGER_PATH.exists():
+                    ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+
+                consumed = ledger.get("consumed", {})
+                entry = consumed.get(nonce)
+                if entry is not None:
+                    state = entry.get("state", "COMMITTED")
+                    if state in ("RESERVED", "COMMITTED"):
+                        return False  # Already taken
+
+                consumed[nonce] = {
+                    "state": "COMMITTED",
                     "receipt_id": receipt_id,
                     "consumed_at": _now_iso(),
                 }
+                ledger["consumed"] = consumed
 
-                # Atomic write
                 tmp = NONCE_LEDGER_PATH.with_suffix(".tmp")
                 with open(str(tmp), "w") as f:
                     json.dump(ledger, f, indent=2)
@@ -632,16 +759,21 @@ class ClaimStore:
             if datetime.now(timezone.utc) > exp:
                 raise ValueError("Receipt expired")
 
-        # Step 2: Verify nonce not used (global ledger)
+        # Step 2: Atomic nonce reserve — must succeed BEFORE any store mutation
         if receipt.get("consumed", False):
             raise ValueError("Receipt already consumed")
         nonce = receipt.get("nonce", "")
         if not nonce or len(nonce) < 16:
             raise ValueError("Receipt nonce missing or too short")
 
-        # Global nonce ledger check — prevents cross-receipt nonce reuse
-        if not self._check_nonce(nonce):
-            raise ValueError("Nonce already consumed in global ledger: %s" % nonce[:16])
+        # Generate tx_id early for nonce reservation
+        import uuid as _uuid
+        tx_id = "repair-tx-%s-%s" % (approval_receipt_id[:8], _uuid.uuid4().hex[:8])
+
+        # Atomic reserve: check + mark RESERVED(tx_id) in one lock acquisition
+        # Loser gets False before any store/receipt mutation
+        if not self._reserve_nonce(nonce, tx_id, approval_receipt_id):
+            raise ValueError("Nonce already reserved or consumed: %s" % nonce[:16])
 
         # Step 3: Verify immutable corrupted backup SHA
         old_sha = receipt.get("old_store_sha256", "")
@@ -693,7 +825,7 @@ class ClaimStore:
             raise MANIFEST_CORRUPTED("Candidate checksum mismatch")
 
         # Step 8: Create persistent journal BEFORE any mutations
-        tx_id = "repair-tx-%s-%s" % (approval_receipt_id[:8], uuid.uuid4().hex[:8])
+        # tx_id already generated at Step 2 for nonce reservation
         journal_path = self.store_path.parent / ("%s.journal.json" % tx_id)
         journal = {
             "tx_id": tx_id,
@@ -753,12 +885,12 @@ class ClaimStore:
         journal["steps_completed"].append("receipt_consume")
         self._write_journal(journal_path, journal)
 
-        # Step 12: Consume nonce in global ledger — MUST succeed
-        if not self._consume_nonce(nonce, approval_receipt_id):
+        # Step 12: Commit nonce in global ledger — RESERVED → COMMITTED
+        if not self._commit_nonce(nonce, tx_id):
             raise RuntimeError(
-                "Nonce consumption FAILED for %s. "
+                "Nonce commit FAILED for %s (tx=%s). "
                 "Repair aborted — receipt already consumed, journal at %s. "
-                "Manual intervention required." % (nonce[:16], journal_path))
+                "Manual intervention required." % (nonce[:16], tx_id, journal_path))
         journal["status"] = "NONCE_CONSUMED"
         journal["steps_completed"].append("nonce_consume")
         self._write_journal(journal_path, journal)
@@ -877,79 +1009,166 @@ class ClaimStore:
     def _rollback_repair(self, journal: dict, journal_path: Path) -> dict:
         """Roll back an incomplete repair where store was NOT yet replaced.
 
-        Clears latch if the original store is intact and valid.
+        V1.18.4.1 FAIL-CLOSED:
+        - Transaction is marked ROLLED_BACK (journal updated).
+        - Latch is ONLY cleared if the live store passes full validation
+          (schema version, checksum, claims dict). If the store is still
+          corrupted, the latch STAYS and service remains BLOCKED.
+        - "repair transaction rolled back" != "corruption resolved".
         """
-        import shutil
         tx_id = journal.get("tx_id", "unknown")
         try:
-            # If backup exists, the original store might have been corrupted
-            # We don't need to restore — the store was not yet replaced
-            # Just clear the latch so the store can be used again
+            # Mark journal as rolled back
+            journal["status"] = "ROLLED_BACK"
+            journal["rolled_back_at"] = _now_iso()
+            self._write_journal(journal_path, journal)
+        except Exception as e:
+            return {"tx_id": tx_id, "action": "rollback_failed",
+                    "error": "journal_write_failed: %s" % e}
+
+        # Validate live store before clearing latch
+        try:
+            data = self._raw_read()
+            if not isinstance(data, dict):
+                return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                        "detail": "store_not_dict", "latch": "KEPT"}
+            if "claims" not in data:
+                return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                        "detail": "missing_claims", "latch": "KEPT"}
+            ver = data.get("version")
+            if ver != CLAIM_STORE_SCHEMA_VERSION:
+                return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                        "detail": "version_mismatch_%s" % ver, "latch": "KEPT"}
+            stored_checksum = data.get(_STORE_CHECKSUM_KEY)
+            if stored_checksum is None:
+                return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                        "detail": "checksum_missing", "latch": "KEPT"}
+            recomputed = _compute_store_checksum(data)
+            if stored_checksum != recomputed:
+                return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                        "detail": "checksum_mismatch", "latch": "KEPT"}
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                    "detail": "read_failed: %s" % e, "latch": "KEPT"}
+
+        # Store is valid — safe to clear latch
+        try:
             self._corruption_latch = False
             self._corruption_reason = ""
             if self.latch_path.exists():
                 self.latch_path.unlink()
-
-            journal["status"] = "ROLLED_BACK"
-            journal["rolled_back_at"] = _now_iso()
-            self._write_journal(journal_path, journal)
-
-            return {"tx_id": tx_id, "action": "rolled_back"}
-        except Exception as e:
-            return {"tx_id": tx_id, "action": "rollback_failed", "error": str(e)}
+                self._fsync_parent_dir(self.latch_path)
+            return {"tx_id": tx_id, "action": "rolled_back",
+                    "latch": "CLEARED", "store_valid": True}
+        except OSError as e:
+            return {"tx_id": tx_id, "action": "rolled_back_latch_error",
+                    "error": str(e), "latch": "KEPT"}
 
     def _complete_repair(self, journal: dict, journal_path: Path) -> dict:
         """Complete a repair where store was already replaced.
 
-        Ensures receipt is marked consumed and nonce is in ledger.
+        V1.18.4.1 FAIL-CLOSED:
+        - No except:pass. Every failure keeps latch and journal.
+        - Receipt write failure → latch KEPT, journal preserved.
+        - Nonce consume failure → latch KEPT, journal preserved.
+        - Only when ALL steps succeed: clear latch, mark COMPLETED.
+        - Recovery is idempotent: re-running on COMPLETED is a no-op.
         """
         tx_id = journal.get("tx_id", "unknown")
+
+        # Step 1: Verify new store is valid (schema + checksum)
         try:
-            # Verify the new store is valid
-            store_data = self._raw_read()
-            if not isinstance(store_data, dict) or "claims" not in store_data:
+            data = self._raw_read()
+            if not isinstance(data, dict) or "claims" not in data:
                 return {"tx_id": tx_id, "action": "complete_failed",
-                        "error": "new store invalid"}
+                        "error": "new_store_invalid_structure", "latch": "KEPT"}
+            ver = data.get("version")
+            if ver != CLAIM_STORE_SCHEMA_VERSION:
+                return {"tx_id": tx_id, "action": "complete_failed",
+                        "error": "new_store_version_mismatch_%s" % ver, "latch": "KEPT"}
+            stored_checksum = data.get(_STORE_CHECKSUM_KEY)
+            if stored_checksum is None:
+                return {"tx_id": tx_id, "action": "complete_failed",
+                        "error": "new_store_checksum_missing", "latch": "KEPT"}
+            recomputed = _compute_store_checksum(data)
+            if stored_checksum != recomputed:
+                return {"tx_id": tx_id, "action": "complete_failed",
+                        "error": "new_store_checksum_mismatch", "latch": "KEPT"}
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            return {"tx_id": tx_id, "action": "complete_failed",
+                    "error": "new_store_read_failed: %s" % e, "latch": "KEPT"}
 
-            # Ensure receipt is marked consumed
-            approval_receipt_id = journal.get("approval_receipt_id", "")
-            if approval_receipt_id:
-                receipt_path = APPROVAL_RECEIPTS_DIR / ("%s.json" % approval_receipt_id)
-                if receipt_path.exists():
-                    try:
-                        receipt = json.loads(receipt_path.read_text())
-                        if not receipt.get("consumed"):
-                            receipt["consumed"] = True
-                            receipt["consumed_at"] = _now_iso()
-                            receipt["tx_id"] = tx_id
-                            tmp_r = receipt_path.with_suffix(".tmp")
-                            with open(str(tmp_r), "w") as f:
-                                json.dump(receipt, f, indent=2)
-                                f.flush()
-                                os.fsync(f.fileno())
-                            os.replace(str(tmp_r), str(receipt_path))
-                    except Exception:
-                        pass  # best effort
+        # Step 2: Ensure receipt is marked consumed (atomic write)
+        approval_receipt_id = journal.get("approval_receipt_id", "")
+        if approval_receipt_id:
+            receipt_path = APPROVAL_RECEIPTS_DIR / ("%s.json" % approval_receipt_id)
+            if receipt_path.exists():
+                try:
+                    receipt = json.loads(receipt_path.read_text())
+                    if not receipt.get("consumed"):
+                        receipt["consumed"] = True
+                        receipt["consumed_at"] = _now_iso()
+                        receipt["tx_id"] = tx_id
+                        tmp_r = receipt_path.with_suffix(".tmp")
+                        with open(str(tmp_r), "w") as f:
+                            json.dump(receipt, f, indent=2)
+                            f.flush()
+                            os.fsync(f.fileno())
+                        os.replace(str(tmp_r), str(receipt_path))
+                        self._fsync_parent_dir(receipt_path)
+                except (OSError, json.JSONDecodeError) as e:
+                    return {"tx_id": tx_id, "action": "complete_failed",
+                            "error": "receipt_write_failed: %s" % e, "latch": "KEPT"}
 
-            # Ensure nonce is in ledger
-            nonce = journal.get("nonce", "")
-            if nonce:
-                self._consume_nonce(nonce, approval_receipt_id)
+        # Step 3: Ensure nonce is consumed (must succeed)
+        nonce = journal.get("nonce", "")
+        if nonce:
+            nonce_ok = self._consume_nonce(nonce, approval_receipt_id or tx_id)
+            if not nonce_ok:
+                # Check if already committed by this same transaction (idempotent)
+                try:
+                    with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                        if NONCE_LEDGER_PATH.exists():
+                            ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+                            entry = ledger.get("consumed", {}).get(nonce, {})
+                            if entry.get("state") == "COMMITTED":
+                                # Already committed — acceptable for recovery
+                                pass
+                            else:
+                                return {"tx_id": tx_id, "action": "complete_failed",
+                                        "error": "nonce_consume_failed_not_committed",
+                                        "latch": "KEPT"}
+                        else:
+                            return {"tx_id": tx_id, "action": "complete_failed",
+                                    "error": "nonce_consume_failed_no_ledger", "latch": "KEPT"}
+                except Exception as e:
+                    return {"tx_id": tx_id, "action": "complete_failed",
+                            "error": "nonce_verify_failed: %s" % e, "latch": "KEPT"}
 
-            # Clear latch
+        # Step 4: All steps passed — clear latch
+        try:
             self._corruption_latch = False
             self._corruption_reason = ""
             if self.latch_path.exists():
                 self.latch_path.unlink()
+                self._fsync_parent_dir(self.latch_path)
+        except OSError as e:
+            return {"tx_id": tx_id, "action": "complete_failed",
+                    "error": "latch_clear_failed: %s" % e, "latch": "KEPT"}
 
-            journal["status"] = "COMPLETED"
-            journal["completed_at"] = _now_iso()
-            journal["recovered"] = True
+        # Step 5: Mark journal COMPLETED
+        journal["status"] = "COMPLETED"
+        journal["completed_at"] = _now_iso()
+        journal["recovered"] = True
+        try:
             self._write_journal(journal_path, journal)
-
-            return {"tx_id": tx_id, "action": "completed"}
         except Exception as e:
-            return {"tx_id": tx_id, "action": "complete_failed", "error": str(e)}
+            # Latch already cleared but journal write failed — log but don't re-latch
+            # The store is valid, latch is cleared; journal is for audit only
+            return {"tx_id": tx_id, "action": "completed_journal_write_failed",
+                    "warning": str(e), "latch": "CLEARED"}
+
+        return {"tx_id": tx_id, "action": "completed", "latch": "CLEARED"}
 
     def reconcile_nonce_ledger(self) -> dict:
         """Reconcile nonce ledger on startup. Scans for duplicate nonce entries.
