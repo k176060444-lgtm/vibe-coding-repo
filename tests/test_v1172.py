@@ -88,6 +88,8 @@ def test_corruption_latch_blocks():
     paths = _tmp_paths()
     try:
         store = StateStore(*paths)
+        # Must bootstrap first — state file must exist before operations
+        store.bootstrap()
         assert not store.latch.is_latched()
         store.latch.latch("test_corruption")
         assert store.latch.is_latched()
@@ -97,7 +99,7 @@ def test_corruption_latch_blocks():
         except RuntimeError as e:
             blocked = "corruption_latched" in str(e)
         assert blocked, "Write should be blocked by corruption latch"
-        # Read-only still works
+        # Read-only still works when state file exists and is valid
         state = store.load()
         assert state is not None
         # Operator repair
