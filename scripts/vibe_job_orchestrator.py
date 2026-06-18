@@ -1232,7 +1232,7 @@ class JobOrchestrator:
         })
 
         # Build SSH command with process group isolation
-        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_key = _resolve_ssh_key(self.registry, manifest.actual_worker)
         ssh_opts = [
             "-p", str(worker.ssh_port),
             "-i", ssh_key,
@@ -1265,8 +1265,13 @@ class JobOrchestrator:
             local_sha = hashlib.sha256(
                 open(local_script.name, 'rb').read()).hexdigest()
 
-            # SCP upload
-            scp_cmd = ["scp"] + ssh_opts + [
+            # SCP upload (use -P for port, not -p which means "preserve timestamps" for scp)
+            scp_opts = list(ssh_opts)
+            for i, v in enumerate(scp_opts):
+                if v == "-p" and i + 1 < len(scp_opts):
+                    scp_opts[i] = "-P"
+                    break
+            scp_cmd = ["scp"] + scp_opts + [
                 local_script.name,
                 ssh_target + ":" + _shell_quote(job_script_path),
             ]
@@ -1885,7 +1890,7 @@ class JobOrchestrator:
     # Remote process control
     # ===================================================================
     def _ensure_remote_dir(self, worker, remote_path: str) -> bool:
-        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_key = _resolve_ssh_key(self.registry, worker.worker_id)
         cmd = [
             "ssh", "-p", str(worker.ssh_port), "-i", ssh_key,
             "-o", "StrictHostKeyChecking=yes", "-o", "IdentitiesOnly=yes",
@@ -1912,7 +1917,7 @@ class JobOrchestrator:
         if not pgid and not fallback_pid:
             return ProcessLiveness.UNKNOWN
 
-        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_key = _resolve_ssh_key(self.registry, worker.worker_id)
         ssh_opts = [
             "-p", str(worker.ssh_port), "-i", ssh_key,
             "-o", "StrictHostKeyChecking=yes", "-o", "IdentitiesOnly=yes",
@@ -1976,7 +1981,7 @@ class JobOrchestrator:
         Returns PID as int if found, None otherwise.
         Used as fallback when remote_pid was not captured during launch.
         """
-        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_key = _resolve_ssh_key(self.registry, worker.worker_id)
         ssh_opts = [
             "-p", str(worker.ssh_port), "-i", ssh_key,
             "-o", "StrictHostKeyChecking=yes", "-o", "IdentitiesOnly=yes",
@@ -2007,7 +2012,7 @@ class JobOrchestrator:
         """
         if not remote_pid:
             return ProcessLiveness.UNKNOWN
-        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_key = _resolve_ssh_key(self.registry, worker.worker_id)
         ssh_opts = [
             "-p", str(worker.ssh_port), "-i", ssh_key,
             "-o", "StrictHostKeyChecking=yes", "-o", "IdentitiesOnly=yes",
