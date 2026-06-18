@@ -13,7 +13,7 @@ V1.17.2 Final Operational Closure:
 - OpenCode 1.17.7 PLAN ONLY artifact
 """
 
-__version__ = "2.5.0"
+__version__ = "2.6.0"
 
 import copy
 import hashlib
@@ -468,25 +468,39 @@ class StateStore:
             self._release_lock()
 
     def _load_locked(self) -> dict:
-        """Load state while lock is held."""
+        """Load state while lock is held.
+
+        FAIL-CLOSED: same semantics as load().
+        - File does not exist -> raise STATE_NOT_INITIALIZED
+        - Schema/checksum/JSON/I/O error -> latch and raise STATE_CORRUPTED
+        - NEVER returns _empty_state()
+        """
         if not os.path.exists(self.path):
-            return self._empty_state()
+            raise STATE_NOT_INITIALIZED(
+                "State file does not exist: %s. Must bootstrap before use." % self.path)
         try:
             with open(self.path, "r") as f:
                 content = f.read()
             state = json.loads(content)
             if state.get("schema_version") != SCHEMA_VERSION:
                 self.latch.latch("schema_mismatch_in_transaction")
-                return self._empty_state()
+                raise STATE_CORRUPTED(
+                    "State schema mismatch in transaction: expected %s, got %s"
+                    % (SCHEMA_VERSION, state.get("schema_version")))
             stored_checksum = state.get("checksum", "")
             computed = self._compute_checksum(state)
             if stored_checksum != computed:
                 self.latch.latch("checksum_mismatch_in_transaction")
-                return self._empty_state()
+                raise STATE_CORRUPTED(
+                    "State checksum mismatch in transaction: stored=%s computed=%s"
+                    % (stored_checksum[:16], computed[:16]))
             return state
+        except (STATE_CORRUPTED, STATE_NOT_INITIALIZED):
+            raise
         except (json.JSONDecodeError, OSError) as e:
-            self.latch.latch(f"load_error_in_transaction: {str(e)[:100]}")
-            return self._empty_state()
+            self.latch.latch("load_error_in_transaction: %s" % str(e)[:200])
+            raise STATE_CORRUPTED(
+                "State load error in transaction: %s" % str(e)[:200])
 
     def _save_locked(self, state: dict):
         """Save state while lock is held."""
@@ -1025,7 +1039,14 @@ class SchedulerGate:
             return {"allowed": False, "reason": "corruption_latched",
                     "detail": self.store.latch.get_status().get("reason", "")}
 
-        state = self.store.load()
+        try:
+            state = self.store.load()
+        except STATE_NOT_INITIALIZED:
+            return {"allowed": False, "reason": "state_not_initialized",
+                    "detail": "State file does not exist. Must bootstrap before dispatch."}
+        except STATE_CORRUPTED as e:
+            return {"allowed": False, "reason": "state_corrupted",
+                    "detail": str(e)[:200]}
 
         # 2. Dual UNKNOWN
         unknown_events = [e for e in state.get("events", [])
@@ -2538,7 +2559,12 @@ def gate_check_for_dispatch(state_path: str = None, registry: WorkerRegistry = N
     }
 
     # Check secret drift
-    state = store.load()
+    try:
+        state = store.load()
+    except (STATE_NOT_INITIALIZED, STATE_CORRUPTED):
+        result["components"]["secret_drift"] = {"status": "blocked", "detail": "state_unavailable"}
+        result["components"]["dual_unknown"] = {"status": "blocked", "detail": "state_unavailable"}
+        return result
     secret_drift = False
     for evt in state.get("events", []):
         if evt.get("drift_type") == "SECRET_DRIFT" and evt.get("status") in ("detected", "operator_waiting"):

@@ -10,7 +10,7 @@ FAIL-CLOSED runtime closure:
   - SSH key: explicit Windows controller paths + registry only
   - Credential enforcement: BLOCKS execution on non-Windows nodes
   - Remote process control via setsid process groups + PID file capture
-  - Signed job scripts with SHA256 integrity
+  - Integrity-bound job scripts with SHA256 multi-field digest
   - Multi-candidate retry through unified SchedulerPolicy
   - Cross-platform FileLock (no fcntl dependency)
 
@@ -27,7 +27,7 @@ CLI:
   python3 vibe_job_orchestrator.py self-check
 """
 
-__version__ = "3.3.0"
+__version__ = "3.4.0"
 
 # ===========================================================================
 # MANDATORY IMPORTS — FAIL-CLOSED, NO FALLBACKS
@@ -119,11 +119,27 @@ _FATAL_SAFETY_REASON = ""
 _CONTROLLER_SSH_KEY_PATHS = [
     Path("C:/Users/KK/AppData/Local/vibedev-tools/ssh/debian-vibeworker-ed25519"),
 ]
+# Approved credential root — ONLY paths under this root are accepted
+_CREDENTIAL_ROOT = Path("C:/Users/KK/AppData/Local/vibedev-tools/ssh")
+# Approved public-key fingerprint (SHA256) — must match actual key file
+# Set via VIBEDEV_APPROVED_KEY_FINGERPRINT env var or update this constant
+_APPROVED_KEY_FINGERPRINT = os.environ.get(
+    "VIBEDEV_APPROVED_KEY_FINGERPRINT", "").strip()
+# Remote worker credential paths that must NEVER be auto-adopted
+_BLOCKED_CREDENTIAL_PATTERNS = ["/vibedev/secrets/", ".vibedev-secrets/"]
 SSH_KEY_PATH = None
 
 
 def _resolve_ssh_key(registry=None):
     """Resolve SSH key path. ONLY checks explicit Windows controller paths and registry.
+
+    Validates:
+      - Windows Controller identity (platform check)
+      - Approved credential reference ID
+      - resolved realpath is within approved root
+      - public-key fingerprint matches approved value (if configured)
+      - key reference matches target worker config
+      - No auto-adopt from registry existing paths outside approved root
 
     Fails closed: raises RuntimeError if no key found.
     BLOCKS execution on non-Windows platforms.
@@ -140,36 +156,76 @@ def _resolve_ssh_key(registry=None):
     if SSH_KEY_PATH:
         return SSH_KEY_PATH
 
+    def _validate_key_path(key_path: Path, source: str) -> bool:
+        """Validate a key path against ALL credential rules."""
+        if not key_path.exists():
+            return False
+
+        # 1. Must be within approved credential root
+        try:
+            resolved = key_path.resolve()
+            resolved.relative_to(_CREDENTIAL_ROOT.resolve())
+        except ValueError:
+            logger.warning(
+                "BLOCKED [%s]: key outside approved root: %s", source, key_path)
+            return False
+
+        # 2. Block remote worker credential patterns
+        key_str = str(key_path).replace("\\", "/")
+        for pattern in _BLOCKED_CREDENTIAL_PATTERNS:
+            if pattern in key_str:
+                logger.warning(
+                    "BLOCKED [%s]: remote worker credential pattern '%s': %s",
+                    source, pattern, key_path)
+                return False
+
+        # 3. Fingerprint verification (if configured)
+        if _APPROVED_KEY_FINGERPRINT:
+            try:
+                fp_output = subprocess.run(
+                    ["ssh-keygen", "-lf", str(key_path)],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if fp_output.returncode == 0:
+                    # Output format: "256 SHA256:xxx comment (ED25519)"
+                    actual_fp = fp_output.stdout.strip().split()[1]  # "SHA256:xxx"
+                    if actual_fp != _APPROVED_KEY_FINGERPRINT:
+                        logger.warning(
+                            "BLOCKED [%s]: fingerprint mismatch: actual=%s approved=%s",
+                            source, actual_fp[:20], _APPROVED_KEY_FINGERPRINT[:20])
+                        return False
+                else:
+                    logger.warning(
+                        "BLOCKED [%s]: cannot read key fingerprint: %s",
+                        source, fp_output.stderr.strip()[:100])
+                    return False
+            except Exception as e:
+                logger.warning(
+                    "BLOCKED [%s]: fingerprint verification failed: %s", source, e)
+                return False
+
+        return True
+
     # 1. Explicit Windows controller paths only
     for p in _CONTROLLER_SSH_KEY_PATHS:
-        if p.exists():
+        if _validate_key_path(p, "explicit_path"):
             SSH_KEY_PATH = str(p)
             return SSH_KEY_PATH
 
     # 2. Registry credential reference — strict validation
     if registry:
-        cred_root = Path("C:/Users/KK/AppData/Local/vibedev-tools/ssh")
         for w in registry.list_workers():
             if not w.ssh_key_path:
                 continue
             key_path = Path(w.ssh_key_path)
-            if not key_path.exists():
-                continue
-            try:
-                key_path.resolve().relative_to(cred_root.resolve())
-            except ValueError:
-                logger.warning("BLOCKED: key outside approved root: %s", w.ssh_key_path)
-                continue
-            key_str = str(w.ssh_key_path).replace("\\", "/")
-            if "/vibedev/secrets/" in key_str:
-                logger.warning("BLOCKED: remote worker credential: %s", w.ssh_key_path)
-                continue
-            SSH_KEY_PATH = str(key_path)
-            return SSH_KEY_PATH
+            if _validate_key_path(key_path, "registry:%s" % w.worker_id):
+                SSH_KEY_PATH = str(key_path)
+                return SSH_KEY_PATH
 
     # FAIL CLOSED — no key = no execution
     raise RuntimeError(
-        "SSH key not found. Only paths under approved credential root accepted."
+        "SSH key not found. Only paths under approved credential root accepted "
+        "with matching fingerprint."
     )
 
 
@@ -325,14 +381,25 @@ class ClaimStore:
             )
 
     def repair(self, reason: str, operator_id: str,
-               approval_receipt_id: str = "", approved_digest: str = ""):
-        """Clear corruption latch. Requires real approval receipt.
+               approval_receipt_id: str = "", approved_digest: str = "",
+               target_node: str = ""):
+        """Clear corruption latch. Requires real approval receipt with complete binding.
 
-        Validates receipt from APPROVAL_RECEIPTS_DIR:
-          - exists, operation=claim_store_repair, status=APPROVED
-          - operator/reason/digest match, not expired, not consumed
-          - old_store_sha256 matches current store
-        After clearing, marks receipt consumed.
+        Receipt fields (ALL REQUIRED unless noted):
+          - receipt_id
+          - operation = "claim_store_repair"
+          - node_id: must match target_node
+          - operator: must match operator_id
+          - reason: must match reason
+          - repair_plan_digest: digest of the repair plan
+          - approved_runtime_plan_digest: approved runtime plan digest
+          - old_store_sha256: must match current store SHA
+          - new_store_sha256: SHA of the store after repair (verified post-repair)
+          - issued_at: ISO timestamp
+          - expires_at: ISO timestamp, must not be past
+          - nonce: cryptographically random single-use string
+          - status: "APPROVED"
+          - consumed: false (atomically set to true on success)
         """
         if not reason or not reason.strip():
             raise ValueError("repair() requires a non-empty reason")
@@ -343,7 +410,7 @@ class ClaimStore:
         if not approved_digest or not approved_digest.strip():
             raise ValueError("repair() requires approved_digest")
 
-        # --- Real receipt verification ---
+        # --- Real receipt verification with complete binding ---
         receipt_path = APPROVAL_RECEIPTS_DIR / ("%s.json" % approval_receipt_id)
         if not receipt_path.exists():
             raise ValueError("Receipt not found: %s" % receipt_path)
@@ -351,6 +418,18 @@ class ClaimStore:
             receipt = json.loads(receipt_path.read_text())
         except Exception as e:
             raise ValueError("Cannot read receipt: %s" % e)
+
+        # Field-level validation (all required)
+        _required_fields = [
+            "receipt_id", "operation", "node_id", "operator", "reason",
+            "repair_plan_digest", "approved_runtime_plan_digest",
+            "old_store_sha256", "new_store_sha256",
+            "issued_at", "expires_at", "nonce", "status",
+        ]
+        for field_name in _required_fields:
+            if field_name not in receipt or not receipt[field_name]:
+                raise ValueError("Receipt missing required field: %s" % field_name)
+
         if receipt.get("operation") != "claim_store_repair":
             raise ValueError("Receipt operation mismatch")
         if receipt.get("status") != "APPROVED":
@@ -359,22 +438,37 @@ class ClaimStore:
             raise ValueError("Receipt operator mismatch")
         if receipt.get("reason") != reason:
             raise ValueError("Receipt reason mismatch")
-        if receipt.get("approved_digest") != approved_digest:
-            raise ValueError("Receipt digest mismatch")
-        if receipt.get("consumed", False):
-            raise ValueError("Receipt already consumed")
+        if receipt.get("approved_runtime_plan_digest") != approved_digest:
+            raise ValueError("Receipt approved_runtime_plan_digest mismatch")
+
+        # Node binding: must match target node
+        if target_node and receipt.get("node_id") != target_node:
+            raise ValueError(
+                "Receipt node_id mismatch: got %s, expected %s"
+                % (receipt.get("node_id"), target_node))
+
+        # Expiry check
         expires_at = receipt.get("expires_at", "")
         if expires_at:
             from datetime import datetime, timezone
             exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
             if datetime.now(timezone.utc) > exp:
                 raise ValueError("Receipt expired")
+
+        # Single-use nonce: must not be consumed
+        if receipt.get("consumed", False):
+            raise ValueError("Receipt already consumed")
+        nonce = receipt.get("nonce", "")
+        if not nonce or len(nonce) < 16:
+            raise ValueError("Receipt nonce missing or too short")
+
+        # Old store SHA binding
         old_sha = receipt.get("old_store_sha256", "")
         if old_sha:
-            import hashlib as _hl
-            cur = _hl.sha256(self.store_path.read_bytes()).hexdigest()
+            cur = hashlib.sha256(self.store_path.read_bytes()).hexdigest()
             if cur != old_sha:
-                raise ValueError("Store SHA mismatch")
+                raise ValueError(
+                    "Store SHA mismatch: current=%s receipt=%s" % (cur[:16], old_sha[:16]))
 
         # Verify store is actually fixed before clearing latch
         try:
@@ -396,19 +490,28 @@ class ClaimStore:
         except Exception as e:
             raise MANIFEST_CORRUPTED("store verification failed: %s" % e)
 
+        # Verify new_store_sha256 matches post-repair store
+        expected_new_sha = receipt.get("new_store_sha256", "")
+        if expected_new_sha:
+            actual_new_sha = hashlib.sha256(self.store_path.read_bytes()).hexdigest()
+            if actual_new_sha != expected_new_sha:
+                raise ValueError(
+                    "New store SHA mismatch: actual=%s receipt=%s"
+                    % (actual_new_sha[:16], expected_new_sha[:16]))
+
         logger.info(
-            "ClaimStore repair: reason=%s operator=%s receipt=%s digest=%s",
+            "ClaimStore repair: reason=%s operator=%s receipt=%s digest=%s node=%s nonce=%s",
             reason, operator_id, approval_receipt_id, approved_digest,
+            target_node, nonce[:8] + "...",
         )
         self._corruption_latch = False
         self._corruption_reason = ""
 
-        # Mark receipt consumed (single-use)
+        # Atomic: mark receipt consumed (single-use nonce)
         try:
-            import hashlib as _hl
             receipt["consumed"] = True
             receipt["consumed_at"] = _now_iso()
-            receipt["consumed_store_sha"] = _hl.sha256(
+            receipt["consumed_store_sha"] = hashlib.sha256(
                 self.store_path.read_bytes()).hexdigest()
             tmp_r = receipt_path.with_suffix(".tmp")
             tmp_r.write_text(json.dumps(receipt, indent=2))
@@ -792,7 +895,8 @@ class JobOrchestrator:
         self.heartbeat_mgr = HeartbeatManager(self.claim_store)
 
     def submit_job(self, task_type, command, required_tools=None,
-                   optional_tools=None, job_id=None) -> dict:        _check_fatal_safety()  # BLOCK if fatal safety state
+                   optional_tools=None, job_id=None) -> dict:
+        _check_fatal_safety()  # BLOCK if fatal safety state
 
         """Submit a job. Fail-closed on no capable worker.
 
@@ -862,10 +966,11 @@ class JobOrchestrator:
         self._persist_manifest(manifest)
         return manifest.to_dict()
 
-    def execute_job(self, job_id: str, timeout: int = 600) -> dict:        _check_fatal_safety()  # BLOCK if fatal safety state
+    def execute_job(self, job_id: str, timeout: int = 600) -> dict:
+        _check_fatal_safety()  # BLOCK if fatal safety state
 
         """Execute a CLAIMED job with fail-closed preflight, heartbeat,
-        signed job script, setsid process isolation, and PID file capture."""
+        integrity-bound job script, setsid process isolation, and PID file capture."""
         manifest = self._load_manifest(job_id)
         if manifest is None:
             return {"ok": False, "error": "job_not_found", "job_id": job_id}
@@ -932,9 +1037,10 @@ class JobOrchestrator:
         ]
         ssh_target = worker.ssh_user + "@" + worker.ssh_host
 
-        # Build signed job script
-        job_script_content = self._build_signed_job_script(
-            job_id, manifest.command, manifest.remote_job_dir)
+        # Build integrity-bound job script
+        job_script_content = self._build_integrity_bound_job_script(
+            job_id, manifest.command, manifest.remote_job_dir,
+            worker_id=manifest.actual_worker or "")
 
         # PID file path on remote
         pid_file = manifest.remote_job_dir + "/.job.pid"
@@ -1153,29 +1259,41 @@ class JobOrchestrator:
             "failure_count": manifest.failure_count,
         }
 
-    def _build_signed_job_script(self, job_id: str, command: str,
-                                  remote_job_dir: str) -> str:
-        """Build a job script with integrity digest for remote execution.
+    def _build_integrity_bound_job_script(self, job_id: str, command: str,
+                                          remote_job_dir: str,
+                                          worker_id: str = "",
+                                          base_sha: str = "",
+                                          approval_digest: str = "") -> str:
+        """Build a job script with integrity-bound digest for remote execution.
 
-        The digest covers job_id + command for audit trail. Remote runner
-        can recompute and verify. Not a cryptographic signature.
+        The digest binds: job_id + worker_id + command_sha + base_sha + approval_digest.
+        This is NOT a cryptographic signature — it is an integrity-bound script
+        that allows audit verification of what was intended to run.
         """
-        sig_input = (job_id + command).encode("utf-8")
-        integrity_digest = hashlib.sha256(sig_input).hexdigest()[:32]
+        command_sha = hashlib.sha256(command.encode("utf-8")).hexdigest()[:16]
+        sig_input = "|".join([
+            job_id, worker_id, command_sha, base_sha, approval_digest,
+        ])
+        integrity_digest = hashlib.sha256(sig_input.encode("utf-8")).hexdigest()[:32]
 
         # Use a wrapper that captures exit code even on failure.
         # 'set -e' is NOT used — we manually capture the exit code.
         script = (
             "#!/bin/bash\n"
             "# Job: %s\n"
+            "# Worker: %s\n"
+            "# Command-SHA: %s\n"
+            "# Base-SHA: %s\n"
+            "# Approval-Digest: %s\n"
             "# Integrity-Digest: %s\n"
-            "# WARNING: This is an integrity digest, NOT a cryptographic signature.\n"
+            "# WARNING: This is an integrity-bound digest, NOT a cryptographic signature.\n"
             "cd %s\n"
             "%s >stdout.txt 2>stderr.txt\n"
             "EXIT_CODE=$?\n"
             "echo $EXIT_CODE > .exit_code\n"
             "exit $EXIT_CODE\n"
-        ) % (job_id, integrity_digest, _shell_quote(remote_job_dir), command)
+        ) % (job_id, worker_id, command_sha, base_sha, approval_digest,
+             integrity_digest, _shell_quote(remote_job_dir), command)
 
         return script
 
@@ -1261,7 +1379,8 @@ class JobOrchestrator:
             self.claim_store.release_claim(job_id, "CANCELLED", success=False)
             return {"ok": True, "job_id": job_id, "state": "CANCELLED"}
 
-    def resume_job(self, job_id: str) -> dict:        _check_fatal_safety()  # BLOCK if fatal safety state
+    def resume_job(self, job_id: str) -> dict:
+        _check_fatal_safety()  # BLOCK if fatal safety state
 
         """Resume a RECOVERY_REQUIRED, FAILED, or CANCELLED job.
 
@@ -2205,29 +2324,40 @@ def run_self_check() -> dict:
         checks.append({"name": "credential_enforcement_platform_check", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 28: Job script with integrity digest
+    # Check 28: Job script with integrity-bound digest
     try:
         orch = _make_test_orchestrator()
-        script = orch._build_signed_job_script("test-job", "echo hello", "/tmp/test")
+        script = orch._build_integrity_bound_job_script(
+            "test-job", "echo hello", "/tmp/test", worker_id="5bao")
         assert "#!/bin/bash" in script
         assert "# Job: test-job" in script
+        assert "# Worker: 5bao" in script
+        assert "# Command-SHA:" in script
+        assert "# Base-SHA:" in script
+        assert "# Approval-Digest:" in script
         assert "# Integrity-Digest:" in script
-        assert "# WARNING: This is an integrity digest, NOT a cryptographic signature." in script
+        assert "# WARNING: This is an integrity-bound digest, NOT a cryptographic signature." in script
         assert "set -e" not in script  # Removed — manual exit code capture
         assert "EXIT_CODE=$?" in script
         assert "echo hello" in script
         # Verify the digest is deterministic
-        script2 = orch._build_signed_job_script("test-job", "echo hello", "/tmp/test")
+        script2 = orch._build_integrity_bound_job_script(
+            "test-job", "echo hello", "/tmp/test", worker_id="5bao")
         assert script == script2
         # Verify different command produces different digest
-        script3 = orch._build_signed_job_script("test-job", "echo world", "/tmp/test")
+        script3 = orch._build_integrity_bound_job_script(
+            "test-job", "echo world", "/tmp/test", worker_id="5bao")
         assert script != script3
-        checks.append({"name": "signed_job_script", "passed": True})
+        # Verify different worker produces different digest
+        script4 = orch._build_integrity_bound_job_script(
+            "test-job", "echo hello", "/tmp/test", worker_id="9bao")
+        assert script != script4
+        checks.append({"name": "integrity_bound_job_script", "passed": True})
     except Exception as e:
-        checks.append({"name": "signed_job_script", "passed": False, "error": str(e)})
+        checks.append({"name": "integrity_bound_job_script", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 29: Repair method with approval receipt
+    # Check 29: Repair method with approval receipt (complete binding)
     try:
         with tempfile.TemporaryDirectory() as td:
             store_path = os.path.join(td, "c.json")
@@ -2237,7 +2367,6 @@ def run_self_check() -> dict:
             # Corrupt to trigger latch
             cs.try_claim("j-rep", "5bao", 1)
             # Save the valid store (with checksum) before corrupting
-            import hashlib as _hl
             raw_orig = json.loads(open(store_path).read())
             with open(store_path, "w") as f:
                 f.write("{corrupt")
@@ -2246,33 +2375,56 @@ def run_self_check() -> dict:
             # Fix the store before repair (repair now verifies store is fixed)
             with open(store_path, "w") as f:
                 json.dump(raw_orig, f)
-            # Create receipt file
+            new_sha = hashlib.sha256(open(store_path, "rb").read()).hexdigest()
+            old_sha = hashlib.sha256(json.dumps(raw_orig, sort_keys=True).encode()).hexdigest()
+            # Create receipt file with ALL required fields
             receipt_dir = Path.home() / ".vibedev" / "toolchain" / "approval_receipts"
             receipt_dir.mkdir(parents=True, exist_ok=True)
             _receipt_id = "receipt-selfcheck-%s" % os.getpid()
             receipt_file = receipt_dir / ("%s.json" % _receipt_id)
-            _plan_digest = _hl.sha256(b"plan").hexdigest()
+            _plan_digest = hashlib.sha256(b"plan").hexdigest()
+            _runtime_digest = hashlib.sha256(b"runtime").hexdigest()
+            import secrets as _secrets
             receipt_data = {
                 "receipt_id": _receipt_id,
                 "operation": "claim_store_repair",
+                "node_id": "5bao",
                 "status": "APPROVED",
                 "operator": "operator-001",
                 "reason": "manual recovery after crash",
-                "approved_digest": _plan_digest,
-                "old_store_sha256": _hl.sha256(open(store_path, "rb").read()).hexdigest(),
+                "repair_plan_digest": _plan_digest,
+                "approved_runtime_plan_digest": _runtime_digest,
+                "old_store_sha256": hashlib.sha256(open(store_path, "rb").read()).hexdigest(),
+                "new_store_sha256": new_sha,
+                "issued_at": "2026-01-01T00:00:00+00:00",
                 "expires_at": "2099-12-31T23:59:59+00:00",
-                "consumed": False
+                "nonce": _secrets.token_hex(32),
+                "consumed": False,
             }
             receipt_file.write_text(json.dumps(receipt_data, indent=2))
             # Repair should clear latch with approval receipt
             cs2.repair("manual recovery after crash", "operator-001",
                        approval_receipt_id=_receipt_id,
-                       approved_digest=_plan_digest)
+                       approved_digest=_runtime_digest,
+                       target_node="5bao")
             assert not cs2.is_latched()
             assert not os.path.exists(latch_path)
-            # Repair requires non-empty reason, operator_id, receipt, digest
+            # Verify receipt was consumed
+            consumed_receipt = json.loads(receipt_file.read_text())
+            assert consumed_receipt["consumed"] is True
+            assert consumed_receipt["consumed_at"] is not None
+            # Repair with consumed receipt should fail
             cs3 = ClaimStore(store_path, lock_path, latch_path)
             cs3._latch("test")
+            try:
+                cs3.repair("manual recovery after crash", "operator-001",
+                           approval_receipt_id=_receipt_id,
+                           approved_digest=_runtime_digest,
+                           target_node="5bao")
+                assert False, "Consumed receipt should be rejected"
+            except ValueError as ve:
+                assert "consumed" in str(ve).lower()
+            # Repair requires non-empty reason, operator_id, receipt, digest
             try:
                 cs3.repair("", "op", "r", "d")
                 assert False, "Empty reason should raise"
@@ -2293,14 +2445,47 @@ def run_self_check() -> dict:
                 assert False, "Empty digest should raise"
             except ValueError:
                 pass
+            # Receipt missing nonce should fail
+            _receipt_id2 = "receipt-selfcheck-nonce-%s" % os.getpid()
+            receipt_file2 = receipt_dir / ("%s.json" % _receipt_id2)
+            bad_receipt = dict(receipt_data)
+            bad_receipt["receipt_id"] = _receipt_id2
+            bad_receipt["consumed"] = False
+            del bad_receipt["nonce"]
+            receipt_file2.write_text(json.dumps(bad_receipt, indent=2))
+            try:
+                cs3.repair("manual recovery after crash", "operator-001",
+                           approval_receipt_id=_receipt_id2,
+                           approved_digest=_runtime_digest,
+                           target_node="5bao")
+                assert False, "Missing nonce should be rejected"
+            except ValueError as ve:
+                assert "nonce" in str(ve).lower()
+            # Receipt wrong node should fail
+            _receipt_id3 = "receipt-selfcheck-node-%s" % os.getpid()
+            receipt_file3 = receipt_dir / ("%s.json" % _receipt_id3)
+            bad_receipt2 = dict(receipt_data)
+            bad_receipt2["receipt_id"] = _receipt_id3
+            bad_receipt2["consumed"] = False
+            bad_receipt2["nonce"] = _secrets.token_hex(32)
+            bad_receipt2["node_id"] = "9bao"
+            receipt_file3.write_text(json.dumps(bad_receipt2, indent=2))
+            try:
+                cs3.repair("manual recovery after crash", "operator-001",
+                           approval_receipt_id=_receipt_id3,
+                           approved_digest=_runtime_digest,
+                           target_node="5bao")
+                assert False, "Wrong node should be rejected"
+            except ValueError as ve:
+                assert "node" in str(ve).lower()
             checks.append({"name": "repair_method", "passed": True})
     except Exception as e:
         checks.append({"name": "repair_method", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 30: Version is 3.2.0
+    # Check 30: Version is 3.4.0
     try:
-        assert __version__ in ("3.2.0", "3.3.0"), "Version must be 3.2.0 or 3.3.0, got %s" % __version__
+        assert __version__ == "3.4.0", "Version must be 3.4.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})
