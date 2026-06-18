@@ -1393,7 +1393,8 @@ class JobOrchestrator:
                         pass  # Already in terminal state (cancel_job may have completed)
                     # Re-read to get the actual current state
                     final_manifest = self._load_manifest(job_id)
-                    if final_manifest:
+                    if final_manifest and final_manifest.state not in TERMINAL_STATES:
+                        # Only persist if NOT in terminal state (cancel_job may have written CANCELLED)
                         final_manifest.end_time = _now_iso()
                         self._persist_manifest(final_manifest)
                     self.claim_store.release_claim(job_id, "CANCELLED", success=False)
