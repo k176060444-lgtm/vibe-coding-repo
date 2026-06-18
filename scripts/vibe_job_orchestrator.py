@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vibe_job_orchestrator.py — Durable Job Orchestrator v3.1.0
+"""vibe_job_orchestrator.py — Durable Job Orchestrator v3.2.0
 
 FAIL-CLOSED runtime closure:
   - All dependency imports are MANDATORY — no fallbacks/stubs
@@ -1664,7 +1664,7 @@ def _make_test_orchestrator():
 
 
 def run_self_check() -> dict:
-    """Comprehensive self-check for orchestrator v3.1.0."""
+    """Comprehensive self-check for orchestrator v3.2.0."""
     import tempfile
 
     checks = []
@@ -2098,19 +2098,21 @@ def run_self_check() -> dict:
         checks.append({"name": "credential_enforcement_platform_check", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 28: Signed job script generation
+    # Check 28: Job script with integrity digest
     try:
         orch = _make_test_orchestrator()
         script = orch._build_signed_job_script("test-job", "echo hello", "/tmp/test")
         assert "#!/bin/bash" in script
         assert "# Job: test-job" in script
-        assert "# Signed:" in script
-        assert "set -e" in script
+        assert "# Integrity-Digest:" in script
+        assert "# WARNING: This is an integrity digest, NOT a cryptographic signature." in script
+        assert "set -e" not in script  # Removed — manual exit code capture
+        assert "EXIT_CODE=$?" in script
         assert "echo hello" in script
-        # Verify the signature is deterministic
+        # Verify the digest is deterministic
         script2 = orch._build_signed_job_script("test-job", "echo hello", "/tmp/test")
         assert script == script2
-        # Verify different command produces different signature
+        # Verify different command produces different digest
         script3 = orch._build_signed_job_script("test-job", "echo world", "/tmp/test")
         assert script != script3
         checks.append({"name": "signed_job_script", "passed": True})
@@ -2118,7 +2120,7 @@ def run_self_check() -> dict:
         checks.append({"name": "signed_job_script", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 29: Repair method
+    # Check 29: Repair method with approval receipt
     try:
         with tempfile.TemporaryDirectory() as td:
             store_path = os.path.join(td, "c.json")
@@ -2131,21 +2133,39 @@ def run_self_check() -> dict:
                 f.write("{corrupt")
             cs2 = ClaimStore(store_path, lock_path, latch_path)
             assert cs2.is_latched()
-            # Repair should clear latch
-            cs2.repair("manual recovery after crash", "operator-001")
+            # Fix the store before repair (repair now verifies store is fixed)
+            import hashlib as _hl
+            raw = {"claims": {"j-rep": {"worker": "5bao", "state": "CLAIMED"}},
+                   "version": 2}
+            with open(store_path, "w") as f:
+                json.dump(raw, f)
+            # Repair should clear latch with approval receipt
+            cs2.repair("manual recovery after crash", "operator-001",
+                       approval_receipt_id="receipt-001",
+                       approved_digest=_hl.sha256(b"plan").hexdigest())
             assert not cs2.is_latched()
             assert not os.path.exists(latch_path)
-            # Repair requires non-empty reason and operator_id
+            # Repair requires non-empty reason, operator_id, receipt, digest
             cs3 = ClaimStore(store_path, lock_path, latch_path)
             cs3._latch("test")
             try:
-                cs3.repair("", "op")
+                cs3.repair("", "op", "r", "d")
                 assert False, "Empty reason should raise"
             except ValueError:
                 pass
             try:
-                cs3.repair("reason", "")
+                cs3.repair("reason", "", "r", "d")
                 assert False, "Empty operator should raise"
+            except ValueError:
+                pass
+            try:
+                cs3.repair("reason", "op", "", "d")
+                assert False, "Empty receipt should raise"
+            except ValueError:
+                pass
+            try:
+                cs3.repair("reason", "op", "r", "")
+                assert False, "Empty digest should raise"
             except ValueError:
                 pass
             checks.append({"name": "repair_method", "passed": True})
@@ -2153,9 +2173,9 @@ def run_self_check() -> dict:
         checks.append({"name": "repair_method", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 30: Version is 3.1.0
+    # Check 30: Version is 3.2.0
     try:
-        assert __version__ == "3.1.0", "Version must be 3.1.0, got %s" % __version__
+        assert __version__ == "3.2.0", "Version must be 3.2.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})
