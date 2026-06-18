@@ -2601,9 +2601,9 @@ def run_self_check() -> dict:
         checks.append({"name": "repair_method", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 30: Version is 3.5.0
+    # Check 30: Version is 3.6.0
     try:
-        assert __version__ == "3.6.0", "Version must be 3.5.0, got %s" % __version__
+        assert __version__ == "3.6.0", "Version must be 3.6.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})
