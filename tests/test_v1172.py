@@ -22,7 +22,7 @@ from vibe_toolchain_lifecycle import (
     RemediationAction, PlanStatus, BaselineState,
     DriftDetector, DriftClassifier, RemediationPlanner,
     ToolchainLifecycleManager, StateStore, CorruptionLatch, SchedulerGate,
-    __version__, PlanRecord,
+    __version__, PlanRecord, STATE_CORRUPTED,
 )
 
 
@@ -534,9 +534,14 @@ def test_state_corruption_latch():
             content = f.read()
         with open(paths[0], "w") as f:
             f.write(content.replace('"checksum"', '"bad_checksum"'))
-        # Reload should detect corruption and latch
+        # Reload should detect corruption, latch, and raise STATE_CORRUPTED
         store2 = StateStore(*paths)
-        store2.load()
+        caught = False
+        try:
+            store2.load()
+        except STATE_CORRUPTED:
+            caught = True
+        assert caught, "load() should raise STATE_CORRUPTED on checksum mismatch"
         assert store2.latch.is_latched()
     finally:
         _cleanup(paths)

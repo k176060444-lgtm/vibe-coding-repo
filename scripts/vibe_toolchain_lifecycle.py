@@ -2272,6 +2272,12 @@ class ToolchainLifecycleManager:
         tmp_state = os.path.join(tempfile.gettempdir(), f"test_state_{os.getpid()}.json")
         tmp_lock = os.path.join(tempfile.gettempdir(), f"test_state_{os.getpid()}.lock")
         tmp_latch = os.path.join(tempfile.gettempdir(), f"test_latch_{os.getpid()}.json")
+        # Clean up stale files from previous runs
+        for f in [tmp_state, tmp_lock, tmp_latch]:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
         try:
             store = StateStore(tmp_state, tmp_lock, tmp_latch)
             store.bootstrap()
