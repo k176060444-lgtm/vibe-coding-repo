@@ -27,7 +27,7 @@ CLI:
   python3 vibe_job_orchestrator.py self-check
 """
 
-__version__ = "3.5.0"
+__version__ = "3.6.0"
 
 # ===========================================================================
 # MANDATORY IMPORTS — FAIL-CLOSED, NO FALLBACKS
@@ -128,19 +128,34 @@ _APPROVED_KEY_FINGERPRINT = os.environ.get(
 _BLOCKED_CREDENTIAL_PATTERNS = ["/vibedev/secrets/", ".vibedev-secrets/"]
 SSH_KEY_PATH = None
 
+# ===========================================================================
+# Credential Reference Registry — MANDATORY ref ID mapping
+# ===========================================================================
+# Maps credential_ref_id -> {path, fingerprint, controller_identity, allowed_workers}
+# Raw ssh_key_path from worker config MUST NOT be used directly.
+_CREDENTIAL_REGISTRY = {
+    "controller-key-001": {
+        "path": Path("C:/Users/KK/AppData/Local/vibedev-tools/ssh/debian-vibeworker-ed25519"),
+        "fingerprint_env": "VIBEDEV_APPROVED_KEY_FINGERPRINT",
+        "controller_identity": "KK-PC-Server",
+        "allowed_workers": ["5bao", "9bao"],
+    },
+}
 
-def _resolve_ssh_key(registry=None):
-    """Resolve SSH key path. ONLY checks explicit Windows controller paths and registry.
 
-    Validates:
+def _resolve_ssh_key(registry=None, target_worker: str = ""):
+    """Resolve SSH key path using credential reference registry ONLY.
+
+    Validates (ALL MANDATORY, no fallback):
       - Windows Controller identity (platform check)
-      - Approved credential reference ID
-      - resolved realpath is within approved root
-      - public-key fingerprint matches approved value (if configured)
-      - key reference matches target worker config
+      - Credential reference ID maps to approved entry
+      - Resolved realpath is within approved root
+      - Public-key fingerprint matches approved value (MANDATORY, never conditional)
+      - Controller identity matches
+      - Target worker is in allowed_workers list
       - No auto-adopt from registry existing paths outside approved root
 
-    Fails closed: raises RuntimeError if no key found.
+    Fails closed: raises RuntimeError if any check fails.
     BLOCKS execution on non-Windows platforms.
     """
     global SSH_KEY_PATH
@@ -155,7 +170,17 @@ def _resolve_ssh_key(registry=None):
     if SSH_KEY_PATH:
         return SSH_KEY_PATH
 
-    def _validate_key_path(key_path: Path, source: str) -> bool:
+    # Fingerprint env var is MANDATORY — no "if configured" fallback
+    if not _APPROVED_KEY_FINGERPRINT:
+        raise RuntimeError(
+            "BLOCKED: VIBEDEV_APPROVED_KEY_FINGERPRINT environment variable is NOT SET. "
+            "Fingerprint verification is MANDATORY. Cannot proceed without approved fingerprint."
+        )
+
+    def _validate_key_path(key_path: Path, source: str,
+                           credential_ref_id: str = "",
+                           expected_controller_identity: str = "",
+                           allowed_workers: list = None) -> bool:
         """Validate a key path against ALL credential rules. ALL checks mandatory."""
         if not key_path.exists():
             return False
@@ -178,11 +203,7 @@ def _resolve_ssh_key(registry=None):
                     source, pattern, key_path)
                 return False
 
-        # 3. Fingerprint verification — MANDATORY, no fallback
-        if not _APPROVED_KEY_FINGERPRINT:
-            logger.warning(
-                "BLOCKED [%s]: VIBEDEV_APPROVED_KEY_FINGERPRINT not set", source)
-            return False
+        # 3. Fingerprint verification — MANDATORY, never conditional
         try:
             fp_output = subprocess.run(
                 ["ssh-keygen", "-lf", str(key_path)],
@@ -205,28 +226,54 @@ def _resolve_ssh_key(registry=None):
                 "BLOCKED [%s]: fingerprint verification failed: %s", source, e)
             return False
 
+        # 4. Controller identity verification — MANDATORY
+        if expected_controller_identity:
+            import socket
+            actual_hostname = socket.gethostname()
+            if actual_hostname != expected_controller_identity:
+                logger.warning(
+                    "BLOCKED [%s]: controller identity mismatch: actual=%s expected=%s",
+                    source, actual_hostname, expected_controller_identity)
+                return False
+
+        # 5. Target worker must be in allowed_workers list — MANDATORY
+        if allowed_workers is not None and target_worker:
+            if target_worker not in allowed_workers:
+                logger.warning(
+                    "BLOCKED [%s]: target worker '%s' not in allowed list: %s",
+                    source, target_worker, allowed_workers)
+                return False
+
         return True
 
-    # 1. Explicit Windows controller paths only
+    # Resolution order:
+    # 1. Credential reference registry (MANDATORY primary source)
+    for ref_id, ref_entry in _CREDENTIAL_REGISTRY.items():
+        key_path = ref_entry["path"]
+        if _validate_key_path(
+            key_path,
+            source="credential_ref:%s" % ref_id,
+            credential_ref_id=ref_id,
+            expected_controller_identity=ref_entry.get("controller_identity", ""),
+            allowed_workers=ref_entry.get("allowed_workers", None),
+        ):
+            SSH_KEY_PATH = str(key_path)
+            return SSH_KEY_PATH
+
+    # 2. Explicit Windows controller paths (fallback only if registry empty)
     for p in _CONTROLLER_SSH_KEY_PATHS:
         if _validate_key_path(p, "explicit_path"):
             SSH_KEY_PATH = str(p)
             return SSH_KEY_PATH
 
-    # 2. Registry credential reference — strict validation
-    if registry:
-        for w in registry.list_workers():
-            if not w.ssh_key_path:
-                continue
-            key_path = Path(w.ssh_key_path)
-            if _validate_key_path(key_path, "registry:%s" % w.worker_id):
-                SSH_KEY_PATH = str(key_path)
-                return SSH_KEY_PATH
-
     # FAIL CLOSED — no key = no execution
     raise RuntimeError(
-        "SSH key not found. Only paths under approved credential root accepted "
-        "with matching fingerprint."
+        "SSH key not found. Credential reference registry validation failed. "
+        "All keys must: (1) be in credential registry with valid ref_id, "
+        "(2) be within approved credential root, "
+        "(3) have matching fingerprint (MANDATORY), "
+        "(4) match controller identity, "
+        "(5) target worker must be in allowed_workers list."
     )
 
 
@@ -421,6 +468,17 @@ class ClaimStore:
                            approved_digest, target_node, repair_candidate_path):
         """Internal repair logic. Called under exclusive lock."""
 
+        import shutil
+
+        # --- Validate repair_candidate_path is MANDATORY ---
+        if not repair_candidate_path or not repair_candidate_path.strip():
+            raise ValueError(
+                "repair_candidate_path is MANDATORY for ClaimStore repair. "
+                "Cannot use current live store as candidate (in-place repair forbidden).")
+        if not os.path.exists(repair_candidate_path):
+            raise ValueError(
+                "repair_candidate_path does not exist: %s" % repair_candidate_path)
+
         # Step 1: Read and validate receipt
         receipt_path = APPROVAL_RECEIPTS_DIR / ("%s.json" % approval_receipt_id)
         if not receipt_path.exists():
@@ -481,21 +539,34 @@ class ClaimStore:
                 raise ValueError(
                     "Store SHA mismatch: current=%s receipt=%s"
                     % (cur[:16], old_sha[:16]))
-
-        # Step 4: Preserve corrupted artifact as immutable backup
-        backup_path = str(self.store_path) + ".corrupted.%s" % cur[:16]
-        if not os.path.exists(backup_path):
-            import shutil
-            shutil.copy2(str(self.store_path), backup_path)
-            os.chmod(backup_path, 0o444)
-
-        # Step 5: Verify repair candidate (if provided)
-        if repair_candidate_path and os.path.exists(repair_candidate_path):
-            candidate_data = json.loads(open(repair_candidate_path, "rb").read())
         else:
-            # Candidate is the current live store (already repaired in-place)
-            candidate_data = self._raw_read()
+            cur = hashlib.sha256(self.store_path.read_bytes()).hexdigest()
 
+        # Step 4: Verify candidate is INDEPENDENT (realpath differs from live store)
+        candidate_realpath = os.path.realpath(repair_candidate_path)
+        live_realpath = os.path.realpath(str(self.store_path))
+        if candidate_realpath == live_realpath:
+            raise ValueError(
+                "repair_candidate_path realpath equals live store realpath: %s. "
+                "In-place repair is forbidden." % candidate_realpath)
+
+        # Step 5: Verify candidate SHA differs from old corrupted SHA
+        candidate_sha = hashlib.sha256(
+            Path(repair_candidate_path).read_bytes()).hexdigest()
+        if candidate_sha == cur:
+            raise ValueError(
+                "Candidate SHA equals current store SHA (%s). "
+                "Candidate must be a different file." % candidate_sha[:16])
+
+        # Step 6: Verify candidate SHA matches receipt
+        expected_new_sha = receipt.get("new_store_sha256", "")
+        if expected_new_sha and candidate_sha != expected_new_sha:
+            raise ValueError(
+                "New store SHA mismatch: actual=%s receipt=%s"
+                % (candidate_sha[:16], expected_new_sha[:16]))
+
+        # Step 7: Validate candidate structure
+        candidate_data = json.loads(Path(repair_candidate_path).read_bytes())
         if not isinstance(candidate_data, dict) or "claims" not in candidate_data:
             raise MANIFEST_CORRUPTED("Repair candidate invalid structure")
         ver = candidate_data.get("version")
@@ -509,27 +580,18 @@ class ClaimStore:
         if stored_checksum != recomputed:
             raise MANIFEST_CORRUPTED("Candidate checksum mismatch")
 
-        # Verify new_store_sha256
-        expected_new_sha = receipt.get("new_store_sha256", "")
-        if repair_candidate_path and os.path.exists(repair_candidate_path):
-            actual_new_sha = hashlib.sha256(
-                open(repair_candidate_path, "rb").read()).hexdigest()
-        else:
-            actual_new_sha = hashlib.sha256(
-                self.store_path.read_bytes()).hexdigest()
-        if expected_new_sha and actual_new_sha != expected_new_sha:
-            raise ValueError(
-                "New store SHA mismatch: actual=%s receipt=%s"
-                % (actual_new_sha[:16], expected_new_sha[:16]))
+        # Step 8: Preserve corrupted artifact as immutable backup
+        backup_path = str(self.store_path) + ".corrupted.%s" % cur[:16]
+        if not os.path.exists(backup_path):
+            shutil.copy2(str(self.store_path), backup_path)
+            os.chmod(backup_path, 0o444)
 
-        # Step 6: Atomic replacement of live store
-        if repair_candidate_path and os.path.exists(repair_candidate_path):
-            import shutil
-            tmp_store = str(self.store_path) + ".repair.tmp"
-            shutil.copy2(repair_candidate_path, tmp_store)
-            os.replace(tmp_store, str(self.store_path))
+        # Step 9: Atomic replacement of live store
+        tmp_store = str(self.store_path) + ".repair.tmp"
+        shutil.copy2(repair_candidate_path, tmp_store)
+        os.replace(tmp_store, str(self.store_path))
 
-        # Step 7: Atomic mark receipt consumed
+        # Step 10: Atomic mark receipt consumed
         receipt["consumed"] = True
         receipt["consumed_at"] = _now_iso()
         receipt["consumed_store_sha"] = hashlib.sha256(
@@ -538,7 +600,7 @@ class ClaimStore:
         tmp_r.write_text(json.dumps(receipt, indent=2))
         os.replace(str(tmp_r), str(receipt_path))
 
-        # Step 8: Clear latch ONLY on success
+        # Step 11: Clear latch ONLY on success
         self._corruption_latch = False
         self._corruption_reason = ""
 
@@ -554,7 +616,7 @@ class ClaimStore:
             "old=%s new=%s nonce=%s",
             reason, operator_id, approval_receipt_id,
             old_sha[:16] if old_sha else "n/a",
-            actual_new_sha[:16], nonce[:8] + "...",
+            candidate_sha[:16], nonce[:8] + "...",
         )
 
     def _raw_read(self) -> dict:
@@ -1923,7 +1985,7 @@ def _make_test_orchestrator():
 
 
 def run_self_check() -> dict:
-    """Comprehensive self-check for orchestrator v3.5.0."""
+    """Comprehensive self-check for orchestrator v3.6.0."""
     import tempfile
 
     # Set test fingerprint for credential validation
@@ -2402,7 +2464,7 @@ def run_self_check() -> dict:
         checks.append({"name": "integrity_bound_job_script", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 29: Repair method with approval receipt (complete binding)
+    # Check 29: Repair method with approval receipt (complete binding, independent candidate)
     try:
         with tempfile.TemporaryDirectory() as td:
             store_path = os.path.join(td, "c.json")
@@ -2417,10 +2479,11 @@ def run_self_check() -> dict:
                 f.write("{corrupt")
             cs2 = ClaimStore(store_path, lock_path, latch_path)
             assert cs2.is_latched()
-            # Fix the store before repair (repair now verifies store is fixed)
-            with open(store_path, "w") as f:
+            # Create INDEPENDENT candidate file (not in-place repair)
+            candidate_path = os.path.join(td, "candidate.json")
+            with open(candidate_path, "w") as f:
                 json.dump(raw_orig, f)
-            new_sha = hashlib.sha256(open(store_path, "rb").read()).hexdigest()
+            new_sha = hashlib.sha256(open(candidate_path, "rb").read()).hexdigest()
             old_sha = hashlib.sha256(json.dumps(raw_orig, sort_keys=True).encode()).hexdigest()
             # Create receipt file with ALL required fields
             receipt_dir = Path.home() / ".vibedev" / "toolchain" / "approval_receipts"
@@ -2447,11 +2510,12 @@ def run_self_check() -> dict:
                 "consumed": False,
             }
             receipt_file.write_text(json.dumps(receipt_data, indent=2))
-            # Repair should clear latch with approval receipt
+            # Repair should clear latch with approval receipt and independent candidate
             cs2.repair("manual recovery after crash", "operator-001",
                        approval_receipt_id=_receipt_id,
                        approved_digest=_runtime_digest,
-                       target_node="5bao")
+                       target_node="5bao",
+                       repair_candidate_path=candidate_path)
             assert not cs2.is_latched()
             assert not os.path.exists(latch_path)
             # Verify receipt was consumed
@@ -2465,31 +2529,38 @@ def run_self_check() -> dict:
                 cs3.repair("manual recovery after crash", "operator-001",
                            approval_receipt_id=_receipt_id,
                            approved_digest=_runtime_digest,
-                           target_node="5bao")
+                           target_node="5bao",
+                           repair_candidate_path=candidate_path)
                 assert False, "Consumed receipt should be rejected"
             except ValueError as ve:
                 assert "consumed" in str(ve).lower()
-            # Repair requires non-empty reason, operator_id, receipt, digest
+            # Repair requires non-empty reason, operator_id, receipt, digest, candidate_path
             try:
-                cs3.repair("", "op", "r", "d")
+                cs3.repair("", "op", "r", "d", repair_candidate_path=candidate_path)
                 assert False, "Empty reason should raise"
             except ValueError:
                 pass
             try:
-                cs3.repair("reason", "", "r", "d")
+                cs3.repair("reason", "", "r", "d", repair_candidate_path=candidate_path)
                 assert False, "Empty operator should raise"
             except ValueError:
                 pass
             try:
-                cs3.repair("reason", "op", "", "d")
+                cs3.repair("reason", "op", "", "d", repair_candidate_path=candidate_path)
                 assert False, "Empty receipt should raise"
             except ValueError:
                 pass
             try:
-                cs3.repair("reason", "op", "r", "")
+                cs3.repair("reason", "op", "r", "", repair_candidate_path=candidate_path)
                 assert False, "Empty digest should raise"
             except ValueError:
                 pass
+            # Missing candidate_path should be rejected
+            try:
+                cs3.repair("reason", "op", "r", "d", repair_candidate_path="")
+                assert False, "Empty candidate_path should raise"
+            except ValueError as ve:
+                assert "candidate" in str(ve).lower() or "mandatory" in str(ve).lower()
             # Receipt missing nonce should fail
             _receipt_id2 = "receipt-selfcheck-nonce-%s" % os.getpid()
             receipt_file2 = receipt_dir / ("%s.json" % _receipt_id2)
@@ -2502,7 +2573,8 @@ def run_self_check() -> dict:
                 cs3.repair("manual recovery after crash", "operator-001",
                            approval_receipt_id=_receipt_id2,
                            approved_digest=_runtime_digest,
-                           target_node="5bao")
+                           target_node="5bao",
+                           repair_candidate_path=candidate_path)
                 assert False, "Missing nonce should be rejected"
             except ValueError as ve:
                 assert "nonce" in str(ve).lower()
@@ -2519,7 +2591,8 @@ def run_self_check() -> dict:
                 cs3.repair("manual recovery after crash", "operator-001",
                            approval_receipt_id=_receipt_id3,
                            approved_digest=_runtime_digest,
-                           target_node="5bao")
+                           target_node="5bao",
+                           repair_candidate_path=candidate_path)
                 assert False, "Wrong node should be rejected"
             except ValueError as ve:
                 assert "node" in str(ve).lower()
@@ -2528,9 +2601,9 @@ def run_self_check() -> dict:
         checks.append({"name": "repair_method", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 30: Version is 3.5.0
+    # Check 30: Version is 3.6.0
     try:
-        assert __version__ == "3.5.0", "Version must be 3.5.0, got %s" % __version__
+        assert __version__ == "3.6.0", "Version must be 3.6.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})
