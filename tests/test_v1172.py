@@ -35,6 +35,13 @@ def _tmp_paths():
     )
 
 
+def _make_store(paths):
+    """Create and bootstrap a StateStore for testing."""
+    store = StateStore(*paths)
+    store.bootstrap()
+    return store
+
+
 def _cleanup(paths):
     for p in paths:
         try:
@@ -87,7 +94,7 @@ def _freeze_with_plan(mgr, node_id, fp):
 def test_corruption_latch_blocks():
     paths = _tmp_paths()
     try:
-        store = StateStore(*paths)
+        store = _make_store(paths)
         # Must bootstrap first — state file must exist before operations
         store.bootstrap()
         assert not store.latch.is_latched()
@@ -121,7 +128,7 @@ def test_corruption_latch_blocks():
 def test_scheduler_gate_dual_unknown():
     paths = _tmp_paths()
     try:
-        store = StateStore(*paths)
+        store = _make_store(paths)
         gate = SchedulerGate(store)
         result = gate.is_writes_allowed()
         assert result["allowed"] is True
@@ -147,7 +154,7 @@ def test_scheduler_gate_dual_unknown():
 def test_scheduler_gate_secret_drift():
     paths = _tmp_paths()
     try:
-        store = StateStore(*paths)
+        store = _make_store(paths)
         gate = SchedulerGate(store)
         store.add_event(DriftEvent(event_id="e1", node_id="5bao",
                                   drift_type=DriftType.SECRET_DRIFT,
@@ -167,7 +174,7 @@ def test_scheduler_gate_secret_drift():
 def test_scheduler_gate_corruption():
     paths = _tmp_paths()
     try:
-        store = StateStore(*paths)
+        store = _make_store(paths)
         gate = SchedulerGate(store)
         store.latch.latch("test")
         result = gate.is_writes_allowed()
@@ -185,7 +192,7 @@ def test_scheduler_gate_corruption():
 def test_single_unknown_other_free():
     paths = _tmp_paths()
     try:
-        store = StateStore(*paths)
+        store = _make_store(paths)
         gate = SchedulerGate(store)
         store.add_event(DriftEvent(event_id="e1", node_id="5bao",
                                   drift_type=DriftType.UNKNOWN_DRIFT,
@@ -204,7 +211,7 @@ def test_single_unknown_other_free():
 def test_transaction_safety():
     paths = _tmp_paths()
     try:
-        store = StateStore(*paths)
+        store = _make_store(paths)
         store.transaction(lambda s: {**s, "test_key": "test_value"})
         state = store.load()
         assert state.get("test_key") == "test_value"
@@ -223,7 +230,7 @@ def test_transaction_safety():
 def test_concurrent_write_no_loss():
     paths = _tmp_paths()
     try:
-        store = StateStore(*paths)
+        store = _make_store(paths)
         # Simulate concurrent writes by rapid sequential transactions
         for i in range(20):
             store.add_history(f"action_{i}", f"detail_{i}")
@@ -246,7 +253,7 @@ def test_concurrent_write_no_loss():
 def test_no_auto_approved():
     paths = _tmp_paths()
     try:
-        store = StateStore(*paths)
+        store = _make_store(paths)
         mgr = ToolchainLifecycleManager(registry=WorkerRegistry(), state_path=paths[0],
                                         lock_path=paths[1], latch_path=paths[2])
         assert not store.has_approved("5bao")
@@ -498,7 +505,7 @@ def test_adopt_no_candidate():
 def test_events_history_persist():
     paths = _tmp_paths()
     try:
-        store = StateStore(*paths)
+        store = _make_store(paths)
         store.add_event(DriftEvent(event_id="evt-001", node_id="5bao",
                                   status=DriftEventStatus.RESOLVED, resolution="test"))
         store.add_history("action1", "detail1")
@@ -522,7 +529,7 @@ def test_events_history_persist():
 def test_state_corruption_latch():
     paths = _tmp_paths()
     try:
-        store = StateStore(*paths)
+        store = _make_store(paths)
         store.add_history("test", "corruption")
         # Corrupt the file
         with open(paths[0], "r") as f:
