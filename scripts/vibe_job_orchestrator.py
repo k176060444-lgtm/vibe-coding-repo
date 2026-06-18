@@ -27,7 +27,7 @@ CLI:
   python3 vibe_job_orchestrator.py self-check
 """
 
-__version__ = "3.1.0"
+__version__ = "3.2.0"
 
 # ===========================================================================
 # MANDATORY IMPORTS — FAIL-CLOSED, NO FALLBACKS
@@ -92,6 +92,13 @@ class JobState(str, Enum):
     BLOCKED = "BLOCKED"
     CANCELLED = "CANCELLED"
     RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
+
+
+class ProcessLiveness(str, Enum):
+    """Tri-state remote process liveness. Never ambiguous."""
+    ALIVE = "ALIVE"
+    DEAD = "DEAD"
+    UNKNOWN = "UNKNOWN"
 
 
 JOBS_ROOT = Path.home() / "vibedev" / "jobs"
@@ -243,25 +250,33 @@ class ClaimStore:
 
     def _latch(self, reason: str):
         """Set corruption latch. Once latched, all operations are blocked.
-        Also writes a persistent latch file to disk."""
+        Also writes a persistent latch file to disk.
+        If latch file write fails, raises to stop service (fail-closed).
+        """
         self._corruption_latch = True
         self._corruption_reason = reason
-        # Write persistent latch file
+        # Write persistent latch file — MUST succeed
+        latch_data = {
+            "reason": reason,
+            "latched_at": _now_iso(),
+            "schema_version": CLAIM_STORE_SCHEMA_VERSION,
+        }
+        self.latch_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.latch_path.with_suffix(".tmp")
         try:
-            latch_data = {
-                "reason": reason,
-                "latched_at": _now_iso(),
-                "schema_version": CLAIM_STORE_SCHEMA_VERSION,
-            }
-            self.latch_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.latch_path.with_suffix(".tmp")
             with open(str(tmp), "w") as f:
                 json.dump(latch_data, f, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(str(tmp), str(self.latch_path))
-        except Exception:
-            pass  # best effort for persistent latch
+        except Exception as e:
+            # Latch file write failure is fatal — cannot guarantee persistence
+            logger.critical(
+                "FATAL: ClaimStore latch file write failed: %s. "
+                "Service cannot continue safely.", e)
+            raise RuntimeError(
+                "ClaimStore latch file write failed: %s. "
+                "Service halted for safety." % e)
 
     def is_latched(self) -> bool:
         return self._corruption_latch
@@ -276,20 +291,50 @@ class ClaimStore:
                 "ClaimStore corruption latched: %s" % self._corruption_reason
             )
 
-    def repair(self, reason: str, operator_id: str):
-        """Clear the corruption latch. Requires explicit operator approval.
+    def repair(self, reason: str, operator_id: str,
+               approval_receipt_id: str = "", approved_digest: str = ""):
+        """Clear the corruption latch. Requires explicit operator approval with receipt.
 
-        Only clears if both reason and operator_id are non-empty.
-        Removes the persistent latch file.
+        Must provide:
+          - reason: why repair is needed
+          - operator_id: who approved
+          - approval_receipt_id: unique receipt ID for audit trail
+          - approved_digest: SHA256 digest of approved repair plan
+
+        Before clearing latch, verifies the store is actually fixed.
         """
         if not reason or not reason.strip():
             raise ValueError("repair() requires a non-empty reason")
         if not operator_id or not operator_id.strip():
             raise ValueError("repair() requires a non-empty operator_id")
+        if not approval_receipt_id or not approval_receipt_id.strip():
+            raise ValueError("repair() requires approval_receipt_id")
+        if not approved_digest or not approved_digest.strip():
+            raise ValueError("repair() requires approved_digest")
+
+        # Verify store is actually fixed before clearing latch
+        try:
+            data = self._raw_read()
+            if not isinstance(data, dict) or "claims" not in data:
+                raise MANIFEST_CORRUPTED("store still invalid after repair attempt")
+            ver = data.get("version")
+            if ver != CLAIM_STORE_SCHEMA_VERSION:
+                raise MANIFEST_CORRUPTED(
+                    "store schema version still mismatched: got %s" % ver)
+            stored_checksum = data.get(_STORE_CHECKSUM_KEY)
+            if stored_checksum is None:
+                raise MANIFEST_CORRUPTED("store checksum still missing")
+            recomputed = _compute_store_checksum(data)
+            if stored_checksum != recomputed:
+                raise MANIFEST_CORRUPTED("store checksum still mismatched")
+        except MANIFEST_CORRUPTED:
+            raise
+        except Exception as e:
+            raise MANIFEST_CORRUPTED("store verification failed: %s" % e)
 
         logger.info(
-            "ClaimStore repair: reason=%s operator=%s",
-            reason, operator_id,
+            "ClaimStore repair: reason=%s operator=%s receipt=%s digest=%s",
+            reason, operator_id, approval_receipt_id, approved_digest,
         )
         self._corruption_latch = False
         self._corruption_reason = ""
@@ -306,13 +351,25 @@ class ClaimStore:
         return json.loads(self.store_path.read_text())
 
     def _read_store(self) -> dict:
-        """Read with latch check, validation, and checksum verification."""
+        """Read with latch check, strict schema version, and checksum verification."""
         self._check_latch()
         try:
             data = self._raw_read()
             if not isinstance(data, dict) or "claims" not in data:
                 self._latch("invalid store structure")
                 raise MANIFEST_CORRUPTED("invalid store structure")
+
+            # Strict schema version check on EVERY read
+            ver = data.get("version")
+            if ver is None:
+                self._latch("missing schema version")
+                raise MANIFEST_CORRUPTED("missing schema version")
+            if ver != CLAIM_STORE_SCHEMA_VERSION:
+                self._latch("schema version mismatch: got %s, expected %s"
+                            % (ver, CLAIM_STORE_SCHEMA_VERSION))
+                raise MANIFEST_CORRUPTED(
+                    "schema version mismatch: got %s, expected %s"
+                    % (ver, CLAIM_STORE_SCHEMA_VERSION))
 
             # Verify store checksum
             stored_checksum = data.get(_STORE_CHECKSUM_KEY)
@@ -593,23 +650,42 @@ class HeartbeatManager:
                 try:
                     result = self.claim_store.heartbeat_claim(job_id)
                     if not result.get("ok"):
-                        # Heartbeat failed — mark RECOVERY_REQUIRED and remove from active
+                        # Heartbeat failed — mark RECOVERY_REQUIRED
                         try:
                             self.claim_store.update_claim(job_id, {
                                 "state": "RECOVERY_REQUIRED",
                                 "heartbeat_failed_at": _now_iso(),
                                 "heartbeat_failure_reason": result.get("error", "unknown"),
                             })
-                        except Exception:
-                            pass
+                        except Exception as hb_err:
+                            # update_claim also failed — set global safety latch
+                            logger.critical(
+                                "Heartbeat update_claim also failed for %s: %s. "
+                                "Setting global safety latch.", job_id, hb_err)
+                            try:
+                                self.claim_store._latch(
+                                    "heartbeat_update_failed_%s_%s" % (job_id, hb_err))
+                            except Exception:
+                                pass  # latch itself failed — already logged as critical
                         with self._lock:
                             self._active_jobs.pop(job_id, None)
                         logger.warning(
                             "Heartbeat failed for job %s: %s",
                             job_id, result.get("error", "unknown"),
                         )
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Heartbeat exception — try to mark RECOVERY_REQUIRED
+                    logger.warning("Heartbeat exception for %s: %s", job_id, e)
+                    try:
+                        self.claim_store.update_claim(job_id, {
+                            "state": "RECOVERY_REQUIRED",
+                            "heartbeat_failed_at": _now_iso(),
+                            "heartbeat_failure_reason": str(e),
+                        })
+                    except Exception:
+                        pass
+                    with self._lock:
+                        self._active_jobs.pop(job_id, None)
             self._stop_event.wait(HEARTBEAT_INTERVAL_SECONDS)
 
     def is_active(self, job_id: str) -> bool:
@@ -830,10 +906,14 @@ class JobOrchestrator:
                 self.claim_store.release_claim(job_id, "FAILED", success=False)
                 return {"ok": False, "error": "launch_command_timeout", "job_id": job_id}
 
-            # Read PID file via separate SSH after brief delay
-            time.sleep(0.5)
-            remote_pgid = self._read_remote_pid_file(
-                worker, ssh_opts, ssh_target, pid_file)
+            # Poll PID file with bounded retries (file may be generated late)
+            remote_pgid = None
+            for _attempt in range(10):
+                time.sleep(0.5)
+                remote_pgid = self._read_remote_pid_file(
+                    worker, ssh_opts, ssh_target, pid_file)
+                if remote_pgid:
+                    break
             if remote_pgid:
                 manifest.remote_pid = remote_pgid
                 manifest.remote_pgid = remote_pgid
@@ -848,10 +928,9 @@ class JobOrchestrator:
             start_wait = time.time()
             job_exit_code = None
             while time.time() - start_wait < timeout:
-                alive = self._check_remote_process_alive(worker, remote_pgid)
-                if not alive:
-                    # Process exited — try to get exit code
-                    # Write a marker to capture exit code
+                liveness = self._check_remote_process_alive(worker, remote_pgid)
+                if liveness == ProcessLiveness.DEAD:
+                    # Process confirmed exited — try to get exit code
                     exit_code_cmd = "cat %s 2>/dev/null || echo -1" % _shell_quote(
                         manifest.remote_job_dir + "/.exit_code")
                     exit_result = subprocess.run(
@@ -863,30 +942,44 @@ class JobOrchestrator:
                             exit_result.stdout.decode("utf-8", errors="replace").strip()
                         )
                     except (ValueError, TypeError):
-                        job_exit_code = 0 if not alive else -1
+                        job_exit_code = -1
                     break
+                elif liveness == ProcessLiveness.UNKNOWN:
+                    # Cannot determine — keep waiting, do NOT assume dead
+                    logger.warning("PID %s liveness UNKNOWN for job %s, continuing wait",
+                                   remote_pgid, job_id)
+                # ALIVE or UNKNOWN: keep polling
                 time.sleep(2)
 
             if time.time() - start_wait >= timeout:
                 # Timeout: TERM the remote process group
                 pgid = manifest.remote_pgid or manifest.remote_pid
-                self._terminate_remote_process_group(worker, pgid, manifest.remote_pid)
+                term_result = self._terminate_remote_process_group(
+                    worker, pgid, manifest.remote_pid)
 
                 manifest.state = JobState.RECOVERY_REQUIRED.value
-                manifest.error = "timeout_%ds" % timeout
+                manifest.error = "timeout_%ds_term_%s" % (timeout, term_result.value)
                 manifest.exit_code = -1
                 manifest.failure_count += 1
-                # Do NOT release capacity — remote may still be alive
-                self.claim_store.update_claim(job_id, {
-                    "state": "RECOVERY_REQUIRED",
-                    "error": manifest.error,
-                })
+                # Only release capacity if CONFIRMED_EXIT
+                if term_result == ProcessLiveness.DEAD:
+                    manifest.state = JobState.FAILED.value
+                    self.claim_store.release_claim(job_id, "FAILED", success=False)
+                else:
+                    # Do NOT release capacity — remote may still be alive
+                    self.claim_store.update_claim(job_id, {
+                        "state": "RECOVERY_REQUIRED",
+                        "error": manifest.error,
+                        "term_result": term_result.value,
+                    })
+                self._persist_manifest(manifest)
                 return {
                     "ok": False,
                     "job_id": job_id,
                     "state": manifest.state,
                     "exit_code": manifest.exit_code,
                     "error": manifest.error,
+                    "term_result": term_result.value,
                     "failure_count": manifest.failure_count,
                 }
 
@@ -963,23 +1056,27 @@ class JobOrchestrator:
 
     def _build_signed_job_script(self, job_id: str, command: str,
                                   remote_job_dir: str) -> str:
-        """Build a signed job script for remote execution.
+        """Build a job script with integrity digest for remote execution.
 
-        The signature is SHA256 of job_id + command, providing integrity
-        verification for the job script.
+        The digest covers job_id + command for audit trail. Remote runner
+        can recompute and verify. Not a cryptographic signature.
         """
         sig_input = (job_id + command).encode("utf-8")
-        signature = hashlib.sha256(sig_input).hexdigest()[:32]
+        integrity_digest = hashlib.sha256(sig_input).hexdigest()[:32]
 
+        # Use a wrapper that captures exit code even on failure.
+        # 'set -e' is NOT used — we manually capture the exit code.
         script = (
             "#!/bin/bash\n"
             "# Job: %s\n"
-            "# Signed: %s\n"
-            "set -e\n"
+            "# Integrity-Digest: %s\n"
+            "# WARNING: This is an integrity digest, NOT a cryptographic signature.\n"
             "cd %s\n"
             "%s >stdout.txt 2>stderr.txt\n"
-            "echo $? > .exit_code\n"
-        ) % (job_id, signature, _shell_quote(remote_job_dir), command)
+            "EXIT_CODE=$?\n"
+            "echo $EXIT_CODE > .exit_code\n"
+            "exit $EXIT_CODE\n"
+        ) % (job_id, integrity_digest, _shell_quote(remote_job_dir), command)
 
         return script
 
@@ -1029,21 +1126,35 @@ class JobOrchestrator:
         if manifest.state == JobState.RUNNING.value:
             worker = self.registry.get_worker(manifest.actual_worker)
             pgid = manifest.remote_pgid or manifest.remote_pid
+            term_result = ProcessLiveness.UNKNOWN
             if worker and pgid:
-                self._terminate_remote_process_group(
+                term_result = self._terminate_remote_process_group(
                     worker, pgid, manifest.remote_pid)
 
             self.heartbeat_mgr.stop_heartbeat(job_id)
 
-            manifest.state = JobState.RECOVERY_REQUIRED.value
-            manifest.end_time = _now_iso()
-            manifest.error = "cancelled"
-            self._persist_manifest(manifest)
-            self.claim_store.update_claim(job_id, {
-                "state": "RECOVERY_REQUIRED",
-                "error": "cancelled",
-            })
-            return {"ok": True, "job_id": job_id, "state": "RECOVERY_REQUIRED"}
+            if term_result == ProcessLiveness.DEAD:
+                # Confirmed exit — release capacity
+                manifest.state = JobState.CANCELLED.value
+                manifest.end_time = _now_iso()
+                manifest.error = "cancelled_confirmed_exit"
+                self._persist_manifest(manifest)
+                self.claim_store.release_claim(job_id, "CANCELLED", success=False)
+                return {"ok": True, "job_id": job_id, "state": "CANCELLED",
+                        "term_result": "CONFIRMED_EXIT"}
+            else:
+                # UNKNOWN or ALIVE — keep capacity locked
+                manifest.state = JobState.RECOVERY_REQUIRED.value
+                manifest.end_time = _now_iso()
+                manifest.error = "cancelled_term_%s" % term_result.value
+                self._persist_manifest(manifest)
+                self.claim_store.update_claim(job_id, {
+                    "state": "RECOVERY_REQUIRED",
+                    "error": manifest.error,
+                    "term_result": term_result.value,
+                })
+                return {"ok": True, "job_id": job_id, "state": "RECOVERY_REQUIRED",
+                        "term_result": term_result.value}
         else:
             manifest.state = JobState.CANCELLED.value
             manifest.end_time = _now_iso()
@@ -1077,12 +1188,18 @@ class JobOrchestrator:
         if manifest.state == JobState.RECOVERY_REQUIRED.value:
             worker = self.registry.get_worker(manifest.actual_worker)
             if worker and manifest.remote_pid:
-                remote_alive = self._check_remote_process_alive(
+                liveness = self._check_remote_process_alive(
                     worker, manifest.remote_pid)
-                if remote_alive:
+                if liveness == ProcessLiveness.ALIVE:
                     return {"ok": False,
                             "error": "remote_process_still_alive",
-                            "remote_pid": manifest.remote_pid}
+                            "remote_pid": manifest.remote_pid,
+                            "liveness": liveness.value}
+                elif liveness == ProcessLiveness.UNKNOWN:
+                    return {"ok": False,
+                            "error": "remote_process_unknown",
+                            "remote_pid": manifest.remote_pid,
+                            "liveness": liveness.value}
 
             max_pj = worker.max_parallel_jobs if worker else 1
             claim_result = self.claim_store.try_claim(
@@ -1269,10 +1386,16 @@ class JobOrchestrator:
             return False
 
     def _terminate_remote_process_group(self, worker, pgid: int,
-                                         fallback_pid: int = None):
-        """TERM remote PGID, wait, KILL, confirm exit."""
+                                         fallback_pid: int = None) -> ProcessLiveness:
+        """TERM remote PGID, wait, KILL, confirm exit.
+
+        Returns:
+            ProcessLiveness.CONFIRMED_EXIT: process confirmed dead after TERM/KILL.
+            ProcessLiveness.ALIVE: process survived TERM+KILL (should not happen).
+            ProcessLiveness.UNKNOWN: cannot determine (SSH failure etc).
+        """
         if not pgid and not fallback_pid:
-            return
+            return ProcessLiveness.UNKNOWN
 
         ssh_key = _resolve_ssh_key(self.registry)
         ssh_opts = [
@@ -1296,7 +1419,7 @@ class JobOrchestrator:
                 capture_output=True, timeout=15,
             )
         except Exception:
-            pass
+            return ProcessLiveness.UNKNOWN
 
         # Check if still alive, then KILL
         check_and_kill = (
@@ -1311,12 +1434,37 @@ class JobOrchestrator:
                 capture_output=True, timeout=15,
             )
         except Exception:
-            pass
+            return ProcessLiveness.UNKNOWN
 
-    def _check_remote_process_alive(self, worker, remote_pid: int) -> bool:
-        """Check if remote process is still running."""
+        # Final confirmation: check if any target is still alive
+        final_check = (
+            "for pid in %s; do "
+            "  kill -0 $pid 2>/dev/null && echo ALIVE; "
+            "done; echo DONE"
+            % " ".join(targets)
+        )
+        try:
+            result = subprocess.run(
+                ["ssh"] + ssh_opts + [ssh_target, final_check],
+                capture_output=True, timeout=15,
+            )
+            output = result.stdout.decode("utf-8", errors="replace").strip()
+            if "ALIVE" in output:
+                return ProcessLiveness.ALIVE
+            return ProcessLiveness.DEAD
+        except Exception:
+            return ProcessLiveness.UNKNOWN
+
+    def _check_remote_process_alive(self, worker, remote_pid) -> ProcessLiveness:
+        """Check if remote process is still running. Returns tri-state.
+
+        None/0 pid -> UNKNOWN (cannot determine, must not assume DEAD).
+        SSH failure -> UNKNOWN (fail-closed: assume may still be alive).
+        kill -0 success -> ALIVE.
+        kill -0 failure -> DEAD.
+        """
         if not remote_pid:
-            return False
+            return ProcessLiveness.UNKNOWN
         ssh_key = _resolve_ssh_key(self.registry)
         ssh_opts = [
             "-p", str(worker.ssh_port), "-i", ssh_key,
@@ -1324,17 +1472,27 @@ class JobOrchestrator:
             "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
         ]
         ssh_target = worker.ssh_user + "@" + worker.ssh_host
-        check_cmd = 'kill -0 -- -%d 2>/dev/null && echo ALIVE || echo DEAD' % remote_pid
+        # Check both PGID and PID
+        check_cmd = (
+            'kill -0 -- -%d 2>/dev/null && echo ALIVE || '
+            '(kill -0 %d 2>/dev/null && echo ALIVE || echo DEAD)'
+        ) % (remote_pid, remote_pid)
         try:
             result = subprocess.run(
                 ["ssh"] + ssh_opts + [ssh_target, check_cmd],
-                capture_output=True, timeout=10,
+                capture_output=True, timeout=15,
             )
             output = result.stdout.decode("utf-8", errors="replace").strip()
-            return "ALIVE" in output
+            if "ALIVE" in output:
+                return ProcessLiveness.ALIVE
+            elif "DEAD" in output:
+                return ProcessLiveness.DEAD
+            else:
+                # Ambiguous output — fail-closed
+                return ProcessLiveness.UNKNOWN
         except Exception:
-            # Can't check — assume alive to be safe (fail-closed)
-            return True
+            # SSH failure — cannot determine, fail-closed
+            return ProcessLiveness.UNKNOWN
 
     @staticmethod
     def _parse_remote_pid(stdout_text: str) -> Optional[int]:
