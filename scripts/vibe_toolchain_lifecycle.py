@@ -13,7 +13,7 @@ V1.17.2 Final Operational Closure:
 - OpenCode 1.17.7 PLAN ONLY artifact
 """
 
-__version__ = "2.4.0"
+__version__ = "2.5.0"
 
 import copy
 import hashlib
@@ -35,6 +35,14 @@ from vibe_worker_registry import WorkerRegistry, WorkerNode, NodeStatus
 from vibe_filelock import FileLock
 
 SCHEMA_VERSION = 2  # Bumped for corruption latch + lock file
+
+class STATE_CORRUPTED(RuntimeError):
+    """State file exists but failed schema/checksum/JSON validation."""
+    pass
+
+class STATE_NOT_INITIALIZED(RuntimeError):
+    """State file does not exist. Must bootstrap before dispatch/execute."""
+    pass
 STATE_DIR = os.path.expanduser("~/.vibedev/toolchain")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 LOCK_FILE = os.path.join(STATE_DIR, "state.lock")
@@ -337,6 +345,19 @@ class StateStore:
             "history": [],
         }
 
+    def bootstrap(self):
+        """Create initial empty state file if it does not exist.
+
+        Only callable when state file is missing.
+        Raises RuntimeError if state file already exists.
+        """
+        if os.path.exists(self.path):
+            raise RuntimeError(
+                "Cannot bootstrap: state file already exists at %s" % self.path)
+        self._state = self._empty_state()
+        self.save(self._state)
+        return self._state
+
     def _compute_checksum(self, state: dict) -> str:
         s = copy.deepcopy(state)
         s.pop("checksum", None)
@@ -357,14 +378,15 @@ class StateStore:
             self._file_lock = None
 
     def load(self) -> dict:
-        """Load state from disk with exclusive lock. Returns empty state if file missing or corrupt.
+        """Load state from disk with exclusive lock.
 
-        If corruption latch is active, still loads (for read-only operations)
-        but sets _corruption_latched flag.
+        Raises:
+            STATE_NOT_INITIALIZED: if state file does not exist.
+            STATE_CORRUPTED: if state file exists but fails validation.
         """
         if not os.path.exists(self.path):
-            self._state = self._empty_state()
-            return self._state
+            raise STATE_NOT_INITIALIZED(
+                "State file does not exist: %s. Must bootstrap before use." % self.path)
         try:
             self._acquire_lock()
             try:
@@ -375,22 +397,24 @@ class StateStore:
             state = json.loads(content)
             # Schema version check
             if state.get("schema_version") != SCHEMA_VERSION:
-                self.latch.latch(f"schema_mismatch: expected={SCHEMA_VERSION} got={state.get('schema_version')}")
-                self._state = self._empty_state()
-                return self._state
+                self.latch.latch("schema_mismatch: expected=%s got=%s" % (SCHEMA_VERSION, state.get("schema_version")))
+                raise STATE_CORRUPTED(
+                    "State schema mismatch: expected %s, got %s" % (SCHEMA_VERSION, state.get("schema_version")))
             # Checksum verification
             stored_checksum = state.get("checksum", "")
             computed = self._compute_checksum(state)
             if stored_checksum != computed:
-                self.latch.latch(f"checksum_mismatch: stored={stored_checksum[:16]} computed={computed[:16]}")
-                self._state = self._empty_state()
-                return self._state
+                self.latch.latch("checksum_mismatch: stored=%s computed=%s" % (stored_checksum[:16], computed[:16]))
+                raise STATE_CORRUPTED(
+                    "State checksum mismatch: stored=%s computed=%s" % (stored_checksum[:16], computed[:16]))
             self._state = state
             return self._state
+        except (STATE_CORRUPTED, STATE_NOT_INITIALIZED):
+            raise
         except (json.JSONDecodeError, OSError, KeyError) as e:
-            self.latch.latch(f"load_error: {str(e)[:200]}")
-            self._state = self._empty_state()
-            return self._state
+            self.latch.latch("load_error: %s" % str(e)[:200])
+            raise STATE_CORRUPTED(
+                "State load error: %s" % str(e)[:200])
 
     def save(self, state: dict = None):
         """Atomic write with lock file. Blocks if corruption latch is active."""
@@ -2488,7 +2512,18 @@ def gate_check_for_dispatch(state_path: str = None, registry: WorkerRegistry = N
 
     store = StateStore(path=state_path)
     gate = SchedulerGate(store)
-    result = gate.is_writes_allowed()
+    try:
+        result = gate.is_writes_allowed()
+    except (STATE_NOT_INITIALIZED, STATE_CORRUPTED) as e:
+        return {
+            "allowed": False,
+            "reason": "state_error",
+            "detail": str(e)[:200],
+            "version": __version__,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "gate_version": __version__,
+            "components": {},
+        }
 
     # Enrich with component details
     result["gate_version"] = __version__
@@ -2503,7 +2538,10 @@ def gate_check_for_dispatch(state_path: str = None, registry: WorkerRegistry = N
     }
 
     # Check secret drift
-    state = store.load()
+    try:
+        state = store.load()
+    except (STATE_NOT_INITIALIZED, STATE_CORRUPTED):
+        state = store._empty_state()
     secret_drift = False
     for evt in state.get("events", []):
         if evt.get("drift_type") == "SECRET_DRIFT" and evt.get("status") in ("detected", "operator_waiting"):
