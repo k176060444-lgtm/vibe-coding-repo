@@ -1256,9 +1256,12 @@ class JobOrchestrator:
         try:
             # Upload job script via SCP (binary-safe, no heredoc escaping)
             import tempfile
+            # Convert to Unix line endings (LF only) for remote bash
+            script_content_unix = job_script_content.replace('\r\n', '\n').replace('\r', '\n')
             local_script = tempfile.NamedTemporaryFile(
-                mode='w', suffix='.sh', delete=False, prefix='vibe_job_')
-            local_script.write(job_script_content)
+                mode='w', suffix='.sh', delete=False, prefix='vibe_job_',
+                newline='\n')
+            local_script.write(script_content_unix)
             local_script.close()
 
             # Compute local SHA256
