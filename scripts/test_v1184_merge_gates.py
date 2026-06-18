@@ -2,7 +2,7 @@
 """V1.18.4 Pre-Merge Safety Completion Tests.
 
 Tests for:
-1. 50-round multi-process cancel race
+1. 50-round thread-level cancel race (see test_v1184_real_execution_path for real multiprocess)
 2. Malicious payload detection
 3. Script SHA verification (local vs remote mismatch BLOCK)
 4. Credential resolver forward/reverse
@@ -35,34 +35,15 @@ from vibe_worker_registry import WorkerRegistry, WorkerNode, NodeStatus
 
 
 # ===========================================================================
-# Test 1: 50-round multi-process cancel race
+# Test 1: 50-round thread-level cancel race
 # ===========================================================================
 
-def _cancel_race_worker(args):
-    """Worker process: tries to cancel a job."""
-    store_path, lock_path, job_id, worker_id = args
-    try:
-        cs = ClaimStore(store_path, lock_path)
-        # Simulate cancel by releasing claim
-        cs.release_claim(job_id, "CANCELLED", False)
-        return ("cancel", os.getpid(), "ok")
-    except Exception as e:
-        return ("cancel", os.getpid(), str(e))
+def test_50_round_thread_cancel_race():
+    """50 rounds: executor and cancel compete using THREADS (not processes).
 
-
-def _executor_race_worker(args):
-    """Worker process: tries to complete a job (simulates executor)."""
-    store_path, lock_path, job_id, worker_id = args
-    try:
-        cs = ClaimStore(store_path, lock_path)
-        cs.release_claim(job_id, "SUCCEEDED", True)
-        return ("exec", os.getpid(), "ok")
-    except Exception as e:
-        return ("exec", os.getpid(), str(e))
-
-
-def test_50_round_cancel_race():
-    """50 rounds: executor and cancel compete. Only one terminal state per job."""
+    NOTE: This is a THREAD-level test. For real cross-process (multiprocessing spawn)
+    cancel race, see test_v1184_real_execution_path.py::test_real_cross_process_cancel_race.
+    """
     print("\n=== Test 1: 50-Round Cancel Race ===")
 
     cancel_wins = 0
@@ -78,18 +59,6 @@ def test_50_round_cancel_race():
             job_id = "race-job-%d" % i
             cs.try_claim(job_id, "5bao", os.getpid(), lease_seconds=300)
 
-            # Two processes compete: one cancels, one completes
-            pool = multiprocessing.Pool(2)
-            args = (store_path, lock_path, job_id, "5bao")
-            results = pool.starmap_async(
-                lambda sp, lp, jid, wid: _cancel_race_worker((sp, lp, jid, wid)),
-                [(store_path, lock_path, job_id, "5bao")])
-            # Actually use pool.map with different workers
-            pool.close()
-            pool.join()
-
-            # Instead, use sequential but fast alternation
-            # (true parallel on Windows spawn is expensive, use threads)
             import threading
             outcomes = []
 
@@ -144,7 +113,7 @@ def test_50_round_cancel_race():
     print("  Cancel wins: %d, Exec wins: %d" % (cancel_wins, exec_wins))
     assert len(violations) == 0, "Violations: %s" % violations[:5]
     assert cancel_wins + exec_wins == 50, "Expected 50 outcomes, got %d" % (cancel_wins + exec_wins)
-    print("  50-round cancel race: PASS")
+    print("  50-round thread cancel race: PASS")
 
 
 # ===========================================================================
@@ -425,7 +394,7 @@ def main():
 
     tests = [
         test_fresh_registry_unknown,
-        test_50_round_cancel_race,
+        test_50_round_thread_cancel_race,
         test_malicious_payloads,
         test_script_sha_verification,
         test_credential_resolver,

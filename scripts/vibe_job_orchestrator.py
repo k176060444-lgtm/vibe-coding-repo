@@ -2677,6 +2677,44 @@ def _shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+
+
+
+
+
+def _build_integrity_bound_job_script_standalone(
+        job_id, command, remote_job_dir,
+        worker_id="", base_sha="", approval_digest=""):
+    """Standalone version of JobOrchestrator._build_integrity_bound_job_script.
+
+    Builds an integrity-bound job script without requiring an orchestrator instance.
+    Used by test_v1184_real_execution_path.py for real execution-path testing.
+    """
+    command_sha = hashlib.sha256(command.encode("utf-8")).hexdigest()[:16]
+    sig_input = "|".join([
+        job_id, worker_id, command_sha, base_sha, approval_digest,
+    ])
+    integrity_digest = hashlib.sha256(sig_input.encode("utf-8")).hexdigest()[:32]
+
+    lines = [
+        "#!/bin/bash",
+        "# Job: %s" % job_id,
+        "# Worker: %s" % worker_id,
+        "# Command-SHA: %s" % command_sha,
+        "# Base-SHA: %s" % base_sha,
+        "# Approval-Digest: %s" % approval_digest,
+        "# Integrity-Digest: %s" % integrity_digest,
+        "# WARNING: This is an integrity-bound digest, NOT a cryptographic signature.",
+        "cd %s" % _shell_quote(remote_job_dir),
+        "%s >stdout.txt 2>stderr.txt" % command,
+        "EXIT_CODE=$?",
+        "echo $EXIT_CODE > .exit_code",
+        "exit $EXIT_CODE",
+        "",
+    ]
+    return chr(10).join(lines)
+
+
 # ===========================================================================
 # CLI
 # ===========================================================================
