@@ -1384,14 +1384,18 @@ class JobOrchestrator:
                     if worker and pgid:
                         self._terminate_remote_process_group(worker, pgid, manifest.remote_pid)
                     self.heartbeat_mgr.stop_heartbeat(job_id)
+                    # Use current_manifest for transition (not stale manifest)
                     try:
-                        manifest = self._transition_state(
-                            manifest, JobState.CANCELLED.value,
+                        current_manifest = self._transition_state(
+                            current_manifest, JobState.CANCELLED.value,
                             error="cancel_requested_by_executor")
                     except RuntimeError:
-                        pass
-                    manifest.end_time = _now_iso()
-                    self._persist_manifest(manifest)
+                        pass  # Already in terminal state (cancel_job may have completed)
+                    # Re-read to get the actual current state
+                    final_manifest = self._load_manifest(job_id)
+                    if final_manifest:
+                        final_manifest.end_time = _now_iso()
+                        self._persist_manifest(final_manifest)
                     self.claim_store.release_claim(job_id, "CANCELLED", success=False)
                     return {"ok": True, "job_id": job_id, "state": "CANCELLED",
                             "term_result": "EXECUTOR_OBSERVED_CANCEL"}
