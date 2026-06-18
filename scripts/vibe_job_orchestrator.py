@@ -900,11 +900,19 @@ class JobOrchestrator:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.communicate()
-                manifest.state = JobState.FAILED.value
-                manifest.error = "launch_command_timeout"
+                # SSH launch timed out — remote process may have already started.
+                # Fail-closed: do NOT release claim (capacity stays occupied).
+                manifest.state = JobState.RECOVERY_REQUIRED.value
+                manifest.error = "launch_command_timeout_recovery_required"
+                manifest.exit_code = -1
+                manifest.failure_count += 1
                 self._persist_manifest(manifest)
-                self.claim_store.release_claim(job_id, "FAILED", success=False)
-                return {"ok": False, "error": "launch_command_timeout", "job_id": job_id}
+                self.claim_store.update_claim(job_id, {
+                    "state": "RECOVERY_REQUIRED",
+                    "error": manifest.error,
+                })
+                return {"ok": False, "error": "launch_command_timeout_recovery_required",
+                        "job_id": job_id, "state": "RECOVERY_REQUIRED"}
 
             # Poll PID file with bounded retries (file may be generated late)
             remote_pgid = None
@@ -1031,11 +1039,17 @@ class JobOrchestrator:
             })
 
         except Exception as e:
-            manifest.state = JobState.FAILED.value
-            manifest.error = str(e)
+            # Local exception during job execution — remote process may still be alive.
+            # Fail-closed: set RECOVERY_REQUIRED, do NOT release claim (capacity stays occupied).
+            logger.error("Job %s local exception: %s. Setting RECOVERY_REQUIRED.", job_id, e)
+            manifest.state = JobState.RECOVERY_REQUIRED.value
+            manifest.error = "local_exception_%s" % str(e)[:200]
             manifest.exit_code = -1
             manifest.failure_count += 1
-            self.claim_store.release_claim(job_id, "FAILED", success=False)
+            self.claim_store.update_claim(job_id, {
+                "state": "RECOVERY_REQUIRED",
+                "error": manifest.error,
+            })
 
         finally:
             self.heartbeat_mgr.stop_heartbeat(job_id)
