@@ -30,11 +30,13 @@ def _cleanup(d):
     shutil.rmtree(d, ignore_errors=True)
 
 def _make_store(d):
-    return StateStore(
+    store = StateStore(
         os.path.join(d, "state.json"),
         os.path.join(d, "state.lock"),
         os.path.join(d, "latch.json"),
     )
+    store.bootstrap()
+    return store
 
 def _make_mgr(d, store=None):
     if store is None:
@@ -423,7 +425,7 @@ def test_reconcile_no_auto_approve():
 
 # === Test 16: Version ===
 def test_version():
-    assert __version__ in ("2.2.0", "2.3.0")
+    assert __version__ in ("2.2.0", "2.3.0", "2.6.0")
 
 
 # === Test 17: Self-check ===
