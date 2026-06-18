@@ -2129,16 +2129,16 @@ def run_self_check() -> dict:
             cs = ClaimStore(store_path, lock_path, latch_path)
             # Corrupt to trigger latch
             cs.try_claim("j-rep", "5bao", 1)
+            # Save the valid store (with checksum) before corrupting
+            import hashlib as _hl
+            raw_orig = json.loads(open(store_path).read())
             with open(store_path, "w") as f:
                 f.write("{corrupt")
             cs2 = ClaimStore(store_path, lock_path, latch_path)
             assert cs2.is_latched()
             # Fix the store before repair (repair now verifies store is fixed)
-            import hashlib as _hl
-            raw = {"claims": {"j-rep": {"worker": "5bao", "state": "CLAIMED"}},
-                   "version": 2}
             with open(store_path, "w") as f:
-                json.dump(raw, f)
+                json.dump(raw_orig, f)
             # Repair should clear latch with approval receipt
             cs2.repair("manual recovery after crash", "operator-001",
                        approval_receipt_id="receipt-001",
