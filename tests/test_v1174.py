@@ -643,11 +643,7 @@ def test_orchestrator_exists():
     """JobOrchestrator module imports and class instantiates."""
     orch = JobOrchestrator()
     assert orch is not None
-<<<<<<< Updated upstream
-    assert orch_version in ("1.0.0", "2.0.0", "2.1.0")
-=======
     assert orch_version in ("1.0.0", "2.0.0", "2.1.0", "3.0.0", "3.1.0")
->>>>>>> Stashed changes
     assert wo_version == "1.0.0"
 
 
