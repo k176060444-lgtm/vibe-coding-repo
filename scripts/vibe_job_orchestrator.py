@@ -1468,12 +1468,21 @@ class JobOrchestrator:
             (controller_dir / "stdout.txt").write_text(stdout_text)
             (controller_dir / "stderr.txt").write_text(stderr_text)
 
+            # Re-read manifest to check if cancel_job() already set terminal state
+            current = self._load_manifest(job_id)
+            if current and current.state in TERMINAL_STATES:
+                # cancel_job() already wrote terminal state — do NOT overwrite
+                logger.info("Job %s already in terminal state %s, not overwriting",
+                           job_id, current.state)
+                return {"ok": True, "job_id": job_id, "state": current.state}
+
             if manifest.exit_code == 0:
-                manifest.state = JobState.SUCCEEDED.value
+                manifest = self._transition_state(manifest, JobState.SUCCEEDED.value)
                 self.claim_store.release_claim(job_id, "SUCCEEDED", success=True)
             else:
-                manifest.state = JobState.FAILED.value
-                manifest.error = "exit_code_%d" % manifest.exit_code
+                manifest = self._transition_state(
+                    manifest, JobState.FAILED.value,
+                    error="exit_code_%d" % manifest.exit_code)
                 manifest.failure_count += 1
                 self.claim_store.release_claim(job_id, "FAILED", success=False)
 
