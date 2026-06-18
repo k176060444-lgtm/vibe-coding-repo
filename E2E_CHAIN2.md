@@ -1,0 +1,1 @@
+# E2E Chain 2 - Implemented by OpenCode on 9bao. This verifies bidirectional OpenCode dispatch.
