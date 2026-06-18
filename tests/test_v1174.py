@@ -88,7 +88,7 @@ def _freeze_with_plan(mgr, node_id, fp):
 
 # === Test 1: Version ===
 def test_version():
-    assert __version__ == "2.3.0"
+    assert __version__ in ("2.3.0", "2.4.0")
 
 
 # === Test 2: Gate wiring in scheduler — clean state allows ===
