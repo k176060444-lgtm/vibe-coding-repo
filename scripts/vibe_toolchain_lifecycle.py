@@ -2409,6 +2409,12 @@ class ToolchainLifecycleManager:
 
         # 15. gate_check_for_dispatch public API (V2.2.0)
         try:
+            # Re-bootstrap temp state
+            _ss = StateStore(tmp_state, tmp_lock, tmp_latch)
+            try:
+                _ss.load()
+            except (STATE_NOT_INITIALIZED, STATE_CORRUPTED):
+                _ss.bootstrap()
             gcr = gate_check_for_dispatch(state_path=tmp_state)
             checks.append({"name": "gate_dispatch_api", "passed": "allowed" in gcr and "components" in gcr,
                           "message": f"allowed={gcr.get('allowed')} components={len(gcr.get('components', {}))}"})
