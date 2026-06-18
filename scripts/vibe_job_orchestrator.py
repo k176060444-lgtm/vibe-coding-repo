@@ -1161,8 +1161,9 @@ class JobOrchestrator:
 
             # Launch with setsid + PID file capture
             # setsid runs the script in a new session; PID file captures the session leader PID
+            # Redirects ensure SSH session closes immediately (no timeout)
             launch_cmd = (
-                "setsid bash -c 'echo $$ > %s; exec bash %s' &"
+                "setsid bash -c 'echo $$ > %s; exec bash %s' </dev/null >/dev/null 2>&1 &"
                 % (_shell_quote(pid_file), _shell_quote(job_script_path))
             )
             proc = subprocess.Popen(
@@ -1436,6 +1437,15 @@ class JobOrchestrator:
             worker = self.registry.get_worker(manifest.actual_worker)
             pgid = manifest.remote_pgid or manifest.remote_pid
             term_result = ProcessLiveness.UNKNOWN
+
+            # If remote PID not captured (SSH launch timeout), try reading
+            # from remote PID file
+            if not pgid and worker and manifest.remote_job_dir:
+                pgid = self._read_remote_pid_file_from_dir(worker, manifest.remote_job_dir)
+                if pgid:
+                    manifest.remote_pid = pgid
+                    self._persist_manifest(manifest)
+
             if worker and pgid:
                 term_result = self._terminate_remote_process_group(
                     worker, pgid, manifest.remote_pid)
@@ -1770,6 +1780,33 @@ class JobOrchestrator:
             return ProcessLiveness.DEAD
         except Exception:
             return ProcessLiveness.UNKNOWN
+
+    def _read_remote_pid_file_from_dir(self, worker, remote_job_dir: str) -> Optional[int]:
+        """Read PID from remote .job.pid file via SSH.
+
+        Returns PID as int if found, None otherwise.
+        Used as fallback when remote_pid was not captured during launch.
+        """
+        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_opts = [
+            "-p", str(worker.ssh_port), "-i", ssh_key,
+            "-o", "StrictHostKeyChecking=yes", "-o", "IdentitiesOnly=yes",
+            "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+        ]
+        ssh_target = worker.ssh_user + "@" + worker.ssh_host
+        pid_file = remote_job_dir.rstrip("/") + "/.job.pid"
+        try:
+            result = subprocess.run(
+                ["ssh"] + ssh_opts + [ssh_target, "cat %s 2>/dev/null" % _shell_quote(pid_file)],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                pid = int(result.stdout.strip())
+                logger.info("Read remote PID %d from %s", pid, pid_file)
+                return pid
+        except Exception as e:
+            logger.warning("Cannot read remote PID file %s: %s", pid_file, e)
+        return None
 
     def _check_remote_process_alive(self, worker, remote_pid) -> ProcessLiveness:
         """Check if remote process is still running. Returns tri-state.
