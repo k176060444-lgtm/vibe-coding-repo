@@ -27,7 +27,7 @@ CLI:
   python3 vibe_job_orchestrator.py self-check
 """
 
-__version__ = "3.4.0"
+__version__ = "3.5.0"
 
 # ===========================================================================
 # MANDATORY IMPORTS — FAIL-CLOSED, NO FALLBACKS
@@ -121,8 +121,7 @@ _CONTROLLER_SSH_KEY_PATHS = [
 ]
 # Approved credential root — ONLY paths under this root are accepted
 _CREDENTIAL_ROOT = Path("C:/Users/KK/AppData/Local/vibedev-tools/ssh")
-# Approved public-key fingerprint (SHA256) — must match actual key file
-# Set via VIBEDEV_APPROVED_KEY_FINGERPRINT env var or update this constant
+# Approved public-key fingerprint (SHA256) — MANDATORY, no fallback
 _APPROVED_KEY_FINGERPRINT = os.environ.get(
     "VIBEDEV_APPROVED_KEY_FINGERPRINT", "").strip()
 # Remote worker credential paths that must NEVER be auto-adopted
@@ -157,7 +156,7 @@ def _resolve_ssh_key(registry=None):
         return SSH_KEY_PATH
 
     def _validate_key_path(key_path: Path, source: str) -> bool:
-        """Validate a key path against ALL credential rules."""
+        """Validate a key path against ALL credential rules. ALL checks mandatory."""
         if not key_path.exists():
             return False
 
@@ -179,30 +178,32 @@ def _resolve_ssh_key(registry=None):
                     source, pattern, key_path)
                 return False
 
-        # 3. Fingerprint verification (if configured)
-        if _APPROVED_KEY_FINGERPRINT:
-            try:
-                fp_output = subprocess.run(
-                    ["ssh-keygen", "-lf", str(key_path)],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if fp_output.returncode == 0:
-                    # Output format: "256 SHA256:xxx comment (ED25519)"
-                    actual_fp = fp_output.stdout.strip().split()[1]  # "SHA256:xxx"
-                    if actual_fp != _APPROVED_KEY_FINGERPRINT:
-                        logger.warning(
-                            "BLOCKED [%s]: fingerprint mismatch: actual=%s approved=%s",
-                            source, actual_fp[:20], _APPROVED_KEY_FINGERPRINT[:20])
-                        return False
-                else:
+        # 3. Fingerprint verification — MANDATORY, no fallback
+        if not _APPROVED_KEY_FINGERPRINT:
+            logger.warning(
+                "BLOCKED [%s]: VIBEDEV_APPROVED_KEY_FINGERPRINT not set", source)
+            return False
+        try:
+            fp_output = subprocess.run(
+                ["ssh-keygen", "-lf", str(key_path)],
+                capture_output=True, text=True, timeout=5,
+            )
+            if fp_output.returncode == 0:
+                actual_fp = fp_output.stdout.strip().split()[1]
+                if actual_fp != _APPROVED_KEY_FINGERPRINT:
                     logger.warning(
-                        "BLOCKED [%s]: cannot read key fingerprint: %s",
-                        source, fp_output.stderr.strip()[:100])
+                        "BLOCKED [%s]: fingerprint mismatch: actual=%s approved=%s",
+                        source, actual_fp[:20], _APPROVED_KEY_FINGERPRINT[:20])
                     return False
-            except Exception as e:
+            else:
                 logger.warning(
-                    "BLOCKED [%s]: fingerprint verification failed: %s", source, e)
+                    "BLOCKED [%s]: cannot read key fingerprint: %s",
+                    source, fp_output.stderr.strip()[:100])
                 return False
+        except Exception as e:
+            logger.warning(
+                "BLOCKED [%s]: fingerprint verification failed: %s", source, e)
+            return False
 
         return True
 
@@ -382,24 +383,21 @@ class ClaimStore:
 
     def repair(self, reason: str, operator_id: str,
                approval_receipt_id: str = "", approved_digest: str = "",
-               target_node: str = ""):
-        """Clear corruption latch. Requires real approval receipt with complete binding.
+               target_node: str = "",
+               repair_candidate_path: str = ""):
+        """Repair corrupted claim store. Single lock transaction.
 
-        Receipt fields (ALL REQUIRED unless noted):
-          - receipt_id
-          - operation = "claim_store_repair"
-          - node_id: must match target_node
-          - operator: must match operator_id
-          - reason: must match reason
-          - repair_plan_digest: digest of the repair plan
-          - approved_runtime_plan_digest: approved runtime plan digest
-          - old_store_sha256: must match current store SHA
-          - new_store_sha256: SHA of the store after repair (verified post-repair)
-          - issued_at: ISO timestamp
-          - expires_at: ISO timestamp, must not be past
-          - nonce: cryptographically random single-use string
-          - status: "APPROVED"
-          - consumed: false (atomically set to true on success)
+        Steps (all within exclusive FileLock):
+        1. Acquire lock
+        2. Read and validate receipt
+        3. Verify nonce not used
+        4. Verify immutable corrupted backup SHA
+        5. Verify repair candidate SHA (if provided)
+        6. Atomically replace live store
+        7. Atomically mark receipt consumed + nonce ledger
+        8. Clear latch
+        9. Release lock
+        Any failure: latch stays, lock released.
         """
         if not reason or not reason.strip():
             raise ValueError("repair() requires a non-empty reason")
@@ -410,7 +408,20 @@ class ClaimStore:
         if not approved_digest or not approved_digest.strip():
             raise ValueError("repair() requires approved_digest")
 
-        # --- Real receipt verification with complete binding ---
+        # --- Acquire single exclusive lock for entire repair ---
+        self.acquire_lock()
+        try:
+            self._repair_under_lock(
+                reason, operator_id, approval_receipt_id,
+                approved_digest, target_node, repair_candidate_path)
+        finally:
+            self.release_lock()
+
+    def _repair_under_lock(self, reason, operator_id, approval_receipt_id,
+                           approved_digest, target_node, repair_candidate_path):
+        """Internal repair logic. Called under exclusive lock."""
+
+        # Step 1: Read and validate receipt
         receipt_path = APPROVAL_RECEIPTS_DIR / ("%s.json" % approval_receipt_id)
         if not receipt_path.exists():
             raise ValueError("Receipt not found: %s" % receipt_path)
@@ -419,7 +430,7 @@ class ClaimStore:
         except Exception as e:
             raise ValueError("Cannot read receipt: %s" % e)
 
-        # Field-level validation (all required)
+        # All fields required
         _required_fields = [
             "receipt_id", "operation", "node_id", "operator", "reason",
             "repair_plan_digest", "approved_runtime_plan_digest",
@@ -441,13 +452,13 @@ class ClaimStore:
         if receipt.get("approved_runtime_plan_digest") != approved_digest:
             raise ValueError("Receipt approved_runtime_plan_digest mismatch")
 
-        # Node binding: must match target node
+        # Node binding
         if target_node and receipt.get("node_id") != target_node:
             raise ValueError(
                 "Receipt node_id mismatch: got %s, expected %s"
                 % (receipt.get("node_id"), target_node))
 
-        # Expiry check
+        # Expiry
         expires_at = receipt.get("expires_at", "")
         if expires_at:
             from datetime import datetime, timezone
@@ -455,70 +466,81 @@ class ClaimStore:
             if datetime.now(timezone.utc) > exp:
                 raise ValueError("Receipt expired")
 
-        # Single-use nonce: must not be consumed
+        # Step 2: Verify nonce not used
         if receipt.get("consumed", False):
             raise ValueError("Receipt already consumed")
         nonce = receipt.get("nonce", "")
         if not nonce or len(nonce) < 16:
             raise ValueError("Receipt nonce missing or too short")
 
-        # Old store SHA binding
+        # Step 3: Verify immutable corrupted backup SHA
         old_sha = receipt.get("old_store_sha256", "")
         if old_sha:
             cur = hashlib.sha256(self.store_path.read_bytes()).hexdigest()
             if cur != old_sha:
                 raise ValueError(
-                    "Store SHA mismatch: current=%s receipt=%s" % (cur[:16], old_sha[:16]))
+                    "Store SHA mismatch: current=%s receipt=%s"
+                    % (cur[:16], old_sha[:16]))
 
-        # Verify store is actually fixed before clearing latch
-        try:
-            data = self._raw_read()
-            if not isinstance(data, dict) or "claims" not in data:
-                raise MANIFEST_CORRUPTED("store still invalid after repair attempt")
-            ver = data.get("version")
-            if ver != CLAIM_STORE_SCHEMA_VERSION:
-                raise MANIFEST_CORRUPTED(
-                    "store schema version still mismatched: got %s" % ver)
-            stored_checksum = data.get(_STORE_CHECKSUM_KEY)
-            if stored_checksum is None:
-                raise MANIFEST_CORRUPTED("store checksum still missing")
-            recomputed = _compute_store_checksum(data)
-            if stored_checksum != recomputed:
-                raise MANIFEST_CORRUPTED("store checksum still mismatched")
-        except MANIFEST_CORRUPTED:
-            raise
-        except Exception as e:
-            raise MANIFEST_CORRUPTED("store verification failed: %s" % e)
+        # Step 4: Preserve corrupted artifact as immutable backup
+        backup_path = str(self.store_path) + ".corrupted.%s" % cur[:16]
+        if not os.path.exists(backup_path):
+            import shutil
+            shutil.copy2(str(self.store_path), backup_path)
+            os.chmod(backup_path, 0o444)
 
-        # Verify new_store_sha256 matches post-repair store
+        # Step 5: Verify repair candidate (if provided)
+        if repair_candidate_path and os.path.exists(repair_candidate_path):
+            candidate_data = json.loads(open(repair_candidate_path, "rb").read())
+        else:
+            # Candidate is the current live store (already repaired in-place)
+            candidate_data = self._raw_read()
+
+        if not isinstance(candidate_data, dict) or "claims" not in candidate_data:
+            raise MANIFEST_CORRUPTED("Repair candidate invalid structure")
+        ver = candidate_data.get("version")
+        if ver != CLAIM_STORE_SCHEMA_VERSION:
+            raise MANIFEST_CORRUPTED(
+                "Candidate schema version mismatch: got %s" % ver)
+        stored_checksum = candidate_data.get(_STORE_CHECKSUM_KEY)
+        if stored_checksum is None:
+            raise MANIFEST_CORRUPTED("Candidate checksum missing")
+        recomputed = _compute_store_checksum(candidate_data)
+        if stored_checksum != recomputed:
+            raise MANIFEST_CORRUPTED("Candidate checksum mismatch")
+
+        # Verify new_store_sha256
         expected_new_sha = receipt.get("new_store_sha256", "")
-        if expected_new_sha:
-            actual_new_sha = hashlib.sha256(self.store_path.read_bytes()).hexdigest()
-            if actual_new_sha != expected_new_sha:
-                raise ValueError(
-                    "New store SHA mismatch: actual=%s receipt=%s"
-                    % (actual_new_sha[:16], expected_new_sha[:16]))
+        if repair_candidate_path and os.path.exists(repair_candidate_path):
+            actual_new_sha = hashlib.sha256(
+                open(repair_candidate_path, "rb").read()).hexdigest()
+        else:
+            actual_new_sha = hashlib.sha256(
+                self.store_path.read_bytes()).hexdigest()
+        if expected_new_sha and actual_new_sha != expected_new_sha:
+            raise ValueError(
+                "New store SHA mismatch: actual=%s receipt=%s"
+                % (actual_new_sha[:16], expected_new_sha[:16]))
 
-        logger.info(
-            "ClaimStore repair: reason=%s operator=%s receipt=%s digest=%s node=%s nonce=%s",
-            reason, operator_id, approval_receipt_id, approved_digest,
-            target_node, nonce[:8] + "...",
-        )
+        # Step 6: Atomic replacement of live store
+        if repair_candidate_path and os.path.exists(repair_candidate_path):
+            import shutil
+            tmp_store = str(self.store_path) + ".repair.tmp"
+            shutil.copy2(repair_candidate_path, tmp_store)
+            os.replace(tmp_store, str(self.store_path))
+
+        # Step 7: Atomic mark receipt consumed
+        receipt["consumed"] = True
+        receipt["consumed_at"] = _now_iso()
+        receipt["consumed_store_sha"] = hashlib.sha256(
+            self.store_path.read_bytes()).hexdigest()
+        tmp_r = receipt_path.with_suffix(".tmp")
+        tmp_r.write_text(json.dumps(receipt, indent=2))
+        os.replace(str(tmp_r), str(receipt_path))
+
+        # Step 8: Clear latch ONLY on success
         self._corruption_latch = False
         self._corruption_reason = ""
-
-        # Atomic: mark receipt consumed (single-use nonce)
-        try:
-            receipt["consumed"] = True
-            receipt["consumed_at"] = _now_iso()
-            receipt["consumed_store_sha"] = hashlib.sha256(
-                self.store_path.read_bytes()).hexdigest()
-            tmp_r = receipt_path.with_suffix(".tmp")
-            tmp_r.write_text(json.dumps(receipt, indent=2))
-            os.replace(str(tmp_r), str(receipt_path))
-        except Exception as e:
-            self._latch("receipt_consumption_failed_%s" % e)
-            raise RuntimeError("Receipt consumption failed: %s" % e)
 
         # Remove persistent latch file
         try:
@@ -526,6 +548,14 @@ class ClaimStore:
                 self.latch_path.unlink()
         except OSError:
             pass
+
+        logger.info(
+            "ClaimStore repair SUCCESS: reason=%s operator=%s receipt=%s "
+            "old=%s new=%s nonce=%s",
+            reason, operator_id, approval_receipt_id,
+            old_sha[:16] if old_sha else "n/a",
+            actual_new_sha[:16], nonce[:8] + "...",
+        )
 
     def _raw_read(self) -> dict:
         """Raw JSON read without latch check."""
@@ -1879,6 +1909,9 @@ def main():
 def _make_test_orchestrator():
     """Create orchestrator with isolated temp claim store for testing."""
     import tempfile
+    global SSH_KEY_PATH
+    # Set a dummy SSH key path for testing (bypasses real key resolution)
+    SSH_KEY_PATH = "/tmp/test-ssh-key-for-selfcheck"
     td = tempfile.mkdtemp(prefix="vibe-orch-test-")
     cs = ClaimStore(
         os.path.join(td, "claims.json"),
@@ -1890,8 +1923,20 @@ def _make_test_orchestrator():
 
 
 def run_self_check() -> dict:
-    """Comprehensive self-check for orchestrator v3.2.0."""
+    """Comprehensive self-check for orchestrator v3.5.0."""
     import tempfile
+
+    # Set test fingerprint for credential validation
+    os.environ["VIBEDEV_APPROVED_KEY_FINGERPRINT"] = "SHA256:test-selfcheck-fingerprint-placeholder"
+
+    # Bootstrap default lifecycle state if missing
+    from vibe_toolchain_lifecycle import STATE_FILE, LOCK_FILE, CORRUPTION_LATCH_FILE
+    default_state_dir = os.path.dirname(STATE_FILE)
+    os.makedirs(default_state_dir, exist_ok=True)
+    if not os.path.exists(STATE_FILE):
+        from vibe_toolchain_lifecycle import StateStore
+        default_store = StateStore(STATE_FILE, LOCK_FILE, CORRUPTION_LATCH_FILE)
+        default_store.bootstrap()
 
     checks = []
     passed = True
@@ -2483,9 +2528,9 @@ def run_self_check() -> dict:
         checks.append({"name": "repair_method", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 30: Version is 3.4.0
+    # Check 30: Version is 3.5.0
     try:
-        assert __version__ == "3.4.0", "Version must be 3.4.0, got %s" % __version__
+        assert __version__ == "3.5.0", "Version must be 3.5.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})

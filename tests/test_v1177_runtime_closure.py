@@ -363,7 +363,7 @@ class TestLifecycleGateInPreflight:
 
 class TestVersion:
     def test_version_is_300(self):
-        assert __version__ in ("3.0.0", "3.1.0", "3.2.0", "3.3.0", "3.4.0")
+        assert __version__ in ("3.0.0", "3.1.0", "3.2.0", "3.3.0", "3.4.0", "3.5.0")
 
 
 if __name__ == "__main__":

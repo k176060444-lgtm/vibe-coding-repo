@@ -13,7 +13,7 @@ V1.17.2 Final Operational Closure:
 - OpenCode 1.17.7 PLAN ONLY artifact
 """
 
-__version__ = "2.6.0"
+__version__ = "2.7.0"
 
 import copy
 import hashlib
@@ -638,11 +638,143 @@ class StateStore:
         except Exception as e:
             return {"ok": False, "reason": str(e)[:200], "corruption_latched": self.latch.is_latched()}
 
-    def repair(self, operator: str = "operator"):
-        """Operator repair: clear corruption latch and reinitialize state."""
+    def repair(self, approval_receipt_id: str, operator: str,
+               repair_candidate_path: str = ""):
+        """Repair corrupted state with verified candidate. Receipt-based authority ONLY.
+
+        NEVER clears latch on failure. NEVER overwrites with empty state.
+        Preserves approved baselines, plans, approvals, history from candidate.
+
+        Receipt must contain (ALL REQUIRED):
+          - receipt_id, operation='lifecycle_state_repair'
+          - node_id, operator, reason
+          - old_corrupted_artifact_sha256: SHA of current corrupted state file
+          - repair_candidate_sha256: SHA of the candidate replacement file
+          - approved_runtime_plan_digest, repair_plan_digest
+          - issued_at, expires_at, nonce (>=16 chars, single-use)
+          - status='APPROVED', consumed=False
+        """
+        # --- Receipt verification ---
+        receipts_dir = os.path.join(os.path.dirname(self.path), "approval_receipts")
+        receipt_path = os.path.join(receipts_dir, "%s.json" % approval_receipt_id)
+        if not os.path.exists(receipt_path):
+            raise ValueError("Receipt not found: %s" % receipt_path)
+        try:
+            with open(receipt_path, "r") as f:
+                receipt = json.load(f)
+        except Exception as e:
+            raise ValueError("Cannot read receipt: %s" % e)
+
+        # All fields required
+        _required = [
+            "receipt_id", "operation", "node_id", "operator", "reason",
+            "old_corrupted_artifact_sha256", "repair_candidate_sha256",
+            "approved_runtime_plan_digest", "repair_plan_digest",
+            "issued_at", "expires_at", "nonce", "status",
+        ]
+        for field_name in _required:
+            if field_name not in receipt or not receipt[field_name]:
+                raise ValueError("Receipt missing required field: %s" % field_name)
+
+        if receipt["operation"] != "lifecycle_state_repair":
+            raise ValueError("Receipt operation mismatch: %s" % receipt["operation"])
+        if receipt["status"] != "APPROVED":
+            raise ValueError("Receipt not APPROVED")
+        if receipt["operator"] != operator:
+            raise ValueError("Receipt operator mismatch")
+        if receipt.get("consumed", False):
+            raise ValueError("Receipt already consumed")
+        nonce = receipt["nonce"]
+        if len(nonce) < 16:
+            raise ValueError("Receipt nonce too short")
+
+        # Expiry
+        from datetime import datetime, timezone
+        exp = datetime.fromisoformat(receipt["expires_at"].replace("Z", "+00:00"))
+        if datetime.now(timezone.utc) > exp:
+            raise ValueError("Receipt expired")
+
+        # Old corrupted artifact SHA must match current state file
+        old_sha = hashlib.sha256(
+            open(self.path, "rb").read()).hexdigest()
+        if old_sha != receipt["old_corrupted_artifact_sha256"]:
+            raise ValueError(
+                "Old artifact SHA mismatch: actual=%s receipt=%s"
+                % (old_sha[:16], receipt["old_corrupted_artifact_sha256"][:16]))
+
+        # --- Preserve corrupted artifact as read-only backup ---
+        backup_path = self.path + ".corrupted.%s" % old_sha[:16]
+        if not os.path.exists(backup_path):
+            import shutil
+            shutil.copy2(self.path, backup_path)
+            # Make read-only
+            os.chmod(backup_path, 0o444)
+
+        # --- Load and validate repair candidate ---
+        if repair_candidate_path and os.path.exists(repair_candidate_path):
+            candidate_sha = hashlib.sha256(
+                open(repair_candidate_path, "rb").read()).hexdigest()
+        else:
+            # Candidate is the current file (already repaired in-place)
+            candidate_sha = old_sha
+
+        if candidate_sha != receipt["repair_candidate_sha256"]:
+            raise ValueError(
+                "Candidate SHA mismatch: actual=%s receipt=%s"
+                % (candidate_sha[:16], receipt["repair_candidate_sha256"][:16]))
+
+        # Validate candidate is valid JSON with correct schema
+        try:
+            if repair_candidate_path and os.path.exists(repair_candidate_path):
+                with open(repair_candidate_path, "r") as f:
+                    candidate_state = json.load(f)
+            else:
+                candidate_state = json.loads(open(self.path, "r").read())
+            if candidate_state.get("schema_version") != SCHEMA_VERSION:
+                raise STATE_CORRUPTED(
+                    "Candidate schema mismatch: got %s" % candidate_state.get("schema_version"))
+            # Verify checksum
+            stored_cs = candidate_state.get("checksum", "")
+            computed_cs = self._compute_checksum(candidate_state)
+            if stored_cs != computed_cs:
+                raise STATE_CORRUPTED("Candidate checksum mismatch")
+        except (STATE_CORRUPTED, STATE_NOT_INITIALIZED):
+            raise
+        except (json.JSONDecodeError, OSError) as e:
+            raise STATE_CORRUPTED("Candidate validation failed: %s" % e)
+
+        # --- Atomic replacement ---
+        # Only now do we replace the state file (atomic via temp+replace)
+        if repair_candidate_path and os.path.exists(repair_candidate_path):
+            tmp_state = self.path + ".repair.tmp"
+            import shutil
+            shutil.copy2(repair_candidate_path, tmp_state)
+            os.replace(tmp_state, self.path)
+
+        self._state = candidate_state
+
+        # --- Mark receipt consumed (single-use nonce) ---
+        receipt["consumed"] = True
+        receipt["consumed_at"] = datetime.now(timezone.utc).isoformat()
+        receipt["consumed_artifact_sha"] = hashlib.sha256(
+            open(self.path, "rb").read()).hexdigest()
+        tmp_r = receipt_path + ".tmp"
+        with open(tmp_r, "w") as f:
+            json.dump(receipt, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_r, receipt_path)
+
+        # --- Clear latch ONLY on success ---
         self.latch.clear(operator)
-        self._state = self._empty_state()
-        self.save(self._state)
+
+        return {
+            "repaired": True,
+            "old_sha": old_sha[:16],
+            "candidate_sha": candidate_sha[:16],
+            "backup_path": backup_path,
+            "receipt_id": approval_receipt_id,
+        }
 SSH_KEY = os.environ.get(
     "VIBEDEV_SSH_KEY",
     os.path.expanduser("~") + "/AppData/Local/vibedev-tools/ssh/debian-vibeworker-ed25519"
