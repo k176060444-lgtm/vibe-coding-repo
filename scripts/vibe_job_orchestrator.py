@@ -1797,7 +1797,7 @@ class JobOrchestrator:
         pid_file = remote_job_dir.rstrip("/") + "/.job.pid"
         try:
             result = subprocess.run(
-                ["ssh"] + ssh_opts + [ssh_target, "cat %s 2>/dev/null" % pid_file],
+                ["ssh"] + ssh_opts + [ssh_target, "cat %s 2>/dev/null" % _shell_quote(pid_file)],
                 capture_output=True, text=True, timeout=15,
             )
             if result.returncode == 0 and result.stdout.strip():
