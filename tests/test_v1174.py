@@ -19,7 +19,7 @@ from vibe_toolchain_lifecycle import (
     RemediationPlanner, RemediationAction, PlanRecord, PlanStatus,
     SchedulerGate, ToolchainLifecycleManager, gate_check_for_dispatch,
     dispatch_check_write_operation, SSH_OPTS,
-)
+, STATE_CORRUPTED, STATE_NOT_INITIALIZED)
 from vibe_worker_registry import WorkerRegistry, WorkerNode, NodeStatus
 
 
@@ -30,11 +30,13 @@ def _cleanup(d):
     shutil.rmtree(d, ignore_errors=True)
 
 def _make_store(d):
-    return StateStore(
+    store = StateStore(
         os.path.join(d, "state.json"),
         os.path.join(d, "state.lock"),
         os.path.join(d, "latch.json"),
     )
+    store.bootstrap()
+    return store
 
 def _make_mgr(d, store=None):
     if store is None:
@@ -87,8 +89,19 @@ def _freeze_with_plan(mgr, node_id, fp):
 
 
 # === Test 1: Version ===
+
+def _make_bootstrapped_store(*args, **kwargs):
+    """Create a StateStore and bootstrap if state file doesn't exist."""
+    store = StateStore(*args, **kwargs)
+    try:
+        store.load()
+    except (STATE_NOT_INITIALIZED, STATE_CORRUPTED):
+        store.bootstrap()
+    return store
+
+
 def test_version():
-    assert __version__ in ("2.3.0", "2.4.0")
+    assert __version__ in ("2.3.0", "2.4.0", "2.5.0")
 
 
 # === Test 2: Gate wiring in scheduler — clean state allows ===
@@ -368,6 +381,10 @@ def test_concurrent_lock_no_loss():
         n_events = 50
         def writer(store_path, lock_path, latch_path, start_idx, count):
             s = StateStore(store_path, lock_path, latch_path)
+            try:
+                s.load()
+            except (STATE_NOT_INITIALIZED, STATE_CORRUPTED):
+                s.bootstrap()
             for i in range(count):
                 s.add_event(DriftEvent(event_id=f"evt-{start_idx+i}", node_id="5bao",
                     detected_at=datetime.now(timezone.utc).isoformat(),
@@ -643,7 +660,7 @@ def test_orchestrator_exists():
     """JobOrchestrator module imports and class instantiates."""
     orch = JobOrchestrator()
     assert orch is not None
-    assert orch_version in ("1.0.0", "2.0.0", "2.1.0", "3.0.0", "3.1.0", "3.2.0")
+    assert orch_version in ("1.0.0", "2.0.0", "2.1.0", "3.0.0", "3.1.0", "3.2.0", "3.3.0")
     assert wo_version == "1.0.0"
 
 

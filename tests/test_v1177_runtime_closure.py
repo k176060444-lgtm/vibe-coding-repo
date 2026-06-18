@@ -156,6 +156,23 @@ class TestClaimStoreFailClosed:
             with open(sp, "w") as f:
                 json.dump(raw, f)
             # Repair with explicit operator approval + receipt
+            # Create receipt file for repair
+            import hashlib as _hl
+            receipt_dir = Path.home() / ".vibedev" / "toolchain" / "approval_receipts"
+            receipt_dir.mkdir(parents=True, exist_ok=True)
+            receipt_file = receipt_dir / "receipt-001.json"
+            receipt_data = {
+                "receipt_id": "receipt-001",
+                "operation": "claim_store_repair",
+                "status": "APPROVED",
+                "operator": "test_operator",
+                "reason": "corruption_test",
+                "approved_digest": "abc123",
+                "old_store_sha256": _hl.sha256(open(sp, "rb").read()).hexdigest(),
+                "expires_at": "2099-12-31T23:59:59+00:00",
+                "consumed": False
+            }
+            receipt_file.write_text(json.dumps(receipt_data, indent=2))
             cs2.repair("corruption_test", "test_operator",
                        approval_receipt_id="receipt-001",
                        approved_digest="abc123")
@@ -339,7 +356,7 @@ class TestLifecycleGateInPreflight:
 
 class TestVersion:
     def test_version_is_300(self):
-        assert __version__ in ("3.0.0", "3.1.0", "3.2.0")
+        assert __version__ in ("3.0.0", "3.1.0", "3.2.0", "3.3.0")
 
 
 if __name__ == "__main__":
