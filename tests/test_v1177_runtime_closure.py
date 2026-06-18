@@ -152,10 +152,13 @@ class TestClaimStoreFailClosed:
                 f.write("{bad")
             cs2 = ClaimStore(sp, lp)
             assert cs2.is_latched()
-            # Repair with explicit operator approval
-            cs2.repair("corruption_test", "test_operator")
+            # Fix the store file BEFORE repair (repair now verifies store is fixed)
             with open(sp, "w") as f:
                 json.dump(raw, f)
+            # Repair with explicit operator approval + receipt
+            cs2.repair("corruption_test", "test_operator",
+                       approval_receipt_id="receipt-001",
+                       approved_digest="abc123")
             cs3 = ClaimStore(sp, lp)
             assert not cs3.is_latched()
             assert cs3.get_claim("j1") is not None
@@ -336,7 +339,7 @@ class TestLifecycleGateInPreflight:
 
 class TestVersion:
     def test_version_is_300(self):
-        assert __version__ in ("3.0.0", "3.1.0")
+        assert __version__ in ("3.0.0", "3.1.0", "3.2.0")
 
 
 if __name__ == "__main__":

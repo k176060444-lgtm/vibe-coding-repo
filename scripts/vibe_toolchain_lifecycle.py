@@ -13,10 +13,9 @@ V1.17.2 Final Operational Closure:
 - OpenCode 1.17.7 PLAN ONLY artifact
 """
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 
 import copy
-import fcntl
 import hashlib
 import json
 import os
@@ -33,6 +32,7 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 from vibe_worker_registry import WorkerRegistry, WorkerNode, NodeStatus
+from vibe_filelock import FileLock
 
 SCHEMA_VERSION = 2  # Bumped for corruption latch + lock file
 STATE_DIR = os.path.expanduser("~/.vibedev/toolchain")
@@ -313,10 +313,10 @@ class StateStore:
     """Persistent JSON state store with independent lock file and corruption latch.
 
     Location: ~/.vibedev/toolchain/state.json
-    Lock: ~/.vibedev/toolchain/state.lock (independent file, fcntl.flock)
+    Lock: ~/.vibedev/toolchain/state.lock (independent file, cross-platform FileLock)
     Latch: ~/.vibedev/toolchain/corruption_latch (separate file)
     Integrity: SHA256 checksum of content (excluding checksum field itself)
-    Concurrency: fcntl.flock exclusive on lock file for full read-modify-write
+    Concurrency: cross-platform FileLock exclusive on lock file for full read-modify-write
     """
 
     def __init__(self, path: str = None, lock_path: str = None, latch_path: str = None):
@@ -345,20 +345,19 @@ class StateStore:
         ).hexdigest()
 
     def _acquire_lock(self):
-        """Acquire exclusive lock on lock file."""
+        """Acquire exclusive lock on lock file via cross-platform FileLock."""
         os.makedirs(os.path.dirname(self.lock_path) or ".", exist_ok=True)
-        self._lock_fd = open(self.lock_path, "w")
-        fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX)
+        self._file_lock = FileLock(self.lock_path, timeout=10.0)
+        self._file_lock.acquire()
 
     def _release_lock(self):
         """Release lock."""
-        if hasattr(self, "_lock_fd") and self._lock_fd:
-            fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
-            self._lock_fd.close()
-            self._lock_fd = None
+        if hasattr(self, "_file_lock") and self._file_lock:
+            self._file_lock.release()
+            self._file_lock = None
 
     def load(self) -> dict:
-        """Load state from disk. Returns empty state if file missing or corrupt.
+        """Load state from disk with exclusive lock. Returns empty state if file missing or corrupt.
 
         If corruption latch is active, still loads (for read-only operations)
         but sets _corruption_latched flag.
@@ -367,10 +366,12 @@ class StateStore:
             self._state = self._empty_state()
             return self._state
         try:
-            with open(self.path, "r") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-                content = f.read()
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            self._acquire_lock()
+            try:
+                with open(self.path, "r") as f:
+                    content = f.read()
+            finally:
+                self._release_lock()
             state = json.loads(content)
             # Schema version check
             if state.get("schema_version") != SCHEMA_VERSION:
