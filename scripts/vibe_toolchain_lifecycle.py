@@ -744,10 +744,12 @@ class StateStore:
             raise STATE_CORRUPTED("Candidate validation failed: %s" % e)
 
         # --- Atomic replacement ---
-        # Only now do we replace the state file
+        # Only now do we replace the state file (atomic via temp+replace)
         if repair_candidate_path and os.path.exists(repair_candidate_path):
+            tmp_state = self.path + ".repair.tmp"
             import shutil
-            shutil.copy2(repair_candidate_path, self.path)
+            shutil.copy2(repair_candidate_path, tmp_state)
+            os.replace(tmp_state, self.path)
 
         self._state = candidate_state
 
