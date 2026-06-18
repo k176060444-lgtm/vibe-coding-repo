@@ -152,16 +152,17 @@ class TestClaimStoreFailClosed:
                 f.write("{bad")
             cs2 = ClaimStore(sp, lp)
             assert cs2.is_latched()
-            # Fix the store file BEFORE repair (repair now verifies store is fixed)
-            with open(sp, "w") as f:
+            # Create repair candidate with the fixed store content
+            candidate_path = os.path.join(td, "candidate.json")
+            with open(candidate_path, "w") as f:
                 json.dump(raw, f)
             # Repair with explicit operator approval + receipt (complete binding)
             import hashlib as _hl2
             import secrets as _sec
-            new_sha = _hl2.sha256(open(sp, "rb").read()).hexdigest()
             rdir = Path.home() / ".vibedev" / "toolchain" / "approval_receipts"
             rdir.mkdir(parents=True, exist_ok=True)
             rf = rdir / "receipt-001.json"
+            candidate_sha = _hl2.sha256(open(candidate_path, "rb").read()).hexdigest()
             rd = {
                 "receipt_id": "receipt-001",
                 "operation": "claim_store_repair",
@@ -172,7 +173,7 @@ class TestClaimStoreFailClosed:
                 "repair_plan_digest": "plan_digest_abc",
                 "approved_runtime_plan_digest": "abc123",
                 "old_store_sha256": _hl2.sha256(open(sp, "rb").read()).hexdigest(),
-                "new_store_sha256": new_sha,
+                "new_store_sha256": candidate_sha,
                 "issued_at": "2026-01-01T00:00:00+00:00",
                 "expires_at": "2099-12-31T23:59:59+00:00",
                 "nonce": _sec.token_hex(32),
@@ -182,7 +183,8 @@ class TestClaimStoreFailClosed:
             cs2.repair("corruption_test", "test_operator",
                        approval_receipt_id="receipt-001",
                        approved_digest="abc123",
-                       target_node="5bao")
+                       target_node="5bao",
+                       repair_candidate_path=candidate_path)
             cs3 = ClaimStore(sp, lp)
             assert not cs3.is_latched()
             assert cs3.get_claim("j1") is not None
@@ -363,7 +365,7 @@ class TestLifecycleGateInPreflight:
 
 class TestVersion:
     def test_version_is_300(self):
-        assert __version__ in ("3.0.0", "3.1.0", "3.2.0", "3.3.0", "3.4.0", "3.5.0")
+        assert __version__ in ("3.0.0", "3.1.0", "3.2.0", "3.3.0", "3.4.0", "3.5.0", "3.6.0", "3.7.0")
 
 
 if __name__ == "__main__":

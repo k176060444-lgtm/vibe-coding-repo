@@ -27,7 +27,7 @@ CLI:
   python3 vibe_job_orchestrator.py self-check
 """
 
-__version__ = "3.6.0"
+__version__ = "3.7.0"  # V1.18.2: Linearizable job state + secure transport
 
 # ===========================================================================
 # MANDATORY IMPORTS — FAIL-CLOSED, NO FALLBACKS
@@ -90,8 +90,31 @@ class JobState(str, Enum):
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     BLOCKED = "BLOCKED"
+    CANCEL_REQUESTED = "CANCEL_REQUESTED"
     CANCELLED = "CANCELLED"
     RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
+
+# Terminal states: once reached, cannot be overwritten by stale processes
+TERMINAL_STATES = frozenset({
+    JobState.SUCCEEDED.value,
+    JobState.FAILED.value,
+    JobState.BLOCKED.value,
+    JobState.CANCELLED.value,
+})
+
+# Valid state transitions (from -> set of allowed next states)
+VALID_TRANSITIONS = {
+    JobState.QUEUED.value: {JobState.CLAIMED.value, JobState.BLOCKED.value, JobState.CANCELLED.value},
+    JobState.CLAIMED.value: {JobState.RUNNING.value, JobState.FAILED.value, JobState.CANCELLED.value, JobState.CANCEL_REQUESTED.value},
+    JobState.RUNNING.value: {JobState.SUCCEEDED.value, JobState.FAILED.value, JobState.CANCEL_REQUESTED.value, JobState.RECOVERY_REQUIRED.value},
+    JobState.CANCEL_REQUESTED.value: {JobState.CANCELLED.value, JobState.FAILED.value},
+    JobState.RECOVERY_REQUIRED.value: {JobState.RUNNING.value, JobState.FAILED.value, JobState.CANCELLED.value},
+    # Terminal states have no outgoing transitions
+    JobState.SUCCEEDED.value: set(),
+    JobState.FAILED.value: set(),
+    JobState.BLOCKED.value: set(),
+    JobState.CANCELLED.value: set(),
+}
 
 
 class ProcessLiveness(str, Enum):
@@ -152,13 +175,21 @@ def _resolve_ssh_key(registry=None, target_worker: str = ""):
       - Resolved realpath is within approved root
       - Public-key fingerprint matches approved value (MANDATORY, never conditional)
       - Controller identity matches
-      - Target worker is in allowed_workers list
+      - Target worker is in allowed_workers list (MANDATORY, must be non-empty)
       - No auto-adopt from registry existing paths outside approved root
 
     Fails closed: raises RuntimeError if any check fails.
     BLOCKS execution on non-Windows platforms.
+    Cache is DISABLED to force re-validation every call.
     """
     global SSH_KEY_PATH
+
+    # target_worker is MANDATORY
+    if not target_worker or not target_worker.strip():
+        raise RuntimeError(
+            "BLOCKED: target_worker is MANDATORY for credential resolution. "
+            "Cannot resolve SSH key without specifying target worker."
+        )
 
     # Credential enforcement: must be Windows controller
     if sys.platform != "win32":
@@ -167,8 +198,9 @@ def _resolve_ssh_key(registry=None, target_worker: str = ""):
             % sys.platform
         )
 
-    if SSH_KEY_PATH:
-        return SSH_KEY_PATH
+    # Cache DISABLED: always re-validate to prevent stale credential use
+    # if SSH_KEY_PATH:
+    #     return SSH_KEY_PATH
 
     # Fingerprint env var is MANDATORY — no "if configured" fallback
     if not _APPROVED_KEY_FINGERPRINT:
@@ -312,6 +344,10 @@ HEARTBEAT_INTERVAL_SECONDS = 120  # heartbeat thread runs every 2 min
 CLAIM_STORE_SCHEMA_VERSION = "3.0"
 _STORE_CHECKSUM_KEY = "_store_checksum"
 
+# Global nonce ledger — persistent, cross-process, prevents nonce reuse
+NONCE_LEDGER_PATH = Path.home() / ".vibedev" / "toolchain" / "nonce_ledger.json"
+NONCE_LEDGER_LOCK = Path.home() / ".vibedev" / "toolchain" / "nonce_ledger.lock"
+
 
 def _compute_store_checksum(data: dict) -> str:
     """Compute SHA256 of store JSON excluding the checksum field itself."""
@@ -349,6 +385,48 @@ class ClaimStore:
         else:
             # Validate existing store on load
             self._validate_store_or_latch()
+
+    def _check_nonce(self, nonce: str) -> bool:
+        """Check if nonce is available (not consumed). Returns True if available."""
+        if not nonce:
+            return False
+        try:
+            with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                if NONCE_LEDGER_PATH.exists():
+                    ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+                    return nonce not in ledger.get("consumed", {})
+                return True
+        except Exception:
+            return False  # Fail-closed: assume consumed on error
+
+    def _consume_nonce(self, nonce: str, receipt_id: str) -> bool:
+        """Atomically consume a nonce. Returns True if successfully consumed."""
+        if not nonce:
+            return False
+        try:
+            with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                ledger = {"consumed": {}}
+                if NONCE_LEDGER_PATH.exists():
+                    ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+
+                if nonce in ledger.get("consumed", {}):
+                    return False  # Already consumed
+
+                ledger.setdefault("consumed", {})[nonce] = {
+                    "receipt_id": receipt_id,
+                    "consumed_at": _now_iso(),
+                }
+
+                # Atomic write
+                tmp = NONCE_LEDGER_PATH.with_suffix(".tmp")
+                with open(str(tmp), "w") as f:
+                    json.dump(ledger, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(str(tmp), str(NONCE_LEDGER_PATH))
+                return True
+        except Exception:
+            return False  # Fail-closed
 
     def _validate_store_or_latch(self):
         """Validate store schema and checksum. Latch on corruption."""
@@ -431,13 +509,14 @@ class ClaimStore:
     def repair(self, reason: str, operator_id: str,
                approval_receipt_id: str = "", approved_digest: str = "",
                target_node: str = "",
-               repair_candidate_path: str = ""):
+               repair_candidate_path: str = "",
+               repair_plan_digest: str = ""):
         """Repair corrupted claim store. Single lock transaction.
 
         Steps (all within exclusive FileLock):
         1. Acquire lock
-        2. Read and validate receipt
-        3. Verify nonce not used
+        2. Read and validate receipt (strict binding)
+        3. Verify nonce not used (global ledger)
         4. Verify immutable corrupted backup SHA
         5. Verify repair candidate SHA (if provided)
         6. Atomically replace live store
@@ -454,18 +533,22 @@ class ClaimStore:
             raise ValueError("repair() requires approval_receipt_id")
         if not approved_digest or not approved_digest.strip():
             raise ValueError("repair() requires approved_digest")
+        if not target_node or not target_node.strip():
+            raise ValueError("repair() requires target_node (MANDATORY)")
 
         # --- Acquire single exclusive lock for entire repair ---
         self.acquire_lock()
         try:
             self._repair_under_lock(
                 reason, operator_id, approval_receipt_id,
-                approved_digest, target_node, repair_candidate_path)
+                approved_digest, target_node, repair_candidate_path,
+                repair_plan_digest)
         finally:
             self.release_lock()
 
     def _repair_under_lock(self, reason, operator_id, approval_receipt_id,
-                           approved_digest, target_node, repair_candidate_path):
+                           approved_digest, target_node, repair_candidate_path,
+                           repair_plan_digest=""):
         """Internal repair logic. Called under exclusive lock."""
 
         import shutil
@@ -487,6 +570,12 @@ class ClaimStore:
             receipt = json.loads(receipt_path.read_text())
         except Exception as e:
             raise ValueError("Cannot read receipt: %s" % e)
+
+        # Receipt ID must match filename
+        if receipt.get("receipt_id") != approval_receipt_id:
+            raise ValueError(
+                "Receipt ID mismatch: file=%s receipt=%s"
+                % (approval_receipt_id, receipt.get("receipt_id")))
 
         # All fields required
         _required_fields = [
@@ -510,11 +599,19 @@ class ClaimStore:
         if receipt.get("approved_runtime_plan_digest") != approved_digest:
             raise ValueError("Receipt approved_runtime_plan_digest mismatch")
 
-        # Node binding
-        if target_node and receipt.get("node_id") != target_node:
+        # Node binding — MANDATORY
+        if not target_node or not target_node.strip():
+            raise ValueError("target_node is MANDATORY")
+        if receipt.get("node_id") != target_node:
             raise ValueError(
                 "Receipt node_id mismatch: got %s, expected %s"
                 % (receipt.get("node_id"), target_node))
+
+        # Repair plan digest binding
+        if repair_plan_digest and receipt.get("repair_plan_digest") != repair_plan_digest:
+            raise ValueError(
+                "Receipt repair_plan_digest mismatch: got %s, expected %s"
+                % (receipt.get("repair_plan_digest"), repair_plan_digest))
 
         # Expiry
         expires_at = receipt.get("expires_at", "")
@@ -524,12 +621,16 @@ class ClaimStore:
             if datetime.now(timezone.utc) > exp:
                 raise ValueError("Receipt expired")
 
-        # Step 2: Verify nonce not used
+        # Step 2: Verify nonce not used (global ledger)
         if receipt.get("consumed", False):
             raise ValueError("Receipt already consumed")
         nonce = receipt.get("nonce", "")
         if not nonce or len(nonce) < 16:
             raise ValueError("Receipt nonce missing or too short")
+
+        # Global nonce ledger check — prevents cross-receipt nonce reuse
+        if not self._check_nonce(nonce):
+            raise ValueError("Nonce already consumed in global ledger: %s" % nonce[:16])
 
         # Step 3: Verify immutable corrupted backup SHA
         old_sha = receipt.get("old_store_sha256", "")
@@ -591,14 +692,22 @@ class ClaimStore:
         shutil.copy2(repair_candidate_path, tmp_store)
         os.replace(tmp_store, str(self.store_path))
 
-        # Step 10: Atomic mark receipt consumed
+        # Step 10: Atomic mark receipt consumed + nonce ledger
         receipt["consumed"] = True
         receipt["consumed_at"] = _now_iso()
         receipt["consumed_store_sha"] = hashlib.sha256(
             self.store_path.read_bytes()).hexdigest()
         tmp_r = receipt_path.with_suffix(".tmp")
-        tmp_r.write_text(json.dumps(receipt, indent=2))
+        with open(str(tmp_r), "w") as f:
+            json.dump(receipt, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(str(tmp_r), str(receipt_path))
+
+        # Consume nonce in global ledger
+        if not self._consume_nonce(nonce, approval_receipt_id):
+            logger.warning("Nonce consumption failed for %s (may already be consumed)",
+                           nonce[:16])
 
         # Step 11: Clear latch ONLY on success
         self._corruption_latch = False
@@ -861,6 +970,7 @@ class JobManifest:
     involves_branch_mutation: bool = False
     branch_name: Optional[str] = None
     involves_merge: bool = False
+    revision: int = 0  # Monotonic revision for CAS (compare-and-swap)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -1075,8 +1185,9 @@ class JobOrchestrator:
         preflight = self._preflight_check(manifest)
         manifest.preflight_checks = preflight
         if not preflight["all_passed"]:
-            manifest.state = JobState.BLOCKED.value
-            manifest.error = "preflight_failed: " + str(preflight.get("failed_checks", []))
+            manifest = self._transition_state(
+                manifest, JobState.BLOCKED.value,
+                error="preflight_failed: " + str(preflight.get("failed_checks", [])))
             self._persist_manifest(manifest)
             self.claim_store.release_claim(job_id, "BLOCKED", success=False)
             return {"ok": False, "error": manifest.error, "job_id": job_id,
@@ -1084,17 +1195,19 @@ class JobOrchestrator:
 
         worker = self.registry.get_worker(manifest.actual_worker)
         if worker is None:
-            manifest.state = JobState.FAILED.value
-            manifest.error = "worker_disappeared"
+            manifest = self._transition_state(
+                manifest, JobState.FAILED.value,
+                error="worker_disappeared")
             self._persist_manifest(manifest)
             return {"ok": False, "error": "worker_disappeared", "job_id": job_id}
 
         # Verify SSH key availability before any remote operations
         try:
-            _resolve_ssh_key(self.registry)
+            _resolve_ssh_key(self.registry, manifest.actual_worker)
         except RuntimeError as e:
-            manifest.state = JobState.FAILED.value
-            manifest.error = "ssh_key_unavailable: %s" % str(e)
+            manifest = self._transition_state(
+                manifest, JobState.FAILED.value,
+                error="ssh_key_unavailable: %s" % str(e))
             self._persist_manifest(manifest)
             self.claim_store.release_claim(job_id, "FAILED", success=False)
             return {"ok": False, "error": manifest.error, "job_id": job_id}
@@ -1102,14 +1215,15 @@ class JobOrchestrator:
         # Ensure remote job dir
         remote_dir_ok = self._ensure_remote_dir(worker, manifest.remote_job_dir)
         if not remote_dir_ok:
-            manifest.state = JobState.FAILED.value
-            manifest.error = "remote_dir_creation_failed"
+            manifest = self._transition_state(
+                manifest, JobState.FAILED.value,
+                error="remote_dir_creation_failed")
             self._persist_manifest(manifest)
             self.claim_store.release_claim(job_id, "FAILED", success=False)
             return {"ok": False, "error": "remote_dir_creation_failed", "job_id": job_id}
 
         # Mark RUNNING
-        manifest.state = JobState.RUNNING.value
+        manifest = self._transition_state(manifest, JobState.RUNNING.value)
         manifest.start_time = _now_iso()
         self._persist_manifest(manifest)
         self.claim_store.update_claim(job_id, {
@@ -1118,7 +1232,7 @@ class JobOrchestrator:
         })
 
         # Build SSH command with process group isolation
-        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_key = _resolve_ssh_key(self.registry, manifest.actual_worker)
         ssh_opts = [
             "-p", str(worker.ssh_port),
             "-i", ssh_key,
@@ -1140,24 +1254,66 @@ class JobOrchestrator:
 
         proc = None
         try:
-            # Write signed job script to remote
-            write_script_cmd = "cat > %s << 'VIBE_JOB_SCRIPT_EOF'\n%s\nVIBE_JOB_SCRIPT_EOF\nchmod +x %s" % (
-                _shell_quote(job_script_path),
-                job_script_content,
-                _shell_quote(job_script_path),
-            )
-            script_result = subprocess.run(
-                ["ssh"] + ssh_opts + [ssh_target, write_script_cmd],
-                capture_output=True, timeout=30,
-            )
-            if script_result.returncode != 0:
-                manifest.state = JobState.FAILED.value
-                manifest.error = "job_script_write_failed"
+            # Upload job script via SCP (binary-safe, no heredoc escaping)
+            import tempfile
+            # Convert to Unix line endings (LF only) for remote bash
+            script_content_unix = job_script_content.replace('\r\n', '\n').replace('\r', '\n')
+            local_script = tempfile.NamedTemporaryFile(
+                mode='w', suffix='.sh', delete=False, prefix='vibe_job_',
+                newline='\n')
+            local_script.write(script_content_unix)
+            local_script.close()
+
+            # Compute local SHA256
+            local_sha = hashlib.sha256(
+                open(local_script.name, 'rb').read()).hexdigest()
+
+            # SCP upload (use -P for port, not -p which means "preserve timestamps" for scp)
+            scp_opts = list(ssh_opts)
+            for i, v in enumerate(scp_opts):
+                if v == "-p" and i + 1 < len(scp_opts):
+                    scp_opts[i] = "-P"
+                    break
+            scp_cmd = ["scp"] + scp_opts + [
+                local_script.name,
+                ssh_target + ":" + _shell_quote(job_script_path),
+            ]
+            scp_result = subprocess.run(
+                scp_cmd, capture_output=True, timeout=30)
+            os.unlink(local_script.name)
+
+            if scp_result.returncode != 0:
+                manifest = self._transition_state(
+                    manifest, JobState.FAILED.value,
+                    error="job_script_upload_failed")
                 self._persist_manifest(manifest)
                 self.claim_store.release_claim(job_id, "FAILED", success=False)
-                return {"ok": False, "error": "job_script_write_failed",
+                return {"ok": False, "error": "job_script_upload_failed",
                         "job_id": job_id,
-                        "stderr": script_result.stderr.decode("utf-8", errors="replace")}
+                        "stderr": scp_result.stderr.decode("utf-8", errors="replace")}
+
+            # Verify remote SHA matches local SHA
+            remote_sha_cmd = "sha256sum %s | cut -d' ' -f1" % _shell_quote(job_script_path)
+            sha_result = subprocess.run(
+                ["ssh"] + ssh_opts + [ssh_target, remote_sha_cmd],
+                capture_output=True, timeout=10)
+            remote_sha = sha_result.stdout.decode("utf-8", errors="replace").strip()
+
+            if remote_sha != local_sha:
+                manifest = self._transition_state(
+                    manifest, JobState.FAILED.value,
+                    error="script_sha_mismatch: local=%s remote=%s" % (local_sha[:16], remote_sha[:16]))
+                self._persist_manifest(manifest)
+                self.claim_store.release_claim(job_id, "FAILED", success=False)
+                return {"ok": False, "error": "script_sha_mismatch",
+                        "job_id": job_id, "local_sha": local_sha[:16],
+                        "remote_sha": remote_sha[:16]}
+
+            # chmod +x
+            chmod_cmd = "chmod +x %s" % _shell_quote(job_script_path)
+            subprocess.run(
+                ["ssh"] + ssh_opts + [ssh_target, chmod_cmd],
+                capture_output=True, timeout=10)
 
             # Launch with setsid + PID file capture
             # setsid runs the script in a new session; PID file captures the session leader PID
@@ -1220,6 +1376,28 @@ class JobOrchestrator:
             start_wait = time.time()
             job_exit_code = None
             while time.time() - start_wait < timeout:
+                # Check if cancel was requested
+                current_manifest = self._load_manifest(job_id)
+                if current_manifest and current_manifest.state == JobState.CANCEL_REQUESTED.value:
+                    logger.info("CANCEL_REQUESTED detected for job %s, terminating", job_id)
+                    pgid = manifest.remote_pgid or manifest.remote_pid
+                    if worker and pgid:
+                        self._terminate_remote_process_group(worker, pgid, manifest.remote_pid)
+                    self.heartbeat_mgr.stop_heartbeat(job_id)
+                    # Use current_manifest for transition (not stale manifest)
+                    try:
+                        current_manifest = self._transition_state(
+                            current_manifest, JobState.CANCELLED.value,
+                            error="cancel_requested_by_executor")
+                    except RuntimeError:
+                        pass  # Already in terminal state (cancel_job may have completed)
+                    # Do NOT persist manifest here — cancel_job() already wrote CANCELLED
+                    # Writing here creates a race condition where stale state overwrites CANCELLED
+                    self.heartbeat_mgr.stop_heartbeat(job_id)
+                    self.claim_store.release_claim(job_id, "CANCELLED", success=False)
+                    return {"ok": True, "job_id": job_id, "state": "CANCELLED",
+                            "term_result": "EXECUTOR_OBSERVED_CANCEL"}
+
                 liveness = self._check_remote_process_alive(worker, remote_pgid)
                 if liveness == ProcessLiveness.DEAD:
                     # Process confirmed exited — try to get exit code
@@ -1290,12 +1468,21 @@ class JobOrchestrator:
             (controller_dir / "stdout.txt").write_text(stdout_text)
             (controller_dir / "stderr.txt").write_text(stderr_text)
 
+            # Re-read manifest to check if cancel_job() already set terminal state
+            current = self._load_manifest(job_id)
+            if current and current.state in TERMINAL_STATES:
+                # cancel_job() already wrote terminal state — do NOT overwrite
+                logger.info("Job %s already in terminal state %s, not overwriting",
+                           job_id, current.state)
+                return {"ok": True, "job_id": job_id, "state": current.state}
+
             if manifest.exit_code == 0:
-                manifest.state = JobState.SUCCEEDED.value
+                manifest = self._transition_state(manifest, JobState.SUCCEEDED.value)
                 self.claim_store.release_claim(job_id, "SUCCEEDED", success=True)
             else:
-                manifest.state = JobState.FAILED.value
-                manifest.error = "exit_code_%d" % manifest.exit_code
+                manifest = self._transition_state(
+                    manifest, JobState.FAILED.value,
+                    error="exit_code_%d" % manifest.exit_code)
                 manifest.failure_count += 1
                 self.claim_store.release_claim(job_id, "FAILED", success=False)
 
@@ -1422,21 +1609,31 @@ class JobOrchestrator:
     def cancel_job(self, job_id: str) -> dict:
         """Cancel a QUEUED, CLAIMED, or RUNNING job.
 
-        For RUNNING: TERM remote PGID, wait, KILL, confirm exit, then
-        mark RECOVERY_REQUIRED (capacity NOT released until confirmed).
+        Two-phase cancel:
+        1. Transition to CANCEL_REQUESTED (signals Executor to stop)
+        2. Executor observes CANCEL_REQUESTED, terminates, writes CANCELLED
+        Terminal states cannot be cancelled.
         """
         manifest = self._load_manifest(job_id)
         if manifest is None:
             return {"ok": False, "error": "job_not_found"}
 
-        if manifest.state in (JobState.SUCCEEDED.value, JobState.FAILED.value,
-                              JobState.CANCELLED.value):
+        if manifest.state in TERMINAL_STATES:
             return {"ok": False, "error": "cannot_cancel_%s" % manifest.state}
 
+        if manifest.state == JobState.CANCEL_REQUESTED.value:
+            return {"ok": False, "error": "already_cancel_requested"}
+
         if manifest.state == JobState.RUNNING.value:
+            # Phase 1: Transition to CANCEL_REQUESTED
+            try:
+                manifest = self._transition_state(
+                    manifest, JobState.CANCEL_REQUESTED.value)
+            except RuntimeError as e:
+                return {"ok": False, "error": str(e)}
+
             worker = self.registry.get_worker(manifest.actual_worker)
             pgid = manifest.remote_pgid or manifest.remote_pid
-            term_result = ProcessLiveness.UNKNOWN
 
             # If remote PID not captured (SSH launch timeout), try reading
             # from remote PID file
@@ -1444,8 +1641,14 @@ class JobOrchestrator:
                 pgid = self._read_remote_pid_file_from_dir(worker, manifest.remote_job_dir)
                 if pgid:
                     manifest.remote_pid = pgid
-                    self._persist_manifest(manifest)
 
+            self._persist_manifest(manifest)
+            self.claim_store.update_claim(job_id, {
+                "state": "CANCEL_REQUESTED",
+            })
+
+            # Phase 2: Try to terminate remote process
+            term_result = ProcessLiveness.UNKNOWN
             if worker and pgid:
                 term_result = self._terminate_remote_process_group(
                     worker, pgid, manifest.remote_pid)
@@ -1453,29 +1656,34 @@ class JobOrchestrator:
             self.heartbeat_mgr.stop_heartbeat(job_id)
 
             if term_result == ProcessLiveness.DEAD:
-                # Confirmed exit — release capacity
-                manifest.state = JobState.CANCELLED.value
+                # Confirmed exit — transition to CANCELLED
+                try:
+                    manifest = self._transition_state(
+                        manifest, JobState.CANCELLED.value,
+                        error="cancelled_confirmed_exit")
+                except RuntimeError:
+                    pass  # Already in terminal state
                 manifest.end_time = _now_iso()
-                manifest.error = "cancelled_confirmed_exit"
                 self._persist_manifest(manifest)
                 self.claim_store.release_claim(job_id, "CANCELLED", success=False)
                 return {"ok": True, "job_id": job_id, "state": "CANCELLED",
                         "term_result": "CONFIRMED_EXIT"}
             else:
-                # UNKNOWN or ALIVE — keep capacity locked
-                manifest.state = JobState.RECOVERY_REQUIRED.value
+                # UNKNOWN or ALIVE — stay in CANCEL_REQUESTED
+                # Executor will observe and terminate
                 manifest.end_time = _now_iso()
-                manifest.error = "cancelled_term_%s" % term_result.value
+                manifest.error = "cancel_requested_term_%s" % term_result.value
                 self._persist_manifest(manifest)
-                self.claim_store.update_claim(job_id, {
-                    "state": "RECOVERY_REQUIRED",
-                    "error": manifest.error,
-                    "term_result": term_result.value,
-                })
-                return {"ok": True, "job_id": job_id, "state": "RECOVERY_REQUIRED",
+                return {"ok": True, "job_id": job_id,
+                        "state": "CANCEL_REQUESTED",
                         "term_result": term_result.value}
         else:
-            manifest.state = JobState.CANCELLED.value
+            # QUEUED/CLAIMED/RECOVERY_REQUIRED: direct cancel
+            try:
+                manifest = self._transition_state(
+                    manifest, JobState.CANCELLED.value)
+            except RuntimeError as e:
+                return {"ok": False, "error": str(e)}
             manifest.end_time = _now_iso()
             self._persist_manifest(manifest)
             self.claim_store.release_claim(job_id, "CANCELLED", success=False)
@@ -1696,7 +1904,7 @@ class JobOrchestrator:
     # Remote process control
     # ===================================================================
     def _ensure_remote_dir(self, worker, remote_path: str) -> bool:
-        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_key = _resolve_ssh_key(self.registry, worker.worker_id)
         cmd = [
             "ssh", "-p", str(worker.ssh_port), "-i", ssh_key,
             "-o", "StrictHostKeyChecking=yes", "-o", "IdentitiesOnly=yes",
@@ -1723,7 +1931,7 @@ class JobOrchestrator:
         if not pgid and not fallback_pid:
             return ProcessLiveness.UNKNOWN
 
-        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_key = _resolve_ssh_key(self.registry, worker.worker_id)
         ssh_opts = [
             "-p", str(worker.ssh_port), "-i", ssh_key,
             "-o", "StrictHostKeyChecking=yes", "-o", "IdentitiesOnly=yes",
@@ -1787,7 +1995,7 @@ class JobOrchestrator:
         Returns PID as int if found, None otherwise.
         Used as fallback when remote_pid was not captured during launch.
         """
-        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_key = _resolve_ssh_key(self.registry, worker.worker_id)
         ssh_opts = [
             "-p", str(worker.ssh_port), "-i", ssh_key,
             "-o", "StrictHostKeyChecking=yes", "-o", "IdentitiesOnly=yes",
@@ -1818,7 +2026,7 @@ class JobOrchestrator:
         """
         if not remote_pid:
             return ProcessLiveness.UNKNOWN
-        ssh_key = _resolve_ssh_key(self.registry)
+        ssh_key = _resolve_ssh_key(self.registry, worker.worker_id)
         ssh_opts = [
             "-p", str(worker.ssh_port), "-i", ssh_key,
             "-o", "StrictHostKeyChecking=yes", "-o", "IdentitiesOnly=yes",
@@ -1865,6 +2073,33 @@ class JobOrchestrator:
                      and not l.strip().startswith("REMOTE_PGID=")]
         return "\n".join(filtered)
 
+    def _transition_state(self, manifest: JobManifest, new_state: str,
+                          error: str = None) -> JobManifest:
+        """Validate and execute state transition with CAS.
+
+        FAIL-CLOSED:
+        - Terminal states cannot be overwritten
+        - Invalid transitions are rejected
+        - Revision is incremented atomically
+        """
+        current = manifest.state
+        if current in TERMINAL_STATES:
+            raise RuntimeError(
+                "Cannot transition from terminal state %s to %s for job %s"
+                % (current, new_state, manifest.job_id))
+
+        allowed = VALID_TRANSITIONS.get(current, set())
+        if new_state not in allowed:
+            raise RuntimeError(
+                "Invalid transition %s -> %s for job %s (allowed: %s)"
+                % (current, new_state, manifest.job_id, allowed))
+
+        manifest.state = new_state
+        manifest.revision += 1
+        if error:
+            manifest.error = error
+        return manifest
+
     def _persist_manifest(self, manifest: JobManifest):
         if manifest.controller_job_dir:
             p = Path(manifest.controller_job_dir) / "manifest.json"
@@ -1875,7 +2110,16 @@ class JobOrchestrator:
                 json.dump(data, f, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(str(tmp), str(p))
+            # Retry on Windows file locking (WinError 32)
+            for attempt in range(5):
+                try:
+                    os.replace(str(tmp), str(p))
+                    return
+                except PermissionError:
+                    if attempt < 4:
+                        time.sleep(0.2 * (attempt + 1))
+                    else:
+                        raise
 
     def _load_manifest(self, job_id: str) -> Optional[JobManifest]:
         manifest_path = self.jobs_root / job_id / "manifest.json"
@@ -2638,9 +2882,9 @@ def run_self_check() -> dict:
         checks.append({"name": "repair_method", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 30: Version is 3.6.0
+    # Check 30: Version is 3.7.0
     try:
-        assert __version__ == "3.6.0", "Version must be 3.6.0, got %s" % __version__
+        assert __version__ == "3.7.0", "Version must be 3.7.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})
