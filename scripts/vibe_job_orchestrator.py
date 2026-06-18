@@ -1160,18 +1160,32 @@ class ClaimStore:
 
     def release_claim(self, job_id: str, final_state: str = "SUCCEEDED",
                       success: bool = True):
-        """Release a claim and record final state."""
+        """Release a claim and record final state.
+
+        V1.18.4: Terminal state protection — once a claim reaches a terminal
+        state (SUCCEEDED, FAILED, CANCELLED), it cannot be overwritten.
+        This prevents cancel-vs-complete race conditions from producing
+        dual terminal states.
+        """
         self._check_latch()
         self.acquire_lock()
         try:
             store = self._read_store()
             claims = store.get("claims", {})
             if job_id in claims:
+                current_state = claims[job_id].get("state", "")
+                # Terminal state protection: refuse to overwrite
+                if current_state in ("SUCCEEDED", "FAILED", "CANCELLED"):
+                    return {"ok": False, "error": "already_terminal",
+                            "current_state": current_state,
+                            "requested_state": final_state}
                 claims[job_id]["state"] = final_state
                 claims[job_id]["released_at"] = _now_iso()
                 claims[job_id]["success"] = success
                 store["claims"] = claims
                 self._write_store(store)
+                return {"ok": True, "state": final_state}
+            return {"ok": False, "error": "claim_not_found"}
         finally:
             self.release_lock()
 
@@ -2487,8 +2501,12 @@ def main():
         sys.exit(0 if result["passed"] else 1)
 
     orch = JobOrchestrator()
-    for w in orch.registry.list_workers():
-        orch.registry.set_health(w.worker_id, NodeStatus.ONLINE)
+    # V1.18.4: Real SSH health probes — only set ONLINE on verified probe
+    probe_results = orch.registry.probe_all()
+    for wid, pres in probe_results.items():
+        if pres.get("status") != "ONLINE":
+            print("WARNING: worker %s not reachable: %s" % (
+                wid, pres.get("error", pres.get("stderr", "unknown"))[:100]))
 
     if args.subcommand == "submit":
         m = orch.submit_job(
@@ -3259,20 +3277,34 @@ def run_self_check() -> dict:
         checks.append({"name": "nonce_ledger_reconcile", "passed": False, "error": repr(e)})
         passed = False
 
-    # Check 33: Active-active scheduling — both workers get jobs
+    # Check 33: Fresh Registry has UNKNOWN workers — schedule BLOCKS
     try:
         orch = _make_test_orchestrator()
+        # Workers default to UNKNOWN — no set_health call
+        for w in orch.registry.list_workers():
+            assert w.health_status == "UNKNOWN", \
+                "Fresh worker %s should be UNKNOWN, got %s" % (w.worker_id, w.health_status)
+        # Schedule should BLOCK with UNKNOWN workers
+        m = orch.submit_job("linux-worker", "echo should_block")
+        assert m["state"] == "BLOCKED", \
+            "UNKNOWN workers should BLOCK, got %s" % m.get("state")
+        checks.append({"name": "unknown_workers_block_schedule", "passed": True})
+    except Exception as e:
+        checks.append({"name": "unknown_workers_block_schedule", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 34: Active-active scheduling — explicit ONLINE then both workers get jobs
+    try:
+        orch = _make_test_orchestrator()
+        # V1.18.4: Must explicitly set ONLINE (simulates verified health probe)
         for w in orch.registry.list_workers():
             orch.registry.set_health(w.worker_id, NodeStatus.ONLINE)
-        # Submit two jobs without required_tools — should spread across workers
         m1 = orch.submit_job("linux-worker", "echo job1")
         m2 = orch.submit_job("linux-worker", "echo job2")
         w1 = m1.get("actual_worker")
         w2 = m2.get("actual_worker")
         assert w1 in ("5bao", "9bao"), "Job 1 must go to 5bao or 9bao"
         assert w2 in ("5bao", "9bao"), "Job 2 must go to 5bao or 9bao"
-        # With two workers and 2 jobs, they SHOULD spread
-        # (but if one worker is full, the other takes both)
         assert m1["state"] == "CLAIMED"
         assert m2["state"] == "CLAIMED"
         checks.append({"name": "active_active_scheduling", "passed": True})
