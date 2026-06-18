@@ -2250,6 +2250,7 @@ class ToolchainLifecycleManager:
         tmp_latch = os.path.join(tempfile.gettempdir(), f"test_latch_{os.getpid()}.json")
         try:
             store = StateStore(tmp_state, tmp_lock, tmp_latch)
+            store.bootstrap()
             state = store.load()
             assert state["schema_version"] == SCHEMA_VERSION
             checks.append({"name": "state_store_init", "passed": True, "message": f"schema={SCHEMA_VERSION}"})
@@ -2265,6 +2266,7 @@ class ToolchainLifecycleManager:
         # 5. Corruption latch
         try:
             store = StateStore(tmp_state, tmp_lock, tmp_latch)
+            store.bootstrap()
             assert not store.latch.is_latched()
             store.latch.latch("test_corruption")
             assert store.latch.is_latched()
@@ -2290,6 +2292,7 @@ class ToolchainLifecycleManager:
         # 6. Scheduler gate
         try:
             store = StateStore(tmp_state, tmp_lock, tmp_latch)
+            store.bootstrap()
             gate = SchedulerGate(store)
             result = gate.is_writes_allowed()
             assert result["allowed"] is True
@@ -2317,6 +2320,7 @@ class ToolchainLifecycleManager:
         # 7. Transaction safety
         try:
             store = StateStore(tmp_state, tmp_lock, tmp_latch)
+            store.bootstrap()
             store.transaction(lambda s: {**s, "test_key": "test_value"})
             state = store.load()
             assert state.get("test_key") == "test_value"
@@ -2387,6 +2391,7 @@ class ToolchainLifecycleManager:
         # 14. No auto-approved
         try:
             store = StateStore(tmp_state, tmp_lock, tmp_latch)
+            store.bootstrap()
             mgr = ToolchainLifecycleManager(registry=WorkerRegistry(),
                                            state_path=tmp_state, lock_path=tmp_lock,
                                            latch_path=tmp_latch)
