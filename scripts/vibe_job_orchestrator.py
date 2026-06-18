@@ -2103,7 +2103,16 @@ class JobOrchestrator:
                 json.dump(data, f, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(str(tmp), str(p))
+            # Retry on Windows file locking (WinError 32)
+            for attempt in range(5):
+                try:
+                    os.replace(str(tmp), str(p))
+                    return
+                except PermissionError:
+                    if attempt < 4:
+                        time.sleep(0.2 * (attempt + 1))
+                    else:
+                        raise
 
     def _load_manifest(self, job_id: str) -> Optional[JobManifest]:
         manifest_path = self.jobs_root / job_id / "manifest.json"
