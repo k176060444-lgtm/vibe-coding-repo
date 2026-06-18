@@ -1391,12 +1391,9 @@ class JobOrchestrator:
                             error="cancel_requested_by_executor")
                     except RuntimeError:
                         pass  # Already in terminal state (cancel_job may have completed)
-                    # Re-read to get the actual current state
-                    final_manifest = self._load_manifest(job_id)
-                    if final_manifest and final_manifest.state not in TERMINAL_STATES:
-                        # Only persist if NOT in terminal state (cancel_job may have written CANCELLED)
-                        final_manifest.end_time = _now_iso()
-                        self._persist_manifest(final_manifest)
+                    # Do NOT persist manifest here — cancel_job() already wrote CANCELLED
+                    # Writing here creates a race condition where stale state overwrites CANCELLED
+                    self.heartbeat_mgr.stop_heartbeat(job_id)
                     self.claim_store.release_claim(job_id, "CANCELLED", success=False)
                     return {"ok": True, "job_id": job_id, "state": "CANCELLED",
                             "term_result": "EXECUTOR_OBSERVED_CANCEL"}
