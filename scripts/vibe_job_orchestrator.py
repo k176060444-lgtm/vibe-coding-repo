@@ -803,7 +803,7 @@ class JobOrchestrator:
             # Launch with setsid + PID file capture
             # setsid runs the script in a new session; PID file captures the session leader PID
             launch_cmd = (
-                "setsid bash -c 'echo $$ > %s; exec bash %s' > /dev/null 2>&1 &"
+                "setsid bash -c 'echo $$ > %s; exec bash %s' &"
                 % (_shell_quote(pid_file), _shell_quote(job_script_path))
             )
             proc = subprocess.Popen(
@@ -852,7 +852,7 @@ class JobOrchestrator:
                 if not alive:
                     # Process exited — try to get exit code
                     # Write a marker to capture exit code
-                    exit_code_cmd = "cat %s.exit_code 2>/dev/null || echo -1" % _shell_quote(
+                    exit_code_cmd = "cat %s 2>/dev/null || echo -1" % _shell_quote(
                         manifest.remote_job_dir + "/.exit_code")
                     exit_result = subprocess.run(
                         ["ssh"] + ssh_opts + [ssh_target, exit_code_cmd],
@@ -977,7 +977,8 @@ class JobOrchestrator:
             "# Signed: %s\n"
             "set -e\n"
             "cd %s\n"
-            "%s\n"
+            "%s >stdout.txt 2>stderr.txt\n"
+            "echo $? > .exit_code\n"
         ) % (job_id, signature, _shell_quote(remote_job_dir), command)
 
         return script
