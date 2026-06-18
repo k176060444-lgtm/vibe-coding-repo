@@ -27,7 +27,7 @@ CLI:
   python3 vibe_job_orchestrator.py self-check
 """
 
-__version__ = "3.7.0"  # V1.18.2: Linearizable job state + secure transport
+__version__ = "3.8.0"  # V1.18.3: Journal-based repair transaction + cancel state closure
 
 # ===========================================================================
 # MANDATORY IMPORTS — FAIL-CLOSED, NO FALLBACKS
@@ -107,13 +107,13 @@ VALID_TRANSITIONS = {
     JobState.QUEUED.value: {JobState.CLAIMED.value, JobState.BLOCKED.value, JobState.CANCELLED.value},
     JobState.CLAIMED.value: {JobState.RUNNING.value, JobState.FAILED.value, JobState.CANCELLED.value, JobState.CANCEL_REQUESTED.value},
     JobState.RUNNING.value: {JobState.SUCCEEDED.value, JobState.FAILED.value, JobState.CANCEL_REQUESTED.value, JobState.RECOVERY_REQUIRED.value},
-    JobState.CANCEL_REQUESTED.value: {JobState.CANCELLED.value, JobState.FAILED.value},
+    JobState.CANCEL_REQUESTED.value: {JobState.CANCELLED.value},
     JobState.RECOVERY_REQUIRED.value: {JobState.RUNNING.value, JobState.FAILED.value, JobState.CANCELLED.value},
-    # Terminal states have no outgoing transitions
+    # Terminal states — only resume (via resume_job) can exit them
     JobState.SUCCEEDED.value: set(),
-    JobState.FAILED.value: set(),
+    JobState.FAILED.value: {JobState.QUEUED.value},
     JobState.BLOCKED.value: set(),
-    JobState.CANCELLED.value: set(),
+    JobState.CANCELLED.value: {JobState.QUEUED.value},
 }
 
 
@@ -279,7 +279,7 @@ def _resolve_ssh_key(registry=None, target_worker: str = ""):
         return True
 
     # Resolution order:
-    # 1. Credential reference registry (MANDATORY primary source)
+    # 1. Credential reference registry (MANDATORY, ONLY source)
     for ref_id, ref_entry in _CREDENTIAL_REGISTRY.items():
         key_path = ref_entry["path"]
         if _validate_key_path(
@@ -292,13 +292,8 @@ def _resolve_ssh_key(registry=None, target_worker: str = ""):
             SSH_KEY_PATH = str(key_path)
             return SSH_KEY_PATH
 
-    # 2. Explicit Windows controller paths (fallback only if registry empty)
-    for p in _CONTROLLER_SSH_KEY_PATHS:
-        if _validate_key_path(p, "explicit_path"):
-            SSH_KEY_PATH = str(p)
-            return SSH_KEY_PATH
-
     # FAIL CLOSED — no key = no execution
+    # Registry is the ONLY source. No explicit path fallback.
     raise RuntimeError(
         "SSH key not found. Credential reference registry validation failed. "
         "All keys must: (1) be in credential registry with valid ref_id, "
@@ -549,9 +544,18 @@ class ClaimStore:
     def _repair_under_lock(self, reason, operator_id, approval_receipt_id,
                            approved_digest, target_node, repair_candidate_path,
                            repair_plan_digest=""):
-        """Internal repair logic. Called under exclusive lock."""
+        """Internal repair logic with journal-based recoverable transaction.
+
+        Journal ensures atomicity: on crash, repair can be safely completed
+        or rolled back using the journal. No manual state manipulation allowed.
+        """
 
         import shutil
+
+        # --- repair_plan_digest is MANDATORY ---
+        if not repair_plan_digest or not repair_plan_digest.strip():
+            raise ValueError(
+                "repair_plan_digest is MANDATORY for ClaimStore repair.")
 
         # --- Validate repair_candidate_path is MANDATORY ---
         if not repair_candidate_path or not repair_candidate_path.strip():
@@ -607,8 +611,8 @@ class ClaimStore:
                 "Receipt node_id mismatch: got %s, expected %s"
                 % (receipt.get("node_id"), target_node))
 
-        # Repair plan digest binding
-        if repair_plan_digest and receipt.get("repair_plan_digest") != repair_plan_digest:
+        # Repair plan digest binding — MANDATORY strict match
+        if receipt.get("repair_plan_digest") != repair_plan_digest:
             raise ValueError(
                 "Receipt repair_plan_digest mismatch: got %s, expected %s"
                 % (receipt.get("repair_plan_digest"), repair_plan_digest))
@@ -681,35 +685,78 @@ class ClaimStore:
         if stored_checksum != recomputed:
             raise MANIFEST_CORRUPTED("Candidate checksum mismatch")
 
-        # Step 8: Preserve corrupted artifact as immutable backup
+        # Step 8: Create persistent journal BEFORE any mutations
+        tx_id = "repair-tx-%s-%s" % (approval_receipt_id[:8], uuid.uuid4().hex[:8])
+        journal_path = self.store_path.parent / ("%s.journal.json" % tx_id)
+        journal = {
+            "tx_id": tx_id,
+            "status": "STARTED",
+            "started_at": _now_iso(),
+            "approval_receipt_id": approval_receipt_id,
+            "operator_id": operator_id,
+            "reason": reason,
+            "target_node": target_node,
+            "repair_plan_digest": repair_plan_digest,
+            "approved_runtime_plan_digest": approved_digest,
+            "nonce": nonce,
+            "old_store_sha256": cur,
+            "new_store_sha256": candidate_sha,
+            "candidate_path": repair_candidate_path,
+            "steps_completed": [],
+        }
+        self._write_journal(journal_path, journal)
+
+        # Step 9: Preserve corrupted artifact as immutable backup
         backup_path = str(self.store_path) + ".corrupted.%s" % cur[:16]
         if not os.path.exists(backup_path):
             shutil.copy2(str(self.store_path), backup_path)
             os.chmod(backup_path, 0o444)
+        journal["status"] = "BACKUP_CREATED"
+        journal["steps_completed"].append("backup")
+        self._write_journal(journal_path, journal)
 
-        # Step 9: Atomic replacement of live store
+        # Step 10: Atomic replacement of live store + fsync
         tmp_store = str(self.store_path) + ".repair.tmp"
         shutil.copy2(repair_candidate_path, tmp_store)
+        # fsync the tmp file before replace (best-effort on Windows)
+        if sys.platform != "win32":
+            with open(tmp_store, "rb") as f:
+                os.fsync(f.fileno())
         os.replace(tmp_store, str(self.store_path))
+        # fsync parent directory
+        self._fsync_parent_dir(self.store_path)
+        journal["status"] = "STORE_REPLACED"
+        journal["steps_completed"].append("store_replace")
+        self._write_journal(journal_path, journal)
 
-        # Step 10: Atomic mark receipt consumed + nonce ledger
+        # Step 11: Atomic mark receipt consumed + fsync
         receipt["consumed"] = True
         receipt["consumed_at"] = _now_iso()
         receipt["consumed_store_sha"] = hashlib.sha256(
             self.store_path.read_bytes()).hexdigest()
+        receipt["tx_id"] = tx_id
         tmp_r = receipt_path.with_suffix(".tmp")
         with open(str(tmp_r), "w") as f:
             json.dump(receipt, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(str(tmp_r), str(receipt_path))
+        self._fsync_parent_dir(receipt_path)
+        journal["status"] = "RECEIPT_CONSUMED"
+        journal["steps_completed"].append("receipt_consume")
+        self._write_journal(journal_path, journal)
 
-        # Consume nonce in global ledger
+        # Step 12: Consume nonce in global ledger — MUST succeed
         if not self._consume_nonce(nonce, approval_receipt_id):
-            logger.warning("Nonce consumption failed for %s (may already be consumed)",
-                           nonce[:16])
+            raise RuntimeError(
+                "Nonce consumption FAILED for %s. "
+                "Repair aborted — receipt already consumed, journal at %s. "
+                "Manual intervention required." % (nonce[:16], journal_path))
+        journal["status"] = "NONCE_CONSUMED"
+        journal["steps_completed"].append("nonce_consume")
+        self._write_journal(journal_path, journal)
 
-        # Step 11: Clear latch ONLY on success
+        # Step 13: Clear latch ONLY on success
         self._corruption_latch = False
         self._corruption_reason = ""
 
@@ -717,16 +764,48 @@ class ClaimStore:
         try:
             if self.latch_path.exists():
                 self.latch_path.unlink()
-        except OSError:
-            pass
+                self._fsync_parent_dir(self.latch_path)
+        except OSError as e:
+            raise RuntimeError(
+                "Latch file removal FAILED: %s. Journal at %s." % (e, journal_path))
+
+        # Step 14: Mark journal COMPLETE
+        journal["status"] = "COMPLETED"
+        journal["completed_at"] = _now_iso()
+        journal["steps_completed"].append("latch_clear")
+        self._write_journal(journal_path, journal)
 
         logger.info(
-            "ClaimStore repair SUCCESS: reason=%s operator=%s receipt=%s "
+            "ClaimStore repair SUCCESS: tx=%s reason=%s operator=%s receipt=%s "
             "old=%s new=%s nonce=%s",
-            reason, operator_id, approval_receipt_id,
+            tx_id, reason, operator_id, approval_receipt_id,
             old_sha[:16] if old_sha else "n/a",
             candidate_sha[:16], nonce[:8] + "...",
         )
+
+    def _write_journal(self, journal_path: Path, journal: dict):
+        """Write journal atomically with fsync."""
+        tmp = journal_path.with_suffix(".tmp")
+        with open(str(tmp), "w") as f:
+            json.dump(journal, f, indent=2, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(str(tmp), str(journal_path))
+
+    def _fsync_parent_dir(self, path: Path):
+        """Fsync the parent directory to ensure directory entry is durable.
+        Best-effort: Windows does not support directory fsync."""
+        if sys.platform == "win32":
+            return  # Windows does not support directory fsync
+        parent = path.parent
+        try:
+            fd = os.open(str(parent), os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except OSError:
+            pass  # Best-effort on platforms without dir fsync
 
     def _raw_read(self) -> dict:
         """Raw JSON read without latch check."""
@@ -1123,8 +1202,9 @@ class JobOrchestrator:
         )
 
         if not candidates:
-            manifest.state = JobState.BLOCKED.value
-            manifest.error = "no_eligible_worker"
+            manifest = self._transition_state(
+                manifest, JobState.BLOCKED.value,
+                error="no_eligible_worker")
             manifest.capability_resolution = "no_eligible_worker"
             self._persist_manifest(manifest)
             return manifest.to_dict()
@@ -1144,7 +1224,8 @@ class JobOrchestrator:
             )
             if claim_result.get("claimed"):
                 manifest.actual_worker = worker_id
-                manifest.state = JobState.CLAIMED.value
+                manifest = self._transition_state(
+                    manifest, JobState.CLAIMED.value)
 
                 controller_dir = self.jobs_root / jid
                 controller_dir.mkdir(parents=True, exist_ok=True)
@@ -1163,8 +1244,9 @@ class JobOrchestrator:
                 continue
             break
 
-        manifest.state = JobState.BLOCKED.value
-        manifest.error = "claim_failed: " + str(last_error)
+        manifest = self._transition_state(
+            manifest, JobState.BLOCKED.value,
+            error="claim_failed: " + str(last_error))
         self._persist_manifest(manifest)
         return manifest.to_dict()
 
@@ -1342,8 +1424,12 @@ class JobOrchestrator:
                 proc.communicate()
                 # SSH launch timed out — remote process may have already started.
                 # Fail-closed: do NOT release claim (capacity stays occupied).
-                manifest.state = JobState.RECOVERY_REQUIRED.value
-                manifest.error = "launch_command_timeout_recovery_required"
+                try:
+                    manifest = self._transition_state(
+                        manifest, JobState.RECOVERY_REQUIRED.value,
+                        error="launch_command_timeout_recovery_required")
+                except RuntimeError:
+                    pass  # Already in terminal state
                 manifest.exit_code = -1
                 manifest.failure_count += 1
                 self._persist_manifest(manifest)
@@ -1427,19 +1513,28 @@ class JobOrchestrator:
                 term_result = self._terminate_remote_process_group(
                     worker, pgid, manifest.remote_pid)
 
-                manifest.state = JobState.RECOVERY_REQUIRED.value
-                manifest.error = "timeout_%ds_term_%s" % (timeout, term_result.value)
+                error_msg = "timeout_%ds_term_%s" % (timeout, term_result.value)
                 manifest.exit_code = -1
                 manifest.failure_count += 1
                 # Only release capacity if CONFIRMED_EXIT
                 if term_result == ProcessLiveness.DEAD:
-                    manifest.state = JobState.FAILED.value
+                    try:
+                        manifest = self._transition_state(
+                            manifest, JobState.FAILED.value, error=error_msg)
+                    except RuntimeError:
+                        pass
                     self.claim_store.release_claim(job_id, "FAILED", success=False)
                 else:
                     # Do NOT release capacity — remote may still be alive
+                    try:
+                        manifest = self._transition_state(
+                            manifest, JobState.RECOVERY_REQUIRED.value,
+                            error=error_msg)
+                    except RuntimeError:
+                        pass
                     self.claim_store.update_claim(job_id, {
                         "state": "RECOVERY_REQUIRED",
-                        "error": manifest.error,
+                        "error": error_msg,
                         "term_result": term_result.value,
                     })
                 self._persist_manifest(manifest)
@@ -1499,27 +1594,36 @@ class JobOrchestrator:
                 except Exception:
                     pass
 
-            manifest.state = JobState.RECOVERY_REQUIRED.value
-            manifest.error = "timeout_%ds" % timeout
+            try:
+                manifest = self._transition_state(
+                    manifest, JobState.RECOVERY_REQUIRED.value,
+                    error="timeout_%ds" % timeout)
+            except RuntimeError:
+                pass
             manifest.exit_code = -1
             manifest.failure_count += 1
             # Do NOT release capacity — remote may still be alive
             self.claim_store.update_claim(job_id, {
                 "state": "RECOVERY_REQUIRED",
-                "error": manifest.error,
+                "error": "timeout_%ds" % timeout,
             })
 
         except Exception as e:
             # Local exception during job execution — remote process may still be alive.
             # Fail-closed: set RECOVERY_REQUIRED, do NOT release claim (capacity stays occupied).
             logger.error("Job %s local exception: %s. Setting RECOVERY_REQUIRED.", job_id, e)
-            manifest.state = JobState.RECOVERY_REQUIRED.value
-            manifest.error = "local_exception_%s" % str(e)[:200]
+            error_msg = "local_exception_%s" % str(e)[:200]
+            try:
+                manifest = self._transition_state(
+                    manifest, JobState.RECOVERY_REQUIRED.value,
+                    error=error_msg)
+            except RuntimeError:
+                pass
             manifest.exit_code = -1
             manifest.failure_count += 1
             self.claim_store.update_claim(job_id, {
                 "state": "RECOVERY_REQUIRED",
-                "error": manifest.error,
+                "error": error_msg,
             })
 
         finally:
@@ -1738,13 +1842,15 @@ class JobOrchestrator:
             if not claim_result.get("claimed"):
                 return {"ok": False, "error": "reclaim_failed",
                         "reason": claim_result.get("reason")}
-            manifest.state = JobState.CLAIMED.value
+            manifest = self._transition_state(
+                manifest, JobState.CLAIMED.value)
             manifest.error = None
             self._persist_manifest(manifest)
             return self.execute_job(job_id)
 
         if manifest.state in (JobState.FAILED.value, JobState.CANCELLED.value):
-            manifest.state = JobState.QUEUED.value
+            manifest = self._transition_state(
+                manifest, JobState.QUEUED.value)
             manifest.error = None
             manifest.exit_code = None
             manifest.local_pid = None
@@ -2078,15 +2184,12 @@ class JobOrchestrator:
         """Validate and execute state transition with CAS.
 
         FAIL-CLOSED:
-        - Terminal states cannot be overwritten
         - Invalid transitions are rejected
         - Revision is incremented atomically
+        - Resume transitions (FAILED->QUEUED, CANCELLED->QUEUED) are allowed
+          only through VALID_TRANSITIONS table
         """
         current = manifest.state
-        if current in TERMINAL_STATES:
-            raise RuntimeError(
-                "Cannot transition from terminal state %s to %s for job %s"
-                % (current, new_state, manifest.job_id))
 
         allowed = VALID_TRANSITIONS.get(current, set())
         if new_state not in allowed:
@@ -2796,6 +2899,7 @@ def run_self_check() -> dict:
                        approval_receipt_id=_receipt_id,
                        approved_digest=_runtime_digest,
                        target_node="5bao",
+                       repair_plan_digest=_plan_digest,
                        repair_candidate_path=candidate_path)
             assert not cs2.is_latched()
             assert not os.path.exists(latch_path)
@@ -2811,6 +2915,7 @@ def run_self_check() -> dict:
                            approval_receipt_id=_receipt_id,
                            approved_digest=_runtime_digest,
                            target_node="5bao",
+                           repair_plan_digest=_plan_digest,
                            repair_candidate_path=candidate_path)
                 assert False, "Consumed receipt should be rejected"
             except ValueError as ve:
@@ -2855,6 +2960,7 @@ def run_self_check() -> dict:
                            approval_receipt_id=_receipt_id2,
                            approved_digest=_runtime_digest,
                            target_node="5bao",
+                           repair_plan_digest=_plan_digest,
                            repair_candidate_path=candidate_path)
                 assert False, "Missing nonce should be rejected"
             except ValueError as ve:
@@ -2873,6 +2979,7 @@ def run_self_check() -> dict:
                            approval_receipt_id=_receipt_id3,
                            approved_digest=_runtime_digest,
                            target_node="5bao",
+                           repair_plan_digest=_plan_digest,
                            repair_candidate_path=candidate_path)
                 assert False, "Wrong node should be rejected"
             except ValueError as ve:
@@ -2884,7 +2991,7 @@ def run_self_check() -> dict:
 
     # Check 30: Version is 3.7.0
     try:
-        assert __version__ == "3.7.0", "Version must be 3.7.0, got %s" % __version__
+        assert __version__ == "3.8.0", "Version must be 3.8.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})
