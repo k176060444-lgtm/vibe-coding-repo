@@ -53,23 +53,30 @@ def _vs(extra=None):
 # Test 1: State Transition Validity
 # ===========================================================================
 def test_state_transitions():
-    """Verify VALID_TRANSITIONS table and terminal state protection."""
+    """Verify VALID_TRANSITIONS table and state protection."""
     print("\n=== Test 1: State Transitions ===")
 
-    # Terminal states cannot transition
-    for terminal in TERMINAL_STATES:
-        allowed = VALID_TRANSITIONS.get(terminal, set())
-        assert len(allowed) == 0, "Terminal state %s has outgoing transitions: %s" % (terminal, allowed)
-        print(f"  Terminal {terminal}: no outgoing ✓")
-
-    # CANCEL_REQUESTED can go to CANCELLED or FAILED
-    assert "CANCELLED" in VALID_TRANSITIONS["CANCEL_REQUESTED"]
-    assert "FAILED" in VALID_TRANSITIONS["CANCEL_REQUESTED"]
-    print("  CANCEL_REQUESTED → CANCELLED/FAILED ✓")
+    # CANCEL_REQUESTED can ONLY go to CANCELLED (not FAILED, not SUCCEEDED)
+    assert VALID_TRANSITIONS["CANCEL_REQUESTED"] == {"CANCELLED"}, \
+        "CANCEL_REQUESTED must only transition to CANCELLED, got: %s" % VALID_TRANSITIONS["CANCEL_REQUESTED"]
+    print("  CANCEL_REQUESTED → CANCELLED only ✓")
 
     # RUNNING can go to CANCEL_REQUESTED
     assert "CANCEL_REQUESTED" in VALID_TRANSITIONS["RUNNING"]
     print("  RUNNING → CANCEL_REQUESTED ✓")
+
+    # SUCCEEDED has no outgoing transitions (truly terminal)
+    assert len(VALID_TRANSITIONS["SUCCEEDED"]) == 0
+    print("  SUCCEEDED: no outgoing (truly terminal) ✓")
+
+    # BLOCKED has no outgoing transitions (truly terminal)
+    assert len(VALID_TRANSITIONS["BLOCKED"]) == 0
+    print("  BLOCKED: no outgoing (truly terminal) ✓")
+
+    # FAILED and CANCELLED can only go to QUEUED (resume)
+    assert VALID_TRANSITIONS["FAILED"] == {"QUEUED"}
+    assert VALID_TRANSITIONS["CANCELLED"] == {"QUEUED"}
+    print("  FAILED/CANCELLED → QUEUED (resume only) ✓")
 
     print("  PASS")
     return True
@@ -265,6 +272,7 @@ def test_claimstore_repair_binding():
                              approval_receipt_id="test-receipt",
                              approved_digest=hashlib.sha256(b"approved-plan").hexdigest(),
                              target_node="9bao",
+                             repair_plan_digest=hashlib.sha256(b"repair-plan").hexdigest(),
                              repair_candidate_path=str(candidate))
                 assert False, "Should reject wrong target_node"
             except ValueError as e:
@@ -280,6 +288,7 @@ def test_claimstore_repair_binding():
                              approval_receipt_id="bad-receipt",
                              approved_digest=hashlib.sha256(b"approved-plan").hexdigest(),
                              target_node="5bao",
+                             repair_plan_digest=hashlib.sha256(b"repair-plan").hexdigest(),
                              repair_candidate_path=str(candidate))
                 assert False, "Should reject receipt ID mismatch"
             except ValueError as e:

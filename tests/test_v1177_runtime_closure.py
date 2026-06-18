@@ -184,6 +184,7 @@ class TestClaimStoreFailClosed:
                        approval_receipt_id="receipt-001",
                        approved_digest="abc123",
                        target_node="5bao",
+                       repair_plan_digest="plan_digest_abc",
                        repair_candidate_path=candidate_path)
             cs3 = ClaimStore(sp, lp)
             assert not cs3.is_latched()
@@ -365,7 +366,7 @@ class TestLifecycleGateInPreflight:
 
 class TestVersion:
     def test_version_is_300(self):
-        assert __version__ in ("3.0.0", "3.1.0", "3.2.0", "3.3.0", "3.4.0", "3.5.0", "3.6.0", "3.7.0")
+        assert __version__ in ("3.0.0", "3.1.0", "3.2.0", "3.3.0", "3.4.0", "3.5.0", "3.6.0", "3.7.0", "3.8.0")
 
 
 if __name__ == "__main__":
