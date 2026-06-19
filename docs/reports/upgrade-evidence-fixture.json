@@ -1,0 +1,82 @@
+{
+  "operation_id": "upgrade-opencode-1.17.4-to-1.18.0-5bao-canary",
+  "schema_version": 1,
+  "component": "opencode-runtime",
+  "node": "5bao",
+  "from_version": "1.17.4",
+  "to_version": "1.18.0",
+  "operation_type": "upgrade",
+  "state_machine_trace": [
+    "DISCOVER",
+    "PLAN",
+    "APPROVE",
+    "DRAIN_WORKER",
+    "SNAPSHOT",
+    "UPGRADE_CANARY",
+    "SMOKE_TEST",
+    "REAL_FIXTURE_TEST",
+    "OBSERVE",
+    "PROMOTE_OR_ROLLBACK",
+    "ATTEST"
+  ],
+  "gate_results": [
+    {
+      "gate_name": "capacity_gate",
+      "result": "pass",
+      "evidence": "9bao healthy, max_parallel_jobs=1, 5bao can be drained"
+    },
+    {
+      "gate_name": "drain_gate",
+      "result": "pass",
+      "evidence": "no active claims on 5bao at drain time"
+    },
+    {
+      "gate_name": "rollback_gate",
+      "result": "pass",
+      "evidence": "rollback_method=version_pin, rollback_target=1.17.4, npm registry has 1.17.4"
+    },
+    {
+      "gate_name": "snapshot_gate",
+      "result": "pass",
+      "evidence": "pre-upgrade: version=1.17.4, sha256=922a908d...(first 8)"
+    },
+    {
+      "gate_name": "health_gate_smoke",
+      "result": "pass",
+      "evidence": "opencode --version returned 1.18.0"
+    },
+    {
+      "gate_name": "health_gate_fixture",
+      "result": "pass",
+      "evidence": "fixture test produced expected output file"
+    },
+    {
+      "gate_name": "provider_gate",
+      "result": "pass",
+      "evidence": "model smoke test passed with deepseek-v4-flash"
+    },
+    {
+      "gate_name": "sandbox_gate",
+      "result": "pass",
+      "evidence": "bubblewrap config unchanged (not installed)"
+    },
+    {
+      "gate_name": "secret_gate",
+      "result": "pass",
+      "evidence": "no secrets exposed during operation"
+    },
+    {
+      "gate_name": "version_skew_gate",
+      "result": "pass",
+      "evidence": "5bao=1.18.0, 9bao=1.17.4, skew duration=0 (not yet promoted)"
+    }
+  ],
+  "evidence_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "operator_approval": {
+    "approved": true,
+    "approver": "operator_fixture",
+    "timestamp": "2026-06-19T00:00:00Z"
+  },
+  "timestamp": "2026-06-19T00:00:00Z",
+  "notes": "Fixture example. Not a real upgrade evidence. Demonstrates schema compliance."
+}
