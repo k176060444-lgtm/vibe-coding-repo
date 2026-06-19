@@ -21,7 +21,15 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+
+# V1.20.7: Report status gate integration
+try:
+    from vibe_report_status_gate import check_report_status
+    _REPORT_STATUS_GATE_AVAILABLE = True
+except ImportError:
+    check_report_status = None
+    _REPORT_STATUS_GATE_AVAILABLE = False
 
 
 def _run_script(script_path, args, timeout=60):
@@ -222,6 +230,29 @@ def run_report(repo_root=None, jobs_dir=None):
         "operator_summary": op_summary,
     }
 
+    # V1.20.7: Run report status gate on terminal verdicts
+    # Set top-level status so check_report_status can detect terminal status
+    result["status"] = qg_verdict
+    ledger_gate_result = None
+    if _REPORT_STATUS_GATE_AVAILABLE and qg_verdict in ('PASS', 'MERGE_READY', 'FREEZE_PASS', 'PROMOTION_PASS'):
+        ledger_gate_result = check_report_status(result)
+        if not ledger_gate_result.get('status_allowed', True):
+            result['quality_gate']['verdict'] = 'BLOCKED_BY_LEDGER_GATE'
+            result['ledger_gate'] = {
+                'result': 'FAIL',
+                'terminal_status_found': ledger_gate_result.get('terminal_status_found'),
+                'errors': ledger_gate_result.get('gate_errors', []),
+            }
+            result['operator_summary'] = 'BLOCKED: Model ledger gate failed. ' + '; '.join(ledger_gate_result.get('gate_errors', [])[:3])
+            result['next_recommended_action'] = 'HALT: Model ledger gate BLOCKED. Fix ledger issues before proceeding.'
+        else:
+            result['ledger_gate'] = {
+                'result': 'PASS' if ledger_gate_result.get('terminal_status_found') else 'N/A',
+                'terminal_status_found': ledger_gate_result.get('terminal_status_found'),
+            }
+    elif not _REPORT_STATUS_GATE_AVAILABLE:
+        result['ledger_gate'] = {'result': 'GATE_UNAVAILABLE', 'warning': 'vibe_report_status_gate not importable'}
+
     return result
 
 
@@ -250,6 +281,18 @@ def _format_markdown(result):
     lines.append("## 结论")
     lines.append(conclusion)
     lines.append("")
+
+    # V1.20.7: Ledger gate status
+    ledger = result.get("ledger_gate", {})
+    if ledger:
+        lg_result = ledger.get("result", "N/A")
+        lg_icon = {"PASS": "✅", "FAIL": "❌", "N/A": "➖", "GATE_UNAVAILABLE": "⚠️"}.get(lg_result, "❓")
+        lines.append("## Ledger Gate")
+        lines.append("- %s %s" % (lg_icon, lg_result))
+        if ledger.get("errors"):
+            for e in ledger["errors"][:3]:
+                lines.append("  - %s" % e)
+        lines.append("")
 
     # Baseline
     baseline = result.get("baseline", {})

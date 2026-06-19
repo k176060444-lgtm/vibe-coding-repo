@@ -29,6 +29,14 @@ except ImportError:
     gate_check_for_dispatch = None
     _LIFECYCLE_GATE_AVAILABLE = False
 
+# V1.20.8: Model ledger gate integration
+try:
+    from model_ledger_gate import validate_report as ledger_gate_validate
+    _LEDGER_GATE_AVAILABLE = True
+except ImportError:
+    ledger_gate_validate = None
+    _LEDGER_GATE_AVAILABLE = False
+
 
 def _run_cmd(*args, check=False):
     """Run a command and return (stdout, stderr, returncode)."""
@@ -255,13 +263,91 @@ def run_gate(args):
     else:
         warnings.append("Locked job wo-code-repo-status-001 not found")
 
-    allow_merge = len(blockers) == 0
-    return _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info)
+    # V1.20.8: Model ledger gate check — FAIL-CLOSED
+    # merge_ready=true REQUIRES model_ledger_gate.result=PASS
+    # N/A, GATE_UNAVAILABLE, missing report-file all BLOCK merge
+    ledger_gate_result = None
+    if not _LEDGER_GATE_AVAILABLE:
+        ledger_gate_result = {'checked': False, 'result': 'GATE_UNAVAILABLE'}
+        blockers.append('Model ledger gate UNAVAILABLE: cannot validate merge readiness')
+    else:
+        report_file = getattr(args, 'report_file', None)
+        gate_report = None
+        gate_error_detail = None
+
+        # 1. Require --report-file and valid JSON with status
+        if not report_file:
+            gate_error_detail = 'no --report-file provided'
+        else:
+            rf_path = Path(report_file)
+            if not rf_path.exists():
+                gate_error_detail = f'report file not found: {report_file}'
+            elif not rf_path.is_file():
+                gate_error_detail = f'report file is not a file: {report_file}'
+            else:
+                rf = _read_json_file(rf_path)
+                if rf is None:
+                    gate_error_detail = f'report file is not valid JSON: {report_file}'
+                else:
+                    gate_report = rf
+                    if 'status' not in gate_report:
+                        gate_error_detail = 'report file missing status field'
+
+        # 2. Check terminal status FIRST (before ledger field checks)
+        terminal_statuses = {'PASS', 'MERGE_READY', 'FREEZE_PASS', 'PROMOTION_PASS'}
+        is_non_terminal = False
+        if not gate_error_detail and gate_report is not None:
+            status = str(gate_report.get('status', '')).upper()
+            if status not in terminal_statuses:
+                is_non_terminal = True
+                ledger_gate_result = {
+                    'checked': False,
+                    'result': 'N/A',
+                    'reason': f'non-terminal status: {status}',
+                }
+                blockers.append(
+                    f'Merge readiness gate: non-terminal status "{status}", cannot confirm ledger validity')
+
+        # 3. For terminal status, validate ledger fields
+        if not gate_error_detail and not is_non_terminal and gate_report is not None:
+            if not gate_report.get('MODEL_LEDGER'):
+                gate_error_detail = 'report file missing MODEL_LEDGER'
+            elif not gate_report.get('NODE_MODEL_SUMMARY'):
+                gate_error_detail = 'report file missing NODE_MODEL_SUMMARY'
+            elif not gate_report.get('COOLDOWN_STATE_SUMMARY'):
+                gate_error_detail = 'report file missing COOLDOWN_STATE_SUMMARY'
+
+        # 4. If any error -> fail-closed
+        if gate_error_detail and not is_non_terminal:
+            ledger_gate_result = {
+                'checked': False,
+                'result': 'FAIL',
+                'errors': [f'Merge readiness gate: {gate_error_detail}'],
+            }
+            blockers.append(f'Merge readiness gate FAIL: {gate_error_detail}')
+        elif not gate_error_detail and not is_non_terminal and gate_report is not None:
+            # 5. All fields present, terminal status: validate
+            ledger_errors = ledger_gate_validate(gate_report)
+            ledger_gate_result = {
+                'checked': True,
+                'result': 'PASS' if not ledger_errors else 'FAIL',
+                'errors': ledger_errors,
+            }
+            if ledger_errors:
+                blockers.append('Model ledger gate FAIL: ' + '; '.join(ledger_errors[:3]))
+
+    # allow_merge requires: no blockers AND ledger gate checked AND result=PASS
+    base_allow = len(blockers) == 0
+    ledger_ok = (ledger_gate_result is not None
+                 and ledger_gate_result.get('checked', False)
+                 and ledger_gate_result.get('result') == 'PASS')
+    allow_merge = base_allow and ledger_ok
+    return _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info, ledger_gate_result)
 
 
-def _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info):
+def _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info, ledger_gate_result=None):
     """Build the gate result."""
-    return {
+    result = {
         "allow_merge": allow_merge,
         "blockers": blockers,
         "warnings": warnings,
@@ -269,6 +355,9 @@ def _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_inf
         "job": job_info,
         "checks": checks_info,
     }
+    if ledger_gate_result is not None:
+        result["model_ledger_gate"] = ledger_gate_result
+    return result
 
 
 def _format_text(result):
@@ -282,6 +371,16 @@ def _format_text(result):
     status = "✅ ALLOW MERGE" if result["allow_merge"] else "⛔ BLOCKED"
     lines.append(f"  Result: {status}")
     lines.append("----------------------------------------")
+
+    # V1.20.8: Ledger gate status
+    lg = result.get("model_ledger_gate", {})
+    if lg:
+        lg_icon = {"PASS": "✅", "FAIL": "❌", "N/A": "➖", "GATE_UNAVAILABLE": "⚠️"}.get(lg.get("result", "?"), "❓")
+        lines.append(f"  Model Ledger Gate: {lg_icon} {lg.get('result', 'unknown')}")
+        if lg.get("errors"):
+            for e in lg["errors"][:3]:
+                lines.append(f"    - {e}")
+        lines.append("----------------------------------------")
 
     if result["blockers"]:
         lines.append("  Blockers:")
@@ -378,6 +477,11 @@ def build_parser():
         "--job-id",
         default=None,
         help="Job ID to check in registry.",
+    )
+    parser.add_argument(
+        "--report-file",
+        default=None,
+        help="Path to report JSON with MODEL_LEDGER/NODE_MODEL_SUMMARY/COOLDOWN_STATE_SUMMARY for ledger gate.",
     )
     parser.add_argument(
         "--json",
