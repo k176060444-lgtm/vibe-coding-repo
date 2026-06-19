@@ -264,21 +264,32 @@ def run_gate(args):
         warnings.append("Locked job wo-code-repo-status-001 not found")
 
     # V1.20.8: Model ledger gate check
+    # Priority: --report-file > job_info with ledger > fail-closed
     ledger_gate_result = None
     if _LEDGER_GATE_AVAILABLE:
-        # Build a minimal report dict for gate validation
-        # The gate checks MODEL_LEDGER, NODE_MODEL_SUMMARY, COOLDOWN_STATE_SUMMARY
-        # If these are absent from the job info, gate will fail (fail-closed)
-        gate_report = {}
-        if job_info:
-            gate_report = {
-                'status': job_info.get('job_status', '').upper(),
-                'MODEL_LEDGER': job_info.get('MODEL_LEDGER', []),
-                'NODE_MODEL_SUMMARY': job_info.get('NODE_MODEL_SUMMARY', []),
-                'COOLDOWN_STATE_SUMMARY': job_info.get('COOLDOWN_STATE_SUMMARY', []),
-            }
-        else:
-            gate_report = {'status': 'UNKNOWN'}
+        gate_report = None
+        report_file = getattr(args, 'report_file', None)
+
+        # 1. Try loading from --report-file
+        if report_file:
+            rf = _read_json_file(Path(report_file))
+            if rf:
+                gate_report = rf
+                # Ensure status is set
+                if 'status' not in gate_report:
+                    gate_report['status'] = 'UNKNOWN'
+
+        # 2. Fallback: build from job_info (will fail-closed if no ledger)
+        if gate_report is None:
+            if job_info:
+                gate_report = {
+                    'status': job_info.get('job_status', '').upper(),
+                    'MODEL_LEDGER': job_info.get('MODEL_LEDGER', []),
+                    'NODE_MODEL_SUMMARY': job_info.get('NODE_MODEL_SUMMARY', []),
+                    'COOLDOWN_STATE_SUMMARY': job_info.get('COOLDOWN_STATE_SUMMARY', []),
+                }
+            else:
+                gate_report = {'status': 'UNKNOWN'}
 
         # Only run gate if status is terminal
         terminal_statuses = {'PASS', 'MERGE_READY', 'FREEZE_PASS', 'PROMOTION_PASS'}
@@ -432,6 +443,11 @@ def build_parser():
         "--job-id",
         default=None,
         help="Job ID to check in registry.",
+    )
+    parser.add_argument(
+        "--report-file",
+        default=None,
+        help="Path to report JSON with MODEL_LEDGER/NODE_MODEL_SUMMARY/COOLDOWN_STATE_SUMMARY for ledger gate.",
     )
     parser.add_argument(
         "--json",

@@ -231,6 +231,8 @@ def run_report(repo_root=None, jobs_dir=None):
     }
 
     # V1.20.7: Run report status gate on terminal verdicts
+    # Set top-level status so check_report_status can detect terminal status
+    result["status"] = qg_verdict
     ledger_gate_result = None
     if _REPORT_STATUS_GATE_AVAILABLE and qg_verdict in ('PASS', 'MERGE_READY', 'FREEZE_PASS', 'PROMOTION_PASS'):
         ledger_gate_result = check_report_status(result)
