@@ -64,3 +64,16 @@
 - 5bao/9bao sync: BLOCKED (SSH credential remediation pending)
 - Debian post-merge verification: BLOCKED
 - CREDENTIAL_REMEDIATION: PENDING_OPERATOR_APPROVAL
+
+## Superseded / Resolved
+
+The BLOCKED and CREDENTIAL_REMEDIATION_PENDING statuses above
+were historical intermediate conditions recorded immediately after PR #164 merge,
+before SSH credential remediation was completed.
+
+Resolution (2026-06-19):
+- 5bao/9bao SSH sync: RESOLVED - all nodes synced to final HEAD a0b8997
+- Credential remediation: RESOLVED - dedicated key confirmed, legacy exposure remediated
+- Debian post-merge verification: RESOLVED - 161/161 passed on both nodes
+
+See evidence/V118417_PUBLIC_SAFE_ATTESTATION.md for the final attestation.
