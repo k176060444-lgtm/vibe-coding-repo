@@ -27,7 +27,7 @@ CLI:
   python3 vibe_job_orchestrator.py self-check
 """
 
-__version__ = "3.9.0"  # V1.18.4: Recoverable repair saga + active-active + nonce reconcile
+__version__ = "3.10.0"  # V1.18.4.6: bwrap sandbox with host-side PID capture
 
 # ===========================================================================
 # MANDATORY IMPORTS — FAIL-CLOSED, NO FALLBACKS
@@ -1734,7 +1734,13 @@ class JobOrchestrator:
         - /tmp: tmpfs (NOT host /tmp)
         - remote_job_dir: read-write bind (the ONLY writable path)
         - --unshare-pid, --unshare-net (unless network_allowed), --die-with-parent, --new-session
-        - PID capture via bwrap exec
+        - HOST-SIDE PID capture: bwrap is backgrounded, $! captures host PID
+          (NOT namespace-internal $$ which is always 2 inside --unshare-pid)
+
+        PID isolation note:
+          With --unshare-pid, the sandbox gets its own PID namespace.
+          $$ inside the sandbox returns 2 (namespace-internal), NOT the host PID.
+          We MUST capture the host-side bwrap PID via $! for cancel/timeout to work.
         """
         # Read-only system paths
         ro_binds = " ".join([
@@ -1757,16 +1763,21 @@ class JobOrchestrator:
         # Network policy
         net_flag = "" if network_allowed else "--unshare-net"
 
-        # Process isolation
+        # Process isolation (bwrap handles session/process group)
         proc_flags = "--unshare-pid --die-with-parent --new-session"
 
         # Build the full bwrap command
-        # bwrap runs bash which writes PID file then execs the job script
+        # CRITICAL: capture HOST-SIDE bwrap PID via $! (not namespace-internal $$)
+        # bwrap --die-with-parent ensures sandbox dies if parent shell dies
+        # The inner bash execs the job script (PID 2 inside namespace, irrelevant for host control)
+        # stdout/stderr redirection is handled by the job script itself (>stdout.txt 2>stderr.txt)
+        # setsid creates a new session so the process group can be terminated on cancel/timeout
         bwrap_cmd = (
             "setsid bwrap %(ro_binds)s %(std_mounts)s %(tmpfs)s "
             "%(rw_bind)s %(net_flag)s %(proc_flags)s "
-            "/bin/bash -c 'echo $$ > %(pid_file)s; exec bash %(job_script)s' "
-            "</dev/null >/dev/null 2>&1 &"
+            "/bin/bash -c 'exec bash %(job_script)s' "
+            "</dev/null >/dev/null 2>&1 & "
+            "echo $! > %(pid_file)s"
         ) % {
             "ro_binds": ro_binds,
             "std_mounts": std_mounts,
@@ -1774,8 +1785,8 @@ class JobOrchestrator:
             "rw_bind": rw_bind,
             "net_flag": net_flag,
             "proc_flags": proc_flags,
-            "pid_file": _shell_quote(pid_file),
             "job_script": _shell_quote(job_script_path),
+            "pid_file": _shell_quote(pid_file),
         }
 
         config = {
@@ -1789,6 +1800,7 @@ class JobOrchestrator:
             "unshare_net": not network_allowed,
             "die_with_parent": True,
             "new_session": True,
+            "pid_capture": "host_bwrap_pid_via_dollar_bang",
         }
 
         return bwrap_cmd, config
@@ -3707,9 +3719,9 @@ def run_self_check() -> dict:
         checks.append({"name": "active_active_scheduling", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 30: Version is 3.9.0
+    # Check 30: Version is 3.10.0
     try:
-        assert __version__ == "3.9.0", "Version must be 3.9.0, got %s" % __version__
+        assert __version__ == "3.10.0", "Version must be 3.10.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})
