@@ -1,85 +1,78 @@
 # V1.20.7/8/9 Ledger Gate Integration
 
 Version: V1.20.7_8_9
-Status: ACTIVE
-Enforced by: Report Status Gate, Merge Readiness Gate
+Status: ACTIVE (REAL INTEGRATION)
+Enforced by: Report Status Gate, Merge Readiness Gate, vibe_run_report.py, vibe_merge_gate.py
 
 ## Overview
 
-Integrates model_ledger_gate into the report/status output and merge readiness paths.
+Integrates model_ledger_gate into real report/status output and merge readiness paths.
+This is NOT a helper script — it modifies actual workflow entry points.
 
-### V1.20.7: Report Status Gate Integration
+## Real Integration Points
 
-Any report outputting terminal status (PASS, MERGE_READY, FREEZE_PASS,
-PROMOTION_PASS) must first pass model_ledger_gate.
+### V1.20.7: Report Status Gate — vibe_run_report.py (MODIFIED)
 
-**Entry point:** `scripts/vibe_report_status_gate.py --report REPORT_JSON`
+`scripts/vibe_run_report.py` v1.1.0 now imports `vibe_report_status_gate` and runs
+`check_report_status()` after generating the report dict.
 
 **Behavior:**
-- If report has terminal status + gate passes -> STATUS ALLOWED
-- If report has terminal status + gate fails -> STATUS BLOCKED
-- If report has non-terminal status -> gate not applicable, allowed
+- If quality_gate verdict is PASS/MERGE_READY/FREEZE_PASS/PROMOTION_PASS:
+  - Run `check_report_status(result)`
+  - If gate FAILS: verdict downgraded to `BLOCKED_BY_LEDGER_GATE`
+  - If gate PASSES: `ledger_gate.result = PASS`
+- If verdict is non-terminal: `ledger_gate.result = N/A`
+- If gate import fails: `ledger_gate.result = GATE_UNAVAILABLE`
 
-### V1.20.8: Merge Gate Integration
+**Fail-closed:** Terminal verdict without valid MODEL_LEDGER/NODE_MODEL_SUMMARY/COOLDOWN_STATE_SUMMARY -> BLOCKED.
 
-PR/merge readiness must include model_ledger_gate result.
+### V1.20.8: Merge Gate — vibe_merge_gate.py (MODIFIED)
 
-**Entry point:** `scripts/vibe_report_status_gate.py --merge-readiness REPORT_JSON`
+`scripts/vibe_merge_gate.py` now imports `model_ledger_gate` and runs `validate_report()`
+on job info when job status is terminal.
+
+**Behavior:**
+- If job status is terminal (PASS/MERGE_READY/FREEZE_PASS/PROMOTION_PASS):
+  - Build gate report from job_info (MODEL_LEDGER, NODE_MODEL_SUMMARY, COOLDOWN_STATE_SUMMARY)
+  - Run `validate_report(gate_report)`
+  - If errors: add blocker, merge blocked
+- If job status is non-terminal: gate not checked
+- If gate import fails: result = GATE_UNAVAILABLE
 
 **Output fields:**
-- `merge_ready`: bool (true only if terminal status + gate passed)
-- `model_ledger_gate_result`: "PASS" or "FAIL"
-- `gate_exit_code`: 0 or 1
-- `failure_reasons`: list of gate errors
-- `terminal_status_found`: the terminal status found (or null)
+- `model_ledger_gate.checked`: bool
+- `model_ledger_gate.result`: "PASS" / "FAIL" / "N/A" / "GATE_UNAVAILABLE"
+- `model_ledger_gate.errors`: list (if FAIL)
 
 ### V1.20.9: Failure Injection / Negative Path Validation
 
-Integration tests verify fail-closed behavior:
+Integration tests verify fail-closed behavior via `vibe_report_status_gate.py --self-check` (11 scenarios).
 
-| Scenario | Expected |
-|----------|----------|
-| Valid V1.20.5 report (3 live + 2 fixture) | ALLOWED, merge_ready=true |
-| Non-terminal status (IN_PROGRESS) | ALLOWED, merge_ready=false |
-| Missing MODEL_LEDGER | BLOCKED, merge_ready=false |
-| Missing NODE_MODEL_SUMMARY | BLOCKED, merge_ready=false |
-| Missing COOLDOWN_STATE_SUMMARY | BLOCKED, merge_ready=false |
-| rate_limit=true without RATE_LIMIT_EVENT_LEDGER | BLOCKED, merge_ready=false |
-| fallback_used=true without from/to/reason | BLOCKED, merge_ready=false |
-| token_usage='unknown' | BLOCKED, merge_ready=false |
-| Rate limit misclassified as BIN-FAIL | BLOCKED, merge_ready=false |
-| NODE_MODEL_SUMMARY only has node | BLOCKED, merge_ready=false |
-| COOLDOWN_STATE_SUMMARY only has node | BLOCKED, merge_ready=false |
+## Changed Files
 
-## Usage
+| File | Change | Type |
+|------|--------|------|
+| scripts/vibe_run_report.py | Added ledger gate integration (v1.0.0 -> v1.1.0) | MODIFIED |
+| scripts/vibe_merge_gate.py | Added ledger gate integration | MODIFIED |
+| scripts/vibe_report_status_gate.py | Report status + merge readiness gate | UNCHANGED |
+| scripts/model_ledger_gate.py | Underlying gate (13 rules) | UNCHANGED |
+| docs/V1207_1208_1209_LEDGER_GATE_INTEGRATION.md | This doc | UPDATED |
+| docs/reports/V1207_1208_1209_LEDGER_GATE_INTEGRATION_REPORT.md | Report | UPDATED |
+
+## Validation Commands
 
 ```bash
-# Self-check integration tests
-python scripts/vibe_report_status_gate.py --self-check
+# Compile check
+python -m py_compile scripts/vibe_run_report.py
+python -m py_compile scripts/vibe_merge_gate.py
+python -m py_compile scripts/vibe_report_status_gate.py
+python -m py_compile scripts/model_ledger_gate.py
 
-# Validate a report
-python scripts/vibe_report_status_gate.py --report report.json
-
-# Check merge readiness
-python scripts/vibe_report_status_gate.py --merge-readiness report.json
-
-# Validate underlying gate
-python scripts/model_ledger_gate.py --self-check
-python scripts/model_ledger_gate.py --fixture docs/reports/model-ledger-gate-fixture.json
+# Self-checks
+python scripts/model_ledger_gate.py --self-check           # 13/13
+python scripts/vibe_report_status_gate.py --self-check      # 11/11
+python scripts/model_ledger_gate.py --fixture docs/reports/model-ledger-gate-fixture.json  # 13/13
 ```
-
-## Integration Points
-
-1. **Report export** (`vibe_report_export.py`, `vibe_run_report.py`, `vibe_daily_report.py`)
-   - Before emitting PASS/MERGE_READY/FREEZE_PASS/PROMOTION_PASS
-   - Call `check_report_status(report)` and block if status_allowed=False
-
-2. **Merge gate** (`vibe_merge_gate.py`)
-   - Before allowing merge-ready
-   - Call `check_merge_readiness(report)` and block if merge_ready=False
-
-3. **Quality gate** (`vibe_quality_gate.py`)
-   - Include gate result in quality checks
 
 ## Safety
 
@@ -87,5 +80,5 @@ python scripts/model_ledger_gate.py --fixture docs/reports/model-ledger-gate-fix
 - No credential/secret access
 - No network calls
 - Read-only validation
-- workflow_code_changed=true (new integration script)
+- workflow_code_changed=true (modified vibe_run_report.py, vibe_merge_gate.py)
 - runtime_code_changed=false

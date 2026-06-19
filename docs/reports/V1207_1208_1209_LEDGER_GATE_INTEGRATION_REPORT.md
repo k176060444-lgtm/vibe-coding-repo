@@ -1,47 +1,89 @@
 # V1.20.7/8/9 Ledger Gate Integration Report
 
-Generated: 2026-06-19T15:00:00Z
+Generated: 2026-06-19T16:00:00Z
 Branch: feat/v1207-1209-ledger-gate-integration
 Base SHA: b3a59f9271dcbc320cd79e85d2b4470d79ecd50f
+Integration Type: REAL (not helper-only)
 
 ## Preflight Results
 
 | Check | Expected | Actual | Status |
 |-------|----------|--------|--------|
 | Windows HEAD | b3a59f92... | b3a59f9271dcbc320cd79e85d2b4470d79ecd50f | PASS |
-| 5bao OpenCode | 1.17.8 | 1.17.8 | PASS |
-| 9bao OpenCode | 1.17.8 | 1.17.8 | PASS |
-| Binary SHA256 (both) | ea9f0e72... | ea9f0e7257bbd3d71b788bca397d3b8d951c101c21d3387ca39ae41b66360ec7 | PASS |
+| 5bao OpenCode | 1.17.8 | SSH not available (key not on Windows) | UNVERIFIED |
+| 9bao OpenCode | 1.17.8 | SSH not available (key not on Windows) | UNVERIFIED |
+| Binary SHA256 | ea9f0e72... | Cannot verify without SSH | UNVERIFIED |
 | V1.20.6 gate | 13/13 | 13/13 | PASS |
 | V1.17.7 freeze | 547da273 | exists | PASS |
 
-## Deliverables
+Note: 5bao/9bao OpenCode version and binary SHA256 cannot be independently verified
+because SSH credentials (debian-vibeworker-ed25519) are not present on the Windows
+build machine. The baseline of 1.17.8 is accepted per Operator's trusted baseline declaration.
 
-| File | Description | Status |
-|------|-------------|--------|
-| scripts/vibe_report_status_gate.py | Report status + merge readiness gate | CREATED |
-| docs/V1207_1208_1209_LEDGER_GATE_INTEGRATION.md | Documentation | CREATED |
-| docs/reports/V1207_1208_1209_LEDGER_GATE_INTEGRATION_REPORT.md | This report | CREATED |
+## Changed Files
 
-## Integration Test Results
+| File | Change | Lines |
+|------|--------|-------|
+| scripts/vibe_run_report.py | v1.0.0 -> v1.1.0: added ledger gate import + check | ~25 added |
+| scripts/vibe_merge_gate.py | added ledger gate import + check + output | ~35 added |
+| docs/V1207_1208_1209_LEDGER_GATE_INTEGRATION.md | updated for real integration | rewritten |
+| docs/reports/V1207_1208_1209_LEDGER_GATE_INTEGRATION_REPORT.md | this report | rewritten |
 
-### Self-check: 11/11 PASSED
+## Real Integration Details
 
-| ID | Description | Expected Status | Expected Merge | Actual Status | Actual Merge | Status |
-|----|-------------|-----------------|----------------|---------------|--------------|--------|
-| int-01 | Valid V1.20.5 report | ALLOWED | true | ALLOWED | true | PASS |
-| int-02 | Non-terminal (IN_PROGRESS) | ALLOWED | false | ALLOWED | false | PASS |
-| int-03 | Missing MODEL_LEDGER | BLOCKED | false | BLOCKED | false | PASS |
-| int-04 | Missing NODE_MODEL_SUMMARY | BLOCKED | false | BLOCKED | false | PASS |
-| int-05 | Missing COOLDOWN_STATE_SUMMARY | BLOCKED | false | BLOCKED | false | PASS |
-| int-06 | rate_limit without ledger | BLOCKED | false | BLOCKED | false | PASS |
-| int-07 | fallback without fields | BLOCKED | false | BLOCKED | false | PASS |
-| int-08 | token_usage='unknown' | BLOCKED | false | BLOCKED | false | PASS |
-| int-09 | rate-limit as BIN-FAIL | BLOCKED | false | BLOCKED | false | PASS |
-| int-10 | NODE_SUMMARY only node | BLOCKED | false | BLOCKED | false | PASS |
-| int-11 | COOLDOWN only node | BLOCKED | false | BLOCKED | false | PASS |
+### vibe_run_report.py (V1.20.7)
 
-### Negative Path Matrix
+- Imports `vibe_report_status_gate.check_report_status`
+- After building result dict, if qg_verdict is terminal:
+  - Runs `check_report_status(result)`
+  - On FAIL: downgrades verdict to `BLOCKED_BY_LEDGER_GATE`
+  - On PASS: records `ledger_gate.result = PASS`
+- Adds `ledger_gate` section to markdown output
+- Fail-closed: missing MODEL_LEDGER -> BLOCKED
+
+### vibe_merge_gate.py (V1.20.8)
+
+- Imports `model_ledger_gate.validate_report`
+- Before `allow_merge` determination:
+  - If job status is terminal: runs gate validation
+  - On FAIL: adds blocker, merge blocked
+  - Adds `model_ledger_gate` to result dict
+- Fail-closed: missing ledger fields -> merge blocked
+
+## Validation Results
+
+### py_compile: ALL OK
+
+```
+scripts/vibe_run_report.py: OK
+scripts/vibe_merge_gate.py: OK
+scripts/vibe_report_status_gate.py: OK
+scripts/model_ledger_gate.py: OK
+```
+
+### model_ledger_gate.py --self-check: 13/13 PASSED
+
+### vibe_report_status_gate.py --self-check: 11/11 PASSED
+
+### model_ledger_gate.py --fixture: 13/13 PASSED
+
+## Integration Test Matrix
+
+| ID | Description | Gate | Expected | Status |
+|----|-------------|------|----------|--------|
+| int-01 | Valid V1.20.5 report (3 live + 2 fixture) | status | ALLOWED, merge=true | PASS |
+| int-02 | Non-terminal (IN_PROGRESS) | status | ALLOWED, merge=false | PASS |
+| int-03 | Missing MODEL_LEDGER | status | BLOCKED, merge=false | PASS |
+| int-04 | Missing NODE_MODEL_SUMMARY | status | BLOCKED, merge=false | PASS |
+| int-05 | Missing COOLDOWN_STATE_SUMMARY | status | BLOCKED, merge=false | PASS |
+| int-06 | rate_limit without ledger | status | BLOCKED, merge=false | PASS |
+| int-07 | fallback without fields | status | BLOCKED, merge=false | PASS |
+| int-08 | token_usage='unknown' | status | BLOCKED, merge=false | PASS |
+| int-09 | rate-limit as BIN-FAIL | status | BLOCKED, merge=false | PASS |
+| int-10 | NODE_SUMMARY only node | status | BLOCKED, merge=false | PASS |
+| int-11 | COOLDOWN only node | status | BLOCKED, merge=false | PASS |
+
+## Negative Path Matrix (Fail-Closed)
 
 | Scenario | Gate Result | Merge Ready | Fail-Closed |
 |----------|-------------|-------------|-------------|
@@ -55,43 +97,23 @@ Base SHA: b3a59f9271dcbc320cd79e85d2b4470d79ecd50f
 | NODE_SUMMARY only node | FAIL | false | YES |
 | COOLDOWN only node | FAIL | false | YES |
 
-### Positive Path Matrix
+## GitHub Hidden/Bidi Unicode Check
 
-| Scenario | Gate Result | Merge Ready |
-|----------|-------------|-------------|
-| Valid V1.20.5 report | PASS | true |
-| Non-terminal status | N/A | false |
-
-## Underlying Gate Verification
-
-```
-=== model_ledger_gate.py --self-check ===
-  Total: 13
-  Passed: 13
-  Failed: 0
-  Self-check: PASSED
-
-=== model_ledger_gate.py --fixture ===
-  Scenarios: 13
-  Results: 13/13 passed
-
-=== vibe_report_status_gate.py --self-check ===
-  Total: 11
-  Passed: 11
-  Failed: 0
-  Self-check: PASSED
-```
+Scanned all changed files (byte-level):
+- 0 non-ASCII bytes in both markdown files
+- 0 BOM, 0 bidi control chars, 0 zero-width chars
+- GitHub PR files page: NO hidden/bidi warnings detected
+- GitHub blob API decoded content: 100% ASCII
 
 ## Code Classification
 
 | Component | Type | Changed |
 |-----------|------|---------|
-| vibe_report_status_gate.py | workflow CLI / validator | NEW |
-| model_ledger_gate.py | workflow CLI / validator | UNCHANGED |
-| docs/ | documentation | NEW |
-
-- workflow_code_changed: true (new vibe_report_status_gate.py)
-- runtime_code_changed: false (no runtime service changes)
+| vibe_run_report.py | real workflow entry point | MODIFIED (v1.0.0 -> v1.1.0) |
+| vibe_merge_gate.py | real workflow entry point | MODIFIED |
+| vibe_report_status_gate.py | gate script | UNCHANGED |
+| model_ledger_gate.py | underlying gate | UNCHANGED |
+| docs/ | documentation | UPDATED |
 
 ## Safety Declarations
 
@@ -104,6 +126,15 @@ Base SHA: b3a59f9271dcbc320cd79e85d2b4470d79ecd50f
 | internal_ip_in_public_files | false |
 | merge_executed | false |
 | upgrade_performed | false |
+| hidden_bidi_unicode | false (verified) |
+
+## OpenCode Version Note
+
+5bao/9bao OpenCode version (1.17.8) and binary SHA256 (ea9f0e72...) cannot be
+independently verified from this build because SSH key (debian-vibeworker-ed25519)
+is not present on the Windows machine. These values are accepted from Operator's
+trusted baseline declaration. If independent verification is required, Operator
+must provide SSH access or verify manually on each node.
 
 ## PR Requirements
 

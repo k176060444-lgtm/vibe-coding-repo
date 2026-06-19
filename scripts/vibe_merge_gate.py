@@ -29,6 +29,14 @@ except ImportError:
     gate_check_for_dispatch = None
     _LIFECYCLE_GATE_AVAILABLE = False
 
+# V1.20.8: Model ledger gate integration
+try:
+    from model_ledger_gate import validate_report as ledger_gate_validate
+    _LEDGER_GATE_AVAILABLE = True
+except ImportError:
+    ledger_gate_validate = None
+    _LEDGER_GATE_AVAILABLE = False
+
 
 def _run_cmd(*args, check=False):
     """Run a command and return (stdout, stderr, returncode)."""
@@ -255,13 +263,46 @@ def run_gate(args):
     else:
         warnings.append("Locked job wo-code-repo-status-001 not found")
 
+    # V1.20.8: Model ledger gate check
+    ledger_gate_result = None
+    if _LEDGER_GATE_AVAILABLE:
+        # Build a minimal report dict for gate validation
+        # The gate checks MODEL_LEDGER, NODE_MODEL_SUMMARY, COOLDOWN_STATE_SUMMARY
+        # If these are absent from the job info, gate will fail (fail-closed)
+        gate_report = {}
+        if job_info:
+            gate_report = {
+                'status': job_info.get('job_status', '').upper(),
+                'MODEL_LEDGER': job_info.get('MODEL_LEDGER', []),
+                'NODE_MODEL_SUMMARY': job_info.get('NODE_MODEL_SUMMARY', []),
+                'COOLDOWN_STATE_SUMMARY': job_info.get('COOLDOWN_STATE_SUMMARY', []),
+            }
+        else:
+            gate_report = {'status': 'UNKNOWN'}
+
+        # Only run gate if status is terminal
+        terminal_statuses = {'PASS', 'MERGE_READY', 'FREEZE_PASS', 'PROMOTION_PASS'}
+        if gate_report.get('status') in terminal_statuses:
+            ledger_errors = ledger_gate_validate(gate_report)
+            ledger_gate_result = {
+                'checked': True,
+                'result': 'PASS' if not ledger_errors else 'FAIL',
+                'errors': ledger_errors,
+            }
+            if ledger_errors:
+                blockers.append('Model ledger gate FAIL: ' + '; '.join(ledger_errors[:3]))
+        else:
+            ledger_gate_result = {'checked': False, 'result': 'N/A', 'reason': 'non-terminal status'}
+    else:
+        ledger_gate_result = {'checked': False, 'result': 'GATE_UNAVAILABLE'}
+
     allow_merge = len(blockers) == 0
-    return _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info)
+    return _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info, ledger_gate_result)
 
 
-def _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info):
+def _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info, ledger_gate_result=None):
     """Build the gate result."""
-    return {
+    result = {
         "allow_merge": allow_merge,
         "blockers": blockers,
         "warnings": warnings,
@@ -269,6 +310,9 @@ def _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_inf
         "job": job_info,
         "checks": checks_info,
     }
+    if ledger_gate_result is not None:
+        result["model_ledger_gate"] = ledger_gate_result
+    return result
 
 
 def _format_text(result):
@@ -282,6 +326,16 @@ def _format_text(result):
     status = "✅ ALLOW MERGE" if result["allow_merge"] else "⛔ BLOCKED"
     lines.append(f"  Result: {status}")
     lines.append("----------------------------------------")
+
+    # V1.20.8: Ledger gate status
+    lg = result.get("model_ledger_gate", {})
+    if lg:
+        lg_icon = {"PASS": "✅", "FAIL": "❌", "N/A": "➖", "GATE_UNAVAILABLE": "⚠️"}.get(lg.get("result", "?"), "❓")
+        lines.append(f"  Model Ledger Gate: {lg_icon} {lg.get('result', 'unknown')}")
+        if lg.get("errors"):
+            for e in lg["errors"][:3]:
+                lines.append(f"    - {e}")
+        lines.append("----------------------------------------")
 
     if result["blockers"]:
         lines.append("  Blockers:")
