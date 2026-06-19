@@ -11,9 +11,9 @@ Usage:
     python3 scripts/vibe_worker_registry.py --self-check
 """
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"  # V1.18.4: UNKNOWN default + SSH health probe
 
-import copy, json
+import copy, hashlib, json
 import os
 import subprocess
 import sys
@@ -82,7 +82,7 @@ DEFAULT_WORKERS = {
         capabilities=["linux-worker", "read-only", "implementer", "reviewer", "pytest", "smoke"],
         weight=100,
         max_parallel_jobs=1,
-        tools_installed={"ripgrep": "NOT_INSTALLED"},
+        tools_installed={"ripgrep": "13.0.0"},
     ),
     "9bao": WorkerNode(
         worker_id="9bao",
@@ -222,6 +222,81 @@ class WorkerRegistry:
         if w:
             w.health_status = status
             w.last_health_check = datetime.now(timezone.utc).isoformat()
+
+    def health_probe(self, worker_id: str, ssh_key_path: str = None,
+                     timeout: int = 10) -> dict:
+        """Real SSH health probe. Returns evidence dict.
+
+        Only sets ONLINE on successful probe. Keeps UNKNOWN on failure.
+        Evidence includes: timestamp, exit_code, stdout, latency_ms.
+        """
+        w = self.workers.get(worker_id)
+        if not w:
+            return {"worker_id": worker_id, "status": "UNKNOWN",
+                    "error": "worker_not_found"}
+
+        key = ssh_key_path or w.ssh_key_path
+        ssh_cmd = [
+            "ssh", "-o", "StrictHostKeyChecking=no",
+            "-o", "ConnectTimeout=%d" % timeout,
+            "-o", "BatchMode=yes",
+            "-p", str(w.ssh_port),
+            "-i", key,
+            "%s@%s" % (w.ssh_user, w.ssh_host),
+            "echo HEALTH_OK && hostname && date -u +%Y-%m-%dT%H:%M:%SZ",
+        ]
+
+        import time as _time
+        start = _time.monotonic()
+        try:
+            result = subprocess.run(
+                ssh_cmd, capture_output=True, text=True, timeout=timeout + 5)
+            elapsed_ms = int((_time.monotonic() - start) * 1000)
+
+            if result.returncode == 0 and "HEALTH_OK" in result.stdout:
+                self.set_health(worker_id, NodeStatus.ONLINE)
+                return {
+                    "worker_id": worker_id,
+                    "status": "ONLINE",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "exit_code": 0,
+                    "stdout": result.stdout.strip()[:200],
+                    "latency_ms": elapsed_ms,
+                    "evidence_sha": hashlib.sha256(
+                        result.stdout.encode()).hexdigest()[:16],
+                }
+            else:
+                self.set_health(worker_id, NodeStatus.OFFLINE)
+                return {
+                    "worker_id": worker_id,
+                    "status": "OFFLINE",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "exit_code": result.returncode,
+                    "stderr": result.stderr.strip()[:200],
+                    "latency_ms": elapsed_ms,
+                }
+        except subprocess.TimeoutExpired:
+            self.set_health(worker_id, NodeStatus.OFFLINE)
+            return {
+                "worker_id": worker_id, "status": "OFFLINE",
+                "error": "ssh_timeout",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            self.set_health(worker_id, NodeStatus.OFFLINE)
+            return {
+                "worker_id": worker_id, "status": "OFFLINE",
+                "error": str(e)[:200],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+    def probe_all(self, ssh_key_path: str = None, timeout: int = 10) -> dict:
+        """Probe all workers. Returns {worker_id: probe_result}."""
+        results = {}
+        for w in self.workers.values():
+            results[w.worker_id] = self.health_probe(
+                w.worker_id, ssh_key_path=ssh_key_path, timeout=timeout)
+        return results
 
     def to_dict(self) -> dict:
         return {

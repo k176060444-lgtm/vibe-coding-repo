@@ -27,7 +27,122 @@ CLI:
   python3 vibe_job_orchestrator.py self-check
 """
 
-__version__ = "3.8.0"  # V1.18.3: Journal-based repair transaction + cancel state closure
+__version__ = "3.11.0"  # V1.18.4.10: approved_model_egress hardening
+
+# ===========================================================================
+# V1.18.4.10: Approved Model Egress Policy (Hardened)
+# ===========================================================================
+# SECURITY NOTE: approved_model_egress uses host network namespace.
+# bwrap does NOT enforce domain/IP whitelists. The domain list below is
+# for audit logging only. domain_allowlist_enforced is ALWAYS False.
+# To add real enforcement, a proxy or nftables/cgroup policy is needed.
+
+# Approved model registry for network egress.
+# Only models listed here may use network_policy=approved_model_egress.
+APPROVED_MODEL_REGISTRY = {
+    "deepseek-plan/deepseek-v4-flash",
+    "deepseek-plan/deepseek-v4-pro",
+    "xiaomi-plan/mimo-v2.5",
+    "xiaomi-plan/mimo-v2.5-pro",
+    "minimax-plan/MiniMax-M3",
+}
+
+# Quarantined models - never allowed network egress
+QUARANTINED_MODELS = {
+    "volcengine-plan/ark-code-latest",
+}
+
+# Approved domains — AUDIT LOGGING ONLY, NOT ENFORCED at bwrap/network level.
+# These are recorded in manifests and evidence for post-hoc audit.
+# domain_allowlist_enforced is ALWAYS False unless a proxy/nftables layer exists.
+APPROVED_EGRESS_DOMAINS_AUDIT_ONLY = [
+    "api.deepseek.com",
+    "api.minimax.chat",
+    "token-plan-cn.xiaomimimo.com",
+]
+
+# Allowed task types for network egress — ONLY OpenCode jobs.
+EGRESS_ALLOWED_TASK_TYPES = {"opencode_implement", "opencode_review"}
+
+# Minimum secret files required for OpenCode to function.
+# These are --ro-bind individually; the entire .vibedev-secrets dir is NEVER mounted.
+OPENCODE_SECRET_FILES = [
+    "/home/vibeworker/.vibedev-secrets/opencode.env",
+]
+OPENCODE_CONFIG_FILES = [
+    "/home/vibeworker/.config/vibedev-opencode/opencode.jsonc",
+]
+
+
+def compute_approval_digest(job_id: str, task_type: str, provider_model: str,
+                            worker: str, network_policy: str, base_sha: str,
+                            command_sha: str, operator: str, timestamp: str,
+                            approval_id: str) -> str:
+    """Compute approval receipt digest from bound fields.
+
+    The digest binds ALL critical job parameters to the approval.
+    Any field mismatch between receipt and manifest MUST cause BLOCK.
+    """
+    import hashlib as _hl
+    fields = "|".join([
+        job_id, task_type, provider_model, worker, network_policy,
+        base_sha, command_sha, operator, timestamp, approval_id,
+    ])
+    return _hl.sha256(fields.encode("utf-8")).hexdigest()
+
+
+def verify_approval_receipt(manifest, approval_receipt: dict) -> dict:
+    """Verify approval receipt against manifest fields.
+
+    Returns {ok, reason, ...}. FAIL-CLOSED on any mismatch.
+    """
+    required_fields = [
+        "job_id", "task_type", "provider_model", "worker",
+        "network_policy", "base_sha", "command_sha", "operator",
+        "timestamp", "approval_id", "approval_digest",
+    ]
+    for f in required_fields:
+        if f not in approval_receipt or not approval_receipt[f]:
+            return {"ok": False, "reason": "receipt_missing_field: %s" % f}
+
+    # Field-by-field comparison
+    mismatches = []
+    checks = {
+        "job_id": getattr(manifest, "job_id", ""),
+        "task_type": getattr(manifest, "task_type", ""),
+        "provider_model": getattr(manifest, "provider_model", ""),
+        "worker": getattr(manifest, "actual_worker", ""),
+        "network_policy": getattr(manifest, "network_policy", ""),
+        "approval_id": getattr(manifest, "approval_id", ""),
+    }
+    for field, manifest_val in checks.items():
+        receipt_val = approval_receipt.get(field, "")
+        if str(manifest_val) != str(receipt_val):
+            mismatches.append("%s: manifest=%s receipt=%s" % (field, manifest_val, receipt_val))
+
+    if mismatches:
+        return {"ok": False, "reason": "receipt_field_mismatch", "mismatches": mismatches}
+
+    # Recompute and verify digest
+    expected_digest = compute_approval_digest(
+        approval_receipt["job_id"],
+        approval_receipt["task_type"],
+        approval_receipt["provider_model"],
+        approval_receipt["worker"],
+        approval_receipt["network_policy"],
+        approval_receipt["base_sha"],
+        approval_receipt["command_sha"],
+        approval_receipt["operator"],
+        approval_receipt["timestamp"],
+        approval_receipt["approval_id"],
+    )
+    if expected_digest != approval_receipt["approval_digest"]:
+        return {"ok": False, "reason": "receipt_digest_mismatch",
+                "expected": expected_digest[:16],
+                "actual": approval_receipt["approval_digest"][:16]}
+
+    return {"ok": True, "reason": "receipt_verified", "digest": expected_digest[:16]}
+
 
 # ===========================================================================
 # MANDATORY IMPORTS — FAIL-CLOSED, NO FALLBACKS
@@ -381,21 +496,79 @@ class ClaimStore:
             # Validate existing store on load
             self._validate_store_or_latch()
 
+        # V1.18.4: Reconcile nonce ledger on startup
+        self.reconcile_nonce_ledger()
+
+        # V1.18.4: Recover incomplete repairs on startup
+        # Always run, even when latched — that's the whole point of recovery
+        self.recover_incomplete_repairs()
+
     def _check_nonce(self, nonce: str) -> bool:
-        """Check if nonce is available (not consumed). Returns True if available."""
+        """Check if nonce is available (not RESERVED or COMMITTED). Returns True if available."""
         if not nonce:
             return False
         try:
             with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
                 if NONCE_LEDGER_PATH.exists():
                     ledger = json.loads(NONCE_LEDGER_PATH.read_text())
-                    return nonce not in ledger.get("consumed", {})
+                    consumed = ledger.get("consumed", {})
+                    entry = consumed.get(nonce)
+                    if entry is None:
+                        return True  # Not in ledger at all
+                    state = entry.get("state", "COMMITTED")
+                    if state == "ABORTED":
+                        return True  # Aborted = available for reuse
+                    return False  # RESERVED or COMMITTED = not available
                 return True
         except Exception:
             return False  # Fail-closed: assume consumed on error
 
-    def _consume_nonce(self, nonce: str, receipt_id: str) -> bool:
-        """Atomically consume a nonce. Returns True if successfully consumed."""
+    def _reserve_nonce(self, nonce: str, tx_id: str, receipt_id: str) -> bool:
+        """Atomically check + reserve a nonce. Returns True if successfully reserved.
+
+        Atomic state machine: nonce must not be RESERVED or COMMITTED.
+        On success, nonce is marked RESERVED(tx_id, receipt_id).
+        Loser gets False before any store/receipt mutation.
+        """
+        if not nonce or not tx_id:
+            return False
+        try:
+            with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                ledger = {"consumed": {}}
+                if NONCE_LEDGER_PATH.exists():
+                    ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+
+                consumed = ledger.get("consumed", {})
+                entry = consumed.get(nonce)
+                if entry is not None:
+                    state = entry.get("state", "COMMITTED")
+                    if state in ("RESERVED", "COMMITTED"):
+                        return False  # Already taken
+                    # ABORTED → can be reused
+
+                consumed[nonce] = {
+                    "state": "RESERVED",
+                    "tx_id": tx_id,
+                    "receipt_id": receipt_id,
+                    "reserved_at": _now_iso(),
+                }
+                ledger["consumed"] = consumed
+
+                tmp = NONCE_LEDGER_PATH.with_suffix(".tmp")
+                with open(str(tmp), "w") as f:
+                    json.dump(ledger, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(str(tmp), str(NONCE_LEDGER_PATH))
+                return True
+        except Exception:
+            return False  # Fail-closed
+
+    def _commit_nonce(self, nonce: str, tx_id: str) -> bool:
+        """Commit a RESERVED nonce. Returns True on success.
+
+        Only the holder of the same tx_id can commit.
+        """
         if not nonce:
             return False
         try:
@@ -404,15 +577,91 @@ class ClaimStore:
                 if NONCE_LEDGER_PATH.exists():
                     ledger = json.loads(NONCE_LEDGER_PATH.read_text())
 
-                if nonce in ledger.get("consumed", {}):
-                    return False  # Already consumed
+                consumed = ledger.get("consumed", {})
+                entry = consumed.get(nonce)
+                if entry is None:
+                    return False  # Not reserved
+                if entry.get("state") != "RESERVED":
+                    return False  # Not in RESERVED state
+                if entry.get("tx_id") != tx_id:
+                    return False  # Not our reservation
 
-                ledger.setdefault("consumed", {})[nonce] = {
+                entry["state"] = "COMMITTED"
+                entry["committed_at"] = _now_iso()
+                consumed[nonce] = entry
+                ledger["consumed"] = consumed
+
+                tmp = NONCE_LEDGER_PATH.with_suffix(".tmp")
+                with open(str(tmp), "w") as f:
+                    json.dump(ledger, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(str(tmp), str(NONCE_LEDGER_PATH))
+                return True
+        except Exception:
+            return False  # Fail-closed
+
+    def _abort_nonce(self, nonce: str, tx_id: str) -> bool:
+        """Abort a RESERVED nonce, releasing it for reuse."""
+        if not nonce:
+            return False
+        try:
+            with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                ledger = {"consumed": {}}
+                if NONCE_LEDGER_PATH.exists():
+                    ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+
+                consumed = ledger.get("consumed", {})
+                entry = consumed.get(nonce)
+                if entry is None:
+                    return True  # Nothing to abort
+                if entry.get("tx_id") != tx_id:
+                    return False  # Not our reservation
+
+                entry["state"] = "ABORTED"
+                entry["aborted_at"] = _now_iso()
+                consumed[nonce] = entry
+                ledger["consumed"] = consumed
+
+                tmp = NONCE_LEDGER_PATH.with_suffix(".tmp")
+                with open(str(tmp), "w") as f:
+                    json.dump(ledger, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(str(tmp), str(NONCE_LEDGER_PATH))
+                return True
+        except Exception:
+            return False
+
+    def _consume_nonce(self, nonce: str, receipt_id: str) -> bool:
+        """Atomically consume a nonce (legacy: marks COMMITTED directly).
+
+        V1.18.4.1: Prefer _reserve_nonce + _commit_nonce for new code.
+        This method is kept for backward compatibility with the original
+        repair flow which does check+consume in sequence.
+        """
+        if not nonce:
+            return False
+        try:
+            with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                ledger = {"consumed": {}}
+                if NONCE_LEDGER_PATH.exists():
+                    ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+
+                consumed = ledger.get("consumed", {})
+                entry = consumed.get(nonce)
+                if entry is not None:
+                    state = entry.get("state", "COMMITTED")
+                    if state in ("RESERVED", "COMMITTED"):
+                        return False  # Already taken
+
+                consumed[nonce] = {
+                    "state": "COMMITTED",
                     "receipt_id": receipt_id,
                     "consumed_at": _now_iso(),
                 }
+                ledger["consumed"] = consumed
 
-                # Atomic write
                 tmp = NONCE_LEDGER_PATH.with_suffix(".tmp")
                 with open(str(tmp), "w") as f:
                     json.dump(ledger, f, indent=2)
@@ -625,16 +874,21 @@ class ClaimStore:
             if datetime.now(timezone.utc) > exp:
                 raise ValueError("Receipt expired")
 
-        # Step 2: Verify nonce not used (global ledger)
+        # Step 2: Atomic nonce reserve — must succeed BEFORE any store mutation
         if receipt.get("consumed", False):
             raise ValueError("Receipt already consumed")
         nonce = receipt.get("nonce", "")
         if not nonce or len(nonce) < 16:
             raise ValueError("Receipt nonce missing or too short")
 
-        # Global nonce ledger check — prevents cross-receipt nonce reuse
-        if not self._check_nonce(nonce):
-            raise ValueError("Nonce already consumed in global ledger: %s" % nonce[:16])
+        # Generate tx_id early for nonce reservation
+        import uuid as _uuid
+        tx_id = "repair-tx-%s-%s" % (approval_receipt_id[:8], _uuid.uuid4().hex[:8])
+
+        # Atomic reserve: check + mark RESERVED(tx_id) in one lock acquisition
+        # Loser gets False before any store/receipt mutation
+        if not self._reserve_nonce(nonce, tx_id, approval_receipt_id):
+            raise ValueError("Nonce already reserved or consumed: %s" % nonce[:16])
 
         # Step 3: Verify immutable corrupted backup SHA
         old_sha = receipt.get("old_store_sha256", "")
@@ -686,7 +940,7 @@ class ClaimStore:
             raise MANIFEST_CORRUPTED("Candidate checksum mismatch")
 
         # Step 8: Create persistent journal BEFORE any mutations
-        tx_id = "repair-tx-%s-%s" % (approval_receipt_id[:8], uuid.uuid4().hex[:8])
+        # tx_id already generated at Step 2 for nonce reservation
         journal_path = self.store_path.parent / ("%s.journal.json" % tx_id)
         journal = {
             "tx_id": tx_id,
@@ -746,12 +1000,12 @@ class ClaimStore:
         journal["steps_completed"].append("receipt_consume")
         self._write_journal(journal_path, journal)
 
-        # Step 12: Consume nonce in global ledger — MUST succeed
-        if not self._consume_nonce(nonce, approval_receipt_id):
+        # Step 12: Commit nonce in global ledger — RESERVED → COMMITTED
+        if not self._commit_nonce(nonce, tx_id):
             raise RuntimeError(
-                "Nonce consumption FAILED for %s. "
+                "Nonce commit FAILED for %s (tx=%s). "
                 "Repair aborted — receipt already consumed, journal at %s. "
-                "Manual intervention required." % (nonce[:16], journal_path))
+                "Manual intervention required." % (nonce[:16], tx_id, journal_path))
         journal["status"] = "NONCE_CONSUMED"
         journal["steps_completed"].append("nonce_consume")
         self._write_journal(journal_path, journal)
@@ -806,6 +1060,274 @@ class ClaimStore:
                 os.close(fd)
         except OSError:
             pass  # Best-effort on platforms without dir fsync
+
+    def recover_incomplete_repairs(self) -> list:
+        """Scan for incomplete repair journals and recover them.
+
+        Called on startup and can be called explicitly. Idempotent.
+        For each journal:
+          - COMPLETED/ROLLED_BACK → clean up journal file
+          - STARTED/BACKUP_CREATED → rollback (restore backup if exists)
+          - STORE_REPLACED/RECEIPT_CONSUMED/NONCE_CONSUMED → complete repair
+        Returns list of recovery results.
+        """
+        results = []
+        journal_dir = self.store_path.parent
+        if not journal_dir.exists():
+            return results
+
+        for jf in sorted(journal_dir.glob("*.journal.json")):
+            try:
+                journal = json.loads(jf.read_text())
+            except Exception as e:
+                results.append({
+                    "journal": jf.name, "action": "error",
+                    "error": "cannot read journal: %s" % e,
+                })
+                continue
+
+            tx_id = journal.get("tx_id", jf.stem)
+            status = journal.get("status", "UNKNOWN")
+
+            if status in ("COMPLETED", "ROLLED_BACK"):
+                # Already done — clean up journal
+                try:
+                    jf.unlink()
+                    results.append({
+                        "tx_id": tx_id, "action": "cleanup",
+                        "old_status": status,
+                    })
+                except OSError as e:
+                    results.append({
+                        "tx_id": tx_id, "action": "cleanup_failed",
+                        "error": str(e),
+                    })
+                continue
+
+            # Incomplete repair — need to recover
+            if status in ("STARTED", "BACKUP_CREATED"):
+                # Store was NOT yet replaced → rollback
+                result = self._rollback_repair(journal, jf)
+                results.append(result)
+            elif status in ("STORE_REPLACED", "RECEIPT_CONSUMED", "NONCE_CONSUMED"):
+                # Store was already replaced → complete the repair
+                result = self._complete_repair(journal, jf)
+                results.append(result)
+            else:
+                results.append({
+                    "tx_id": tx_id, "action": "unknown_status",
+                    "status": status,
+                })
+
+        return results
+
+    def _rollback_repair(self, journal: dict, journal_path: Path) -> dict:
+        """Roll back an incomplete repair where store was NOT yet replaced.
+
+        V1.18.4.1 FAIL-CLOSED:
+        - Transaction is marked ROLLED_BACK (journal updated).
+        - Latch is ONLY cleared if the live store passes full validation
+          (schema version, checksum, claims dict). If the store is still
+          corrupted, the latch STAYS and service remains BLOCKED.
+        - "repair transaction rolled back" != "corruption resolved".
+        """
+        tx_id = journal.get("tx_id", "unknown")
+        try:
+            # Mark journal as rolled back
+            journal["status"] = "ROLLED_BACK"
+            journal["rolled_back_at"] = _now_iso()
+            self._write_journal(journal_path, journal)
+        except Exception as e:
+            return {"tx_id": tx_id, "action": "rollback_failed",
+                    "error": "journal_write_failed: %s" % e}
+
+        # Validate live store before clearing latch
+        try:
+            data = self._raw_read()
+            if not isinstance(data, dict):
+                return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                        "detail": "store_not_dict", "latch": "KEPT"}
+            if "claims" not in data:
+                return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                        "detail": "missing_claims", "latch": "KEPT"}
+            ver = data.get("version")
+            if ver != CLAIM_STORE_SCHEMA_VERSION:
+                return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                        "detail": "version_mismatch_%s" % ver, "latch": "KEPT"}
+            stored_checksum = data.get(_STORE_CHECKSUM_KEY)
+            if stored_checksum is None:
+                return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                        "detail": "checksum_missing", "latch": "KEPT"}
+            recomputed = _compute_store_checksum(data)
+            if stored_checksum != recomputed:
+                return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                        "detail": "checksum_mismatch", "latch": "KEPT"}
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            return {"tx_id": tx_id, "action": "rolled_back_store_corrupt",
+                    "detail": "read_failed: %s" % e, "latch": "KEPT"}
+
+        # Store is valid — safe to clear latch
+        try:
+            self._corruption_latch = False
+            self._corruption_reason = ""
+            if self.latch_path.exists():
+                self.latch_path.unlink()
+                self._fsync_parent_dir(self.latch_path)
+            return {"tx_id": tx_id, "action": "rolled_back",
+                    "latch": "CLEARED", "store_valid": True}
+        except OSError as e:
+            return {"tx_id": tx_id, "action": "rolled_back_latch_error",
+                    "error": str(e), "latch": "KEPT"}
+
+    def _complete_repair(self, journal: dict, journal_path: Path) -> dict:
+        """Complete a repair where store was already replaced.
+
+        V1.18.4.1 FAIL-CLOSED:
+        - No except:pass. Every failure keeps latch and journal.
+        - Receipt write failure → latch KEPT, journal preserved.
+        - Nonce consume failure → latch KEPT, journal preserved.
+        - Only when ALL steps succeed: clear latch, mark COMPLETED.
+        - Recovery is idempotent: re-running on COMPLETED is a no-op.
+        """
+        tx_id = journal.get("tx_id", "unknown")
+
+        # Step 1: Verify new store is valid (schema + checksum)
+        try:
+            data = self._raw_read()
+            if not isinstance(data, dict) or "claims" not in data:
+                return {"tx_id": tx_id, "action": "complete_failed",
+                        "error": "new_store_invalid_structure", "latch": "KEPT"}
+            ver = data.get("version")
+            if ver != CLAIM_STORE_SCHEMA_VERSION:
+                return {"tx_id": tx_id, "action": "complete_failed",
+                        "error": "new_store_version_mismatch_%s" % ver, "latch": "KEPT"}
+            stored_checksum = data.get(_STORE_CHECKSUM_KEY)
+            if stored_checksum is None:
+                return {"tx_id": tx_id, "action": "complete_failed",
+                        "error": "new_store_checksum_missing", "latch": "KEPT"}
+            recomputed = _compute_store_checksum(data)
+            if stored_checksum != recomputed:
+                return {"tx_id": tx_id, "action": "complete_failed",
+                        "error": "new_store_checksum_mismatch", "latch": "KEPT"}
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            return {"tx_id": tx_id, "action": "complete_failed",
+                    "error": "new_store_read_failed: %s" % e, "latch": "KEPT"}
+
+        # Step 2: Ensure receipt is marked consumed (atomic write)
+        approval_receipt_id = journal.get("approval_receipt_id", "")
+        if approval_receipt_id:
+            receipt_path = APPROVAL_RECEIPTS_DIR / ("%s.json" % approval_receipt_id)
+            if receipt_path.exists():
+                try:
+                    receipt = json.loads(receipt_path.read_text())
+                    if not receipt.get("consumed"):
+                        receipt["consumed"] = True
+                        receipt["consumed_at"] = _now_iso()
+                        receipt["tx_id"] = tx_id
+                        tmp_r = receipt_path.with_suffix(".tmp")
+                        with open(str(tmp_r), "w") as f:
+                            json.dump(receipt, f, indent=2)
+                            f.flush()
+                            os.fsync(f.fileno())
+                        os.replace(str(tmp_r), str(receipt_path))
+                        self._fsync_parent_dir(receipt_path)
+                except (OSError, json.JSONDecodeError) as e:
+                    return {"tx_id": tx_id, "action": "complete_failed",
+                            "error": "receipt_write_failed: %s" % e, "latch": "KEPT"}
+
+        # Step 3: Ensure nonce is consumed (must succeed)
+        nonce = journal.get("nonce", "")
+        if nonce:
+            nonce_ok = self._consume_nonce(nonce, approval_receipt_id or tx_id)
+            if not nonce_ok:
+                # Check if already committed by this same transaction (idempotent)
+                try:
+                    with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                        if NONCE_LEDGER_PATH.exists():
+                            ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+                            entry = ledger.get("consumed", {}).get(nonce, {})
+                            if entry.get("state") == "COMMITTED":
+                                # Already committed — acceptable for recovery
+                                pass
+                            else:
+                                return {"tx_id": tx_id, "action": "complete_failed",
+                                        "error": "nonce_consume_failed_not_committed",
+                                        "latch": "KEPT"}
+                        else:
+                            return {"tx_id": tx_id, "action": "complete_failed",
+                                    "error": "nonce_consume_failed_no_ledger", "latch": "KEPT"}
+                except Exception as e:
+                    return {"tx_id": tx_id, "action": "complete_failed",
+                            "error": "nonce_verify_failed: %s" % e, "latch": "KEPT"}
+
+        # Step 4: All steps passed — clear latch
+        try:
+            self._corruption_latch = False
+            self._corruption_reason = ""
+            if self.latch_path.exists():
+                self.latch_path.unlink()
+                self._fsync_parent_dir(self.latch_path)
+        except OSError as e:
+            return {"tx_id": tx_id, "action": "complete_failed",
+                    "error": "latch_clear_failed: %s" % e, "latch": "KEPT"}
+
+        # Step 5: Mark journal COMPLETED
+        journal["status"] = "COMPLETED"
+        journal["completed_at"] = _now_iso()
+        journal["recovered"] = True
+        try:
+            self._write_journal(journal_path, journal)
+        except Exception as e:
+            # Latch already cleared but journal write failed — log but don't re-latch
+            # The store is valid, latch is cleared; journal is for audit only
+            return {"tx_id": tx_id, "action": "completed_journal_write_failed",
+                    "warning": str(e), "latch": "CLEARED"}
+
+        return {"tx_id": tx_id, "action": "completed", "latch": "CLEARED"}
+
+    def reconcile_nonce_ledger(self) -> dict:
+        """Reconcile nonce ledger on startup. Scans for duplicate nonce entries.
+
+        If same nonce appears in multiple transactions, aborts all but the
+        most recent (by consumed_at timestamp).
+        Returns reconciliation result.
+        """
+        if not NONCE_LEDGER_PATH.exists():
+            return {"status": "no_ledger"}
+        try:
+            with FileLock(str(NONCE_LEDGER_LOCK), timeout=5):
+                ledger = json.loads(NONCE_LEDGER_PATH.read_text())
+                consumed = ledger.get("consumed", {})
+                # Find duplicate nonces (shouldn't happen but defensive)
+                # Each nonce maps to exactly one entry
+                # Just validate structure
+                cleaned = {}
+                duplicates = []
+                for nonce, entry in consumed.items():
+                    if not isinstance(entry, dict):
+                        duplicates.append(nonce)
+                        continue
+                    if nonce in cleaned:
+                        duplicates.append(nonce)
+                        continue
+                    cleaned[nonce] = entry
+
+                if duplicates:
+                    ledger["consumed"] = cleaned
+                    tmp = NONCE_LEDGER_PATH.with_suffix(".tmp")
+                    with open(str(tmp), "w") as f:
+                        json.dump(ledger, f, indent=2)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(str(tmp), str(NONCE_LEDGER_PATH))
+
+                return {
+                    "status": "reconciled",
+                    "total_nonces": len(cleaned),
+                    "duplicates_removed": len(duplicates),
+                }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     def _raw_read(self) -> dict:
         """Raw JSON read without latch check."""
@@ -972,18 +1494,32 @@ class ClaimStore:
 
     def release_claim(self, job_id: str, final_state: str = "SUCCEEDED",
                       success: bool = True):
-        """Release a claim and record final state."""
+        """Release a claim and record final state.
+
+        V1.18.4: Terminal state protection — once a claim reaches a terminal
+        state (SUCCEEDED, FAILED, CANCELLED), it cannot be overwritten.
+        This prevents cancel-vs-complete race conditions from producing
+        dual terminal states.
+        """
         self._check_latch()
         self.acquire_lock()
         try:
             store = self._read_store()
             claims = store.get("claims", {})
             if job_id in claims:
+                current_state = claims[job_id].get("state", "")
+                # Terminal state protection: refuse to overwrite
+                if current_state in ("SUCCEEDED", "FAILED", "CANCELLED"):
+                    return {"ok": False, "error": "already_terminal",
+                            "current_state": current_state,
+                            "requested_state": final_state}
                 claims[job_id]["state"] = final_state
                 claims[job_id]["released_at"] = _now_iso()
                 claims[job_id]["success"] = success
                 store["claims"] = claims
                 self._write_store(store)
+                return {"ok": True, "state": final_state}
+            return {"ok": False, "error": "claim_not_found"}
         finally:
             self.release_lock()
 
@@ -1050,6 +1586,16 @@ class JobManifest:
     branch_name: Optional[str] = None
     involves_merge: bool = False
     revision: int = 0  # Monotonic revision for CAS (compare-and-swap)
+    sandbox_enabled: bool = False
+    sandbox_config: dict = field(default_factory=dict)  # bwrap_path, version, args, network_policy, etc.
+    network_policy: str = "blocked"  # blocked | approved_model_egress
+    provider_model: str = ""  # e.g. deepseek-plan/deepseek-v4-flash
+    approval_id: str = ""  # Operator approval reference
+    approval_digest: str = ""  # SHA256 of approval binding
+    approval_receipt: dict = field(default_factory=dict)  # full receipt for verification
+    domain_allowlist_enforced: bool = False  # ALWAYS False (host network)
+    host_network_used: bool = False  # True when approved_model_egress
+    secret_bind_paths: List[str] = field(default_factory=list)  # --ro-bind paths recorded
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -1250,6 +1796,263 @@ class JobOrchestrator:
         self._persist_manifest(manifest)
         return manifest.to_dict()
 
+
+    # ================================================================
+    # Sandbox Runner (bubblewrap)
+    # ================================================================
+
+    def _validate_network_policy(self, manifest,
+                                  approval_receipt: dict = None) -> dict:
+        """Validate network_policy for a job. Returns {ok, reason, ...}.
+
+        V1.18.4.10 HARDENED:
+        - Non-empty checks are insufficient; receipt must match manifest fields.
+        - command/script content must be OpenCode-only for egress.
+        - domain_allowlist_enforced is always False (honest reporting).
+        """
+        policy = getattr(manifest, 'network_policy', 'blocked')
+        task_type = getattr(manifest, 'task_type', '')
+        provider_model = getattr(manifest, 'provider_model', '')
+        command = getattr(manifest, 'command', '')
+
+        if policy == 'blocked':
+            return {"ok": True, "policy": "blocked", "reason": "default_blocked"}
+
+        if policy != 'approved_model_egress':
+            return {"ok": False, "reason": "unknown_policy: %s" % policy, "policy": policy}
+
+        # --- Model validation ---
+        if provider_model in QUARANTINED_MODELS:
+            return {"ok": False, "reason": "quarantined_model: %s" % provider_model}
+        # Enforce full provider/model format (not short model name)
+        if provider_model and "/" not in provider_model:
+            return {"ok": False, "reason": "invalid_model_format: %s (must be provider/model)" % provider_model}
+        if provider_model not in APPROVED_MODEL_REGISTRY:
+            return {"ok": False, "reason": "unapproved_model: %s" % provider_model}
+
+        # --- Task type validation ---
+        if task_type not in EGRESS_ALLOWED_TASK_TYPES:
+            return {"ok": False, "reason": "task_type_not_allowed_for_egress: %s" % task_type}
+
+        # --- Command validation: must be OpenCode-only ---
+        if not self._is_opencode_command(command):
+            return {"ok": False, "reason": "non_opencode_command_blocked",
+                    "detail": "approved_model_egress only allows OpenCode commands"}
+
+        # --- Approval receipt verification ---
+        if approval_receipt is None:
+            return {"ok": False, "reason": "missing_approval_receipt"}
+
+        receipt_check = verify_approval_receipt(manifest, approval_receipt)
+        if not receipt_check["ok"]:
+            return {"ok": False, "reason": receipt_check["reason"],
+                    "detail": receipt_check.get("mismatches",
+                                                receipt_check.get("expected", ""))}
+
+        return {
+            "ok": True,
+            "policy": "approved_model_egress",
+            "domain_allowlist_enforced": False,
+            "host_network_used": True,
+            "approved_egress_domains_audit_only": APPROVED_EGRESS_DOMAINS_AUDIT_ONLY,
+            "provider_model": provider_model,
+            "task_type": task_type,
+            "approval_id": getattr(manifest, 'approval_id', ''),
+            "approval_digest": receipt_check["digest"],
+        }
+
+    @staticmethod
+    def _build_opencode_env_prefix(job_dir: str) -> str:
+        """Build shell prefix to set OpenCode env vars in sandbox.
+
+        Uses job-scoped tmp dirs for data/cache (not global paths).
+        Sources secret env file (which is --ro-bind mounted).
+        """
+        return (
+            "set -a; source /home/vibeworker/.vibedev-secrets/opencode.env; set +a\n"
+            "export HOME=/home/vibeworker\n"
+            "export XDG_CONFIG_HOME=/home/vibeworker/.config/vibedev-opencode\n"
+            "export XDG_DATA_HOME=%(job_dir)s/.opencode-data\n"
+            "export XDG_CACHE_HOME=%(job_dir)s/.opencode-cache\n"
+            "mkdir -p %(job_dir)s/.opencode-data %(job_dir)s/.opencode-cache\n"
+            "export OPENCODE_CONFIG=/home/vibeworker/.config/vibedev-opencode/opencode.jsonc\n"
+            "export OPENCODE_CONFIG_DIR=/home/vibeworker/.config/vibedev-opencode\n"
+            "export OPENCODE_DISABLE_AUTOUPDATE=1\n"
+            "export OPENCODE_AUTO_SHARE=0\n"
+            "export OPENCODE_DISABLE_DEFAULT_PLUGINS=1\n"
+            "export OPENCODE_DISABLE_LSP_DOWNLOAD=1\n"
+            "export OPENCODE_DISABLE_CLAUDE_CODE=1\n"
+            "export OPENCODE_DISABLE_MODELS_FETCH=1\n"
+            "export TERM=dumb\n"
+        ) % {"job_dir": job_dir}
+
+    @staticmethod
+    def _is_opencode_command(command: str) -> bool:
+        """Check if command is an OpenCode invocation (not arbitrary shell).
+
+        Allowed patterns:
+        - Commands containing 'opencode run' or 'opencode' binary path
+        - Must NOT contain shell pipes, redirects, command chaining (;, &&, ||)
+          that could inject arbitrary commands after opencode.
+        """
+        import re
+        if not command or not command.strip():
+            return False
+        cmd = command.strip()
+        # Must reference opencode binary
+        if "opencode" not in cmd:
+            return False
+        # Block shell metacharacters that could chain arbitrary commands
+        dangerous = [";", "&&", "||", "|", ">", "<", "$(", "`", "\n"]
+        for ch in dangerous:
+            if ch in cmd:
+                return False
+        return True
+
+    def _check_bwrap_remote(self, ssh_opts, ssh_target) -> dict:
+        """Check bwrap availability on remote worker. Returns evidence dict.
+
+        Returns: {available: bool, path: str, version: str, error: str}
+        Fail-closed: any error returns available=False.
+        """
+        evidence = {"available": False, "path": "", "version": "", "error": ""}
+        try:
+            # Check bwrap binary exists
+            which_result = subprocess.run(
+                ["ssh"] + ssh_opts + [ssh_target,
+                 "command -v bwrap && bwrap --version"],
+                capture_output=True, timeout=10)
+            stdout = which_result.stdout.decode("utf-8", errors="replace").strip()
+            stderr = which_result.stderr.decode("utf-8", errors="replace").strip()
+
+            if which_result.returncode != 0:
+                evidence["error"] = "bwrap_not_found: %s" % stderr[:200]
+                return evidence
+
+            lines = stdout.split(chr(10))
+            evidence["path"] = lines[0].strip() if lines else ""
+            evidence["version"] = lines[1].strip() if len(lines) > 1 else ""
+
+            # Verify bwrap actually works with minimal sandbox
+            test_result = subprocess.run(
+                ["ssh"] + ssh_opts + [ssh_target,
+                 "bwrap --ro-bind /usr /usr --ro-bind /bin /bin "
+                 "--ro-bind /lib /lib --ro-bind /lib64 /lib64 "
+                 "--proc /proc --dev /dev --tmpfs /tmp "
+                 "--unshare-pid --unshare-net --die-with-parent --new-session "
+                 "/bin/bash -lc 'echo bwrap_sandbox_ok'"],
+                capture_output=True, timeout=10)
+            test_stdout = test_result.stdout.decode("utf-8", errors="replace").strip()
+
+            if "bwrap_sandbox_ok" in test_stdout:
+                evidence["available"] = True
+            else:
+                evidence["error"] = "bwrap_test_failed: %s" % (
+                    test_result.stderr.decode("utf-8", errors="replace")[:200])
+
+        except Exception as e:
+            evidence["error"] = "bwrap_check_exception: %s" % str(e)[:200]
+
+        return evidence
+
+    def _build_sandbox_launch_cmd(self, job_script_path, pid_file,
+                                   remote_job_dir, network_allowed=False,
+                                   network_policy="blocked",
+                                   extra_binds=None,
+                                   secret_binds=None):
+        """Build bwrap sandbox launch command.
+
+        Sandbox rules:
+        - /usr, /bin, /lib, /lib64: read-only bind
+        - /proc, /dev: standard binds
+        - /tmp: tmpfs (NOT host /tmp)
+        - remote_job_dir: read-write bind (the ONLY writable path)
+        - --unshare-pid, --unshare-net (unless network_allowed), --die-with-parent, --new-session
+        - PID capture via bwrap exec
+        - extra_binds: additional --bind entries for approved_model_egress (opencode config, secrets)
+        - network_policy: "blocked" (default) or "approved_model_egress" (audit-recorded exception)
+        """
+        # Read-only system paths
+        ro_binds = " ".join([
+            "--ro-bind /usr /usr",
+            "--ro-bind /bin /bin",
+            "--ro-bind /lib /lib",
+            "--ro-bind /lib64 /lib64",
+        ])
+
+        # For network-enabled sandboxes, bind /etc and /run for DNS resolution
+        if network_allowed:
+            ro_binds += " --ro-bind /etc /etc --ro-bind /run /run"
+
+        # Standard mounts
+        std_mounts = "--proc /proc --dev /dev"
+
+        # tmpfs for /tmp (NOT host /tmp)
+        tmpfs = "--tmpfs /tmp"
+
+        # Writable job directory
+        rw_bind = "--bind %s %s" % (
+            _shell_quote(remote_job_dir), _shell_quote(remote_job_dir))
+
+        # Extra binds for approved_model_egress (opencode binary, config, secrets)
+        # V1.18.4.10: secrets are --ro-bind; binary/config are --ro-bind via /usr-style
+        extra_bind_str = ""
+        if extra_binds:
+            for eb in extra_binds:
+                extra_bind_str += " --ro-bind %s %s" % (
+                    _shell_quote(eb), _shell_quote(eb))
+
+        # Secret binds (always --ro-bind, individual files)
+        secret_bind_str = ""
+        if secret_binds:
+            for sb in secret_binds:
+                secret_bind_str += " --ro-bind %s %s" % (
+                    _shell_quote(sb), _shell_quote(sb))
+
+        # Network policy
+        net_flag = "" if network_allowed else "--unshare-net"
+
+        # Process isolation
+        proc_flags = "--unshare-pid --die-with-parent --new-session"
+
+        # Build the full bwrap command
+        # bwrap runs bash which writes PID file then execs the job script
+        bwrap_cmd = (
+            "setsid bwrap %(ro_binds)s %(std_mounts)s %(tmpfs)s "
+            "%(rw_bind)s %(extra_binds)s %(secret_binds)s %(net_flag)s %(proc_flags)s "
+            "/bin/bash -c 'echo $$ > %(pid_file)s; exec bash %(job_script)s' "
+            "</dev/null >/dev/null 2>&1 &"
+        ) % {
+            "ro_binds": ro_binds,
+            "std_mounts": std_mounts,
+            "tmpfs": tmpfs,
+            "rw_bind": rw_bind,
+            "extra_binds": extra_bind_str,
+            "secret_binds": secret_bind_str,
+            "net_flag": net_flag,
+            "proc_flags": proc_flags,
+            "pid_file": _shell_quote(pid_file),
+            "job_script": _shell_quote(job_script_path),
+        }
+
+        config = {
+            "sandbox_enabled": True,
+            "bwrap_path": "/usr/bin/bwrap",
+            "ro_paths": ["/usr", "/bin", "/lib", "/lib64"],
+            "rw_paths": [remote_job_dir],
+            "tmpfs_paths": ["/tmp"],
+            "network_policy": network_policy,
+            "domain_allowlist_enforced": False,
+            "host_network_used": network_allowed,
+            "approved_egress_domains_audit_only": APPROVED_EGRESS_DOMAINS_AUDIT_ONLY if network_allowed else [],
+            "unshare_pid": True,
+            "unshare_net": not network_allowed,
+            "die_with_parent": True,
+            "new_session": True,
+        }
+
+        return bwrap_cmd, config
+
     def execute_job(self, job_id: str, timeout: int = 600) -> dict:
         _check_fatal_safety()  # BLOCK if fatal safety state
 
@@ -1397,13 +2200,74 @@ class JobOrchestrator:
                 ["ssh"] + ssh_opts + [ssh_target, chmod_cmd],
                 capture_output=True, timeout=10)
 
-            # Launch with setsid + PID file capture
-            # setsid runs the script in a new session; PID file captures the session leader PID
-            # Redirects ensure SSH session closes immediately (no timeout)
-            launch_cmd = (
-                "setsid bash -c 'echo $$ > %s; exec bash %s' </dev/null >/dev/null 2>&1 &"
-                % (_shell_quote(pid_file), _shell_quote(job_script_path))
-            )
+            # V1.18.4.5: Sandbox launch with bubblewrap
+            # Check bwrap availability on remote worker
+            bwrap_evidence = self._check_bwrap_remote(ssh_opts, ssh_target)
+
+            if bwrap_evidence["available"]:
+                # Validate network_policy
+                net_validation = self._validate_network_policy(manifest)
+                if not net_validation["ok"]:
+                    manifest = self._transition_state(
+                        manifest, JobState.FAILED.value,
+                        error="network_policy_blocked: %s" % net_validation["reason"])
+                    self._persist_manifest(manifest)
+                    self.claim_store.release_claim(job_id, "FAILED", success=False)
+                    return {"ok": False, "error": manifest.error, "job_id": job_id,
+                            "network_validation": net_validation}
+
+                network_allowed = (manifest.network_policy == "approved_model_egress")
+
+                # For approved_model_egress, bind minimal OpenCode requirements (all --ro-bind)
+                extra_binds = []
+                secret_binds = []
+                if network_allowed:
+                    # Detect OpenCode binary location per node
+                    opencode_bind = "/home/vibeworker/.npm-global"  # 5bao default
+                    detect_cmd = "ls /home/vibeworker/.opencode/bin/opencode 2>/dev/null && echo opencode-local"
+                    detect_result = subprocess.run(
+                        ["ssh"] + ssh_opts + [ssh_target, detect_cmd],
+                        capture_output=True, timeout=5)
+                    if "opencode-local" in detect_result.stdout.decode():
+                        opencode_bind = "/home/vibeworker/.opencode"
+
+                    # Binary and read-only config/data (writable cache uses job-scoped tmp)
+                    # opencode binary and config are --ro-bind (see _build_sandbox_launch_cmd)
+                    # data/cache dirs use job-scoped tmp dirs inside the sandbox
+                    extra_binds = [
+                        opencode_bind,  # opencode binary (ro via bwrap ro-bind)
+                        "/home/vibeworker/.config/vibedev-opencode/opencode.jsonc",  # config file (ro)
+                    ]
+
+                    # Secret files: --ro-bind individual files, NOT the directory
+                    secret_binds = list(OPENCODE_SECRET_FILES)
+
+                    # Record secret bind paths in manifest (NO content)
+                    manifest.secret_bind_paths = secret_binds
+                    manifest.host_network_used = True
+                    manifest.domain_allowlist_enforced = False
+
+                # Use bwrap sandbox
+                launch_cmd, sandbox_config = self._build_sandbox_launch_cmd(
+                    job_script_path, pid_file, manifest.remote_job_dir,
+                    network_allowed=network_allowed,
+                    network_policy=manifest.network_policy,
+                    extra_binds=extra_binds if extra_binds else None,
+                    secret_binds=secret_binds if secret_binds else None)
+                manifest.sandbox_enabled = True
+                manifest.sandbox_config = sandbox_config
+            else:
+                # FAIL-CLOSED: bwrap not available, cannot run without sandbox
+                manifest = self._transition_state(
+                    manifest, JobState.FAILED.value,
+                    error="sandbox_unavailable: %s" % bwrap_evidence.get("error", "unknown"))
+                self._persist_manifest(manifest)
+                self.claim_store.release_claim(job_id, "FAILED", success=False)
+                return {"ok": False, "error": "sandbox_unavailable",
+                        "job_id": job_id,
+                        "bwrap_error": bwrap_evidence.get("error", ""),
+                        "detail": "bwrap not available on worker %s. "
+                                   "Cannot execute without sandbox isolation." % manifest.actual_worker}
             proc = subprocess.Popen(
                 ["ssh"] + ssh_opts + [ssh_target, launch_cmd],
                 stdout=subprocess.PIPE,
@@ -1662,6 +2526,11 @@ class JobOrchestrator:
 
         # Use a wrapper that captures exit code even on failure.
         # 'set -e' is NOT used — we manually capture the exit code.
+        # For approved_model_egress, prepend OpenCode env vars.
+        env_prefix = ""
+        if self._is_opencode_command(command):
+            env_prefix = self._build_opencode_env_prefix(remote_job_dir)
+
         script = (
             "#!/bin/bash\n"
             "# Job: %s\n"
@@ -1672,12 +2541,12 @@ class JobOrchestrator:
             "# Integrity-Digest: %s\n"
             "# WARNING: This is an integrity-bound digest, NOT a cryptographic signature.\n"
             "cd %s\n"
-            "%s >stdout.txt 2>stderr.txt\n"
+            "%s%s >stdout.txt 2>stderr.txt\n"
             "EXIT_CODE=$?\n"
             "echo $EXIT_CODE > .exit_code\n"
             "exit $EXIT_CODE\n"
         ) % (job_id, worker_id, command_sha, base_sha, approval_digest,
-             integrity_digest, _shell_quote(remote_job_dir), command)
+             integrity_digest, _shell_quote(remote_job_dir), env_prefix, command)
 
         return script
 
@@ -2256,6 +3125,44 @@ def _shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+
+
+
+
+
+def _build_integrity_bound_job_script_standalone(
+        job_id, command, remote_job_dir,
+        worker_id="", base_sha="", approval_digest=""):
+    """Standalone version of JobOrchestrator._build_integrity_bound_job_script.
+
+    Builds an integrity-bound job script without requiring an orchestrator instance.
+    Used by test_v1184_real_execution_path.py for real execution-path testing.
+    """
+    command_sha = hashlib.sha256(command.encode("utf-8")).hexdigest()[:16]
+    sig_input = "|".join([
+        job_id, worker_id, command_sha, base_sha, approval_digest,
+    ])
+    integrity_digest = hashlib.sha256(sig_input.encode("utf-8")).hexdigest()[:32]
+
+    lines = [
+        "#!/bin/bash",
+        "# Job: %s" % job_id,
+        "# Worker: %s" % worker_id,
+        "# Command-SHA: %s" % command_sha,
+        "# Base-SHA: %s" % base_sha,
+        "# Approval-Digest: %s" % approval_digest,
+        "# Integrity-Digest: %s" % integrity_digest,
+        "# WARNING: This is an integrity-bound digest, NOT a cryptographic signature.",
+        "cd %s" % _shell_quote(remote_job_dir),
+        "%s >stdout.txt 2>stderr.txt" % command,
+        "EXIT_CODE=$?",
+        "echo $EXIT_CODE > .exit_code",
+        "exit $EXIT_CODE",
+        "",
+    ]
+    return chr(10).join(lines)
+
+
 # ===========================================================================
 # CLI
 # ===========================================================================
@@ -2299,8 +3206,12 @@ def main():
         sys.exit(0 if result["passed"] else 1)
 
     orch = JobOrchestrator()
-    for w in orch.registry.list_workers():
-        orch.registry.set_health(w.worker_id, NodeStatus.ONLINE)
+    # V1.18.4: Real SSH health probes — only set ONLINE on verified probe
+    probe_results = orch.registry.probe_all()
+    for wid, pres in probe_results.items():
+        if pres.get("status") != "ONLINE":
+            print("WARNING: worker %s not reachable: %s" % (
+                wid, pres.get("error", pres.get("stderr", "unknown"))[:100]))
 
     if args.subcommand == "submit":
         m = orch.submit_job(
@@ -2989,9 +3900,126 @@ def run_self_check() -> dict:
         checks.append({"name": "repair_method", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 30: Version is 3.7.0
+    # Check 31: recover_incomplete_repairs - rollback at STARTED
     try:
-        assert __version__ == "3.8.0", "Version must be 3.8.0, got %s" % __version__
+        with tempfile.TemporaryDirectory() as td:
+            cs = ClaimStore(
+                os.path.join(td, "claims.json"),
+                os.path.join(td, "claims.lock"),
+            )
+            # Simulate a journal stuck at STARTED
+            journal_path = Path(td) / "repair-tx-test-0001.journal.json"
+            journal = {
+                "tx_id": "repair-tx-test-0001",
+                "status": "STARTED",
+                "started_at": _now_iso(),
+                "approval_receipt_id": "test-receipt",
+                "operator_id": "test-op",
+                "reason": "test",
+                "target_node": "test-node",
+                "repair_plan_digest": "abc123",
+                "nonce": "test-nonce-value-1234",
+                "old_store_sha256": "old",
+                "new_store_sha256": "new",
+                "candidate_path": "/tmp/fake",
+                "steps_completed": [],
+            }
+            journal_path.write_text(json.dumps(journal, indent=2))
+            # Create a fresh ClaimStore — should auto-recover
+            cs2 = ClaimStore(
+                os.path.join(td, "claims.json"),
+                os.path.join(td, "claims.lock"),
+            )
+            # Journal should be cleaned up (ROLLED_BACK then cleaned)
+            # Check that latch is cleared
+            assert not cs2.is_latched(), "Latch should be cleared after rollback"
+            checks.append({"name": "repair_recovery_rollback", "passed": True})
+    except Exception as e:
+        checks.append({"name": "repair_recovery_rollback", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 32: reconcile_nonce_ledger
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            ledger_path = Path(td) / "nonce_ledger.json"
+            ledger_lock = Path(td) / "nonce_ledger.lock"
+            ledger = {
+                "consumed": {
+                    "nonce-1": {"receipt_id": "r1", "consumed_at": _now_iso()},
+                    "nonce-2": {"receipt_id": "r2", "consumed_at": _now_iso()},
+                }
+            }
+            ledger_path.write_text(json.dumps(ledger, indent=2))
+
+            # Use global keyword since we're in the same module as ClaimStore
+            # (import vibe_job_orchestrator would create a second copy when run from CLI)
+            global NONCE_LEDGER_PATH, NONCE_LEDGER_LOCK
+            orig_ledger = NONCE_LEDGER_PATH
+            orig_lock = NONCE_LEDGER_LOCK
+            NONCE_LEDGER_PATH = ledger_path
+            NONCE_LEDGER_LOCK = ledger_lock
+            try:
+                cs = ClaimStore(
+                    os.path.join(td, "claims.json"),
+                    os.path.join(td, "claims.lock"),
+                )
+                result = cs.reconcile_nonce_ledger()
+                status_ok = result.get("status") == "reconciled"
+                total_ok = result.get("total_nonces") == 2
+                dupes_ok = result.get("duplicates_removed") == 0
+                if status_ok and total_ok and dupes_ok:
+                    checks.append({"name": "nonce_ledger_reconcile", "passed": True})
+                else:
+                    checks.append({"name": "nonce_ledger_reconcile", "passed": False,
+                                   "error": "status=%s total=%s dupes=%s" % (
+                                       result.get("status"), result.get("total_nonces"),
+                                       result.get("duplicates_removed"))})
+                    passed = False
+            finally:
+                NONCE_LEDGER_PATH = orig_ledger
+                NONCE_LEDGER_LOCK = orig_lock
+    except Exception as e:
+        checks.append({"name": "nonce_ledger_reconcile", "passed": False, "error": repr(e)})
+        passed = False
+
+    # Check 33: Fresh Registry has UNKNOWN workers — schedule BLOCKS
+    try:
+        orch = _make_test_orchestrator()
+        # Workers default to UNKNOWN — no set_health call
+        for w in orch.registry.list_workers():
+            assert w.health_status == "UNKNOWN", \
+                "Fresh worker %s should be UNKNOWN, got %s" % (w.worker_id, w.health_status)
+        # Schedule should BLOCK with UNKNOWN workers
+        m = orch.submit_job("linux-worker", "echo should_block")
+        assert m["state"] == "BLOCKED", \
+            "UNKNOWN workers should BLOCK, got %s" % m.get("state")
+        checks.append({"name": "unknown_workers_block_schedule", "passed": True})
+    except Exception as e:
+        checks.append({"name": "unknown_workers_block_schedule", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 34: Active-active scheduling — explicit ONLINE then both workers get jobs
+    try:
+        orch = _make_test_orchestrator()
+        # V1.18.4: Must explicitly set ONLINE (simulates verified health probe)
+        for w in orch.registry.list_workers():
+            orch.registry.set_health(w.worker_id, NodeStatus.ONLINE)
+        m1 = orch.submit_job("linux-worker", "echo job1")
+        m2 = orch.submit_job("linux-worker", "echo job2")
+        w1 = m1.get("actual_worker")
+        w2 = m2.get("actual_worker")
+        assert w1 in ("5bao", "9bao"), "Job 1 must go to 5bao or 9bao"
+        assert w2 in ("5bao", "9bao"), "Job 2 must go to 5bao or 9bao"
+        assert m1["state"] == "CLAIMED"
+        assert m2["state"] == "CLAIMED"
+        checks.append({"name": "active_active_scheduling", "passed": True})
+    except Exception as e:
+        checks.append({"name": "active_active_scheduling", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 30: Version is 3.9.0
+    try:
+        assert __version__ == "3.9.0", "Version must be 3.9.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})
