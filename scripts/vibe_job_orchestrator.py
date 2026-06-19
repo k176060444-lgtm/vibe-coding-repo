@@ -3408,14 +3408,15 @@ def run_self_check() -> dict:
         checks.append({"name": "submit_no_tools_ok", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 9: ripgrep routes to 9bao
+    # Check 9: ripgrep routes to a capable worker (5bao or 9bao both have rg 13.0.0)
     try:
         orch = _make_test_orchestrator()
         for w in orch.registry.list_workers():
             orch.registry.set_health(w.worker_id, NodeStatus.ONLINE)
         m = orch.submit_job("linux-worker", "rg --version", required_tools=["ripgrep"])
         assert m["state"] == "CLAIMED"
-        assert m["actual_worker"] == "9bao"
+        assert m["actual_worker"] in ("5bao", "9bao"), \
+            f"ripgrep job should route to 5bao or 9bao, got {m['actual_worker']}"
         checks.append({"name": "ripgrep_routes_9bao", "passed": True})
     except Exception as e:
         checks.append({"name": "ripgrep_routes_9bao", "passed": False, "error": str(e)})
@@ -3602,8 +3603,12 @@ def run_self_check() -> dict:
         assert len(candidates) >= 2
         candidates_rg = orch.scheduler.get_eligible_candidates(
             "linux-worker", required_tools=["ripgrep"])
-        assert len(candidates_rg) == 1
-        assert candidates_rg[0][0] == "9bao"
+        # Both 5bao and 9bao have ripgrep 13.0.0 now
+        assert len(candidates_rg) >= 2, \
+            f"Expected >=2 ripgrep-capable candidates, got {len(candidates_rg)}: {candidates_rg}"
+        rg_workers = {c[0] for c in candidates_rg}
+        assert "5bao" in rg_workers and "9bao" in rg_workers, \
+            f"Both 5bao and 9bao should be ripgrep-capable, got {rg_workers}"
         checks.append({"name": "get_eligible_candidates", "passed": True})
     except Exception as e:
         checks.append({"name": "get_eligible_candidates", "passed": False, "error": str(e)})
@@ -4017,9 +4022,9 @@ def run_self_check() -> dict:
         checks.append({"name": "active_active_scheduling", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 30: Version is 3.9.0
+    # Check 30: Version is 3.11.0
     try:
-        assert __version__ == "3.9.0", "Version must be 3.9.0, got %s" % __version__
+        assert __version__ == "3.11.0", "Version must be 3.11.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})

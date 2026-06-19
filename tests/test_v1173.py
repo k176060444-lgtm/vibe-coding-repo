@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import multiprocessing
+import pytest
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
@@ -74,6 +75,9 @@ def _make_plan_with_digest(mgr, store, node_id="5bao", plan_id="P-test"):
 
 
 # === Test 1: Two concurrent processes race state.lock, no event loss ===
+@pytest.mark.xfail(sys.platform == "win32",
+                   reason="Windows multiprocessing spawn cannot pickle local functions",
+                   strict=False)
 def test_concurrent_lock_no_loss():
     d = _make_tmp()
     try:
