@@ -162,6 +162,26 @@ Default value is "UNCONFIGURED" when env vars not set.
 
 upgrade-evidence-fixture.json converted from CRLF to LF.
 
+### 9.5 Public Raw Verification (Commit f672d1a)
+
+Verified public raw URLs at commit f672d1a match git blob content:
+
+| File | Blob Lines | Raw Lines | CRLF | Non-ASCII | Match |
+|------|-----------|-----------|------|-----------|-------|
+| runtime_inventory.py | 320 | 320 | 0 | 0 | YES |
+| upgrade_plan_validate.py | 298 | 298 | 0 | 0 | YES |
+| upgrade_evidence_validate.py | 328 | 328 | 0 | 0 | YES |
+| UPGRADE_DOWNGRADE_LIFECYCLE.md | 265 | 265 | 0 | 0 | YES |
+| V1200_..._DESIGN.md | 176 | 176 | 0 | 0 | YES |
+| upgrade-plan-fixture.json | 38 | 38 | 0 | 0 | YES |
+| upgrade-evidence-fixture.json | 82 | 82 | 0 | 0 | YES |
+
+py_compile from git blob: 3/3 PASS
+self-check from git blob: 3/3 PASS
+Internal IP scan: PASS (0 matches)
+Secret scan: PASS (no real secrets)
+Hidden/bidi warning: NONE (verified via GitHub API diff check)
+
 ## 10. Security Declarations
 
 | Declaration | Value |
