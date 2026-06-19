@@ -1,0 +1,648 @@
+{
+  "fixture_version": "1.0.0",
+  "created": "2026-06-19T14:00:00Z",
+  "description": "MODEL_LEDGER enforcement gate test scenarios",
+  "scenarios": [
+    {
+      "id": "scenario-01-valid-full-report",
+      "description": "Valid report: 3 live calls + 2 fixture/mock, all ledgers present",
+      "expected_gate_pass": true,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-001",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable_opencode_cli",
+            "duration": "12s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "binary_ok": true,
+            "final_status": "PASS"
+          },
+          {
+            "node": "9bao",
+            "job_id": "e2e-002",
+            "role": "reviewer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable_opencode_cli",
+            "duration": "15s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "binary_ok": true,
+            "final_status": "PASS"
+          },
+          {
+            "node": "5bao",
+            "job_id": "e2e-004",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable_opencode_cli",
+            "duration": "19s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "binary_ok": true,
+            "final_status": "PASS"
+          },
+          {
+            "node": "windows",
+            "job_id": "e2e-003",
+            "role": "smoke",
+            "planned_model": "N/A",
+            "actual_model": "N/A",
+            "provider": "N/A",
+            "opencode_provider_alias": "N/A",
+            "fallback_used": false,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 0,
+            "token_usage_or_unavailable_reason": "no_model_call_fixture_validation",
+            "duration": "2s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "binary_ok": true,
+            "final_status": "PASS"
+          },
+          {
+            "node": "windows",
+            "job_id": "e2e-005",
+            "role": "smoke",
+            "planned_model": "N/A",
+            "actual_model": "N/A",
+            "provider": "N/A",
+            "opencode_provider_alias": "N/A",
+            "fallback_used": false,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 0,
+            "token_usage_or_unavailable_reason": "no_model_call_cooldown_validation",
+            "duration": "1s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "binary_ok": true,
+            "final_status": "PASS"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao",
+            "opencode_version": "1.17.8",
+            "models_used_this_run": [
+              "deepseek-v4-flash-free"
+            ],
+            "total_model_calls": 2,
+            "successful_model_calls": 2,
+            "failed_model_calls": 0,
+            "fallback_count": 0,
+            "rate_limit_count": 0,
+            "cooldown_state": "NORMAL"
+          },
+          {
+            "node": "9bao",
+            "opencode_version": "1.17.8",
+            "models_used_this_run": [
+              "deepseek-v4-flash-free"
+            ],
+            "total_model_calls": 1,
+            "successful_model_calls": 1,
+            "failed_model_calls": 0,
+            "fallback_count": 0,
+            "rate_limit_count": 0,
+            "cooldown_state": "NORMAL"
+          }
+        ],
+        "RATE_LIMIT_EVENT_LEDGER": [],
+        "FALLBACK_DECISION_LEDGER": [],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao",
+            "model": "opencode/deepseek-v4-flash-free",
+            "consecutive_rate_limits": 0,
+            "current_cooldown_seconds": 0,
+            "cooldown_action": "NORMAL"
+          },
+          {
+            "node": "9bao",
+            "model": "opencode/deepseek-v4-flash-free",
+            "consecutive_rate_limits": 0,
+            "current_cooldown_seconds": 0,
+            "cooldown_action": "NORMAL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-02-valid-no-model-call",
+      "description": "Valid report with only fixture/mock jobs (no live model calls)",
+      "expected_gate_pass": true,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "windows",
+            "job_id": "e2e-003",
+            "role": "smoke",
+            "planned_model": "N/A",
+            "actual_model": "N/A",
+            "provider": "N/A",
+            "opencode_provider_alias": "N/A",
+            "fallback_used": false,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 0,
+            "token_usage_or_unavailable_reason": "no_model_call_fixture_only",
+            "duration": "2s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "binary_ok": true,
+            "final_status": "PASS"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "windows",
+            "opencode_version": "N/A",
+            "models_used_this_run": [],
+            "total_model_calls": 0,
+            "successful_model_calls": 0,
+            "failed_model_calls": 0,
+            "fallback_count": 0,
+            "rate_limit_count": 0,
+            "cooldown_state": "N/A"
+          }
+        ],
+        "RATE_LIMIT_EVENT_LEDGER": [],
+        "FALLBACK_DECISION_LEDGER": [],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "windows",
+            "model": "N/A",
+            "consecutive_rate_limits": 0,
+            "current_cooldown_seconds": 0,
+            "cooldown_action": "NOT_APPLICABLE"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-03-missing-model-ledger",
+      "description": "PASS status but MODEL_LEDGER missing -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-04-missing-node-model-summary",
+      "description": "PASS status but NODE_MODEL_SUMMARY missing -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-001",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable",
+            "duration": "12s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "final_status": "PASS"
+          }
+        ],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-05-rate-limit-without-ledger",
+      "description": "rate_limit=true but no RATE_LIMIT_EVENT_LEDGER -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "9bao",
+            "job_id": "e2e-002",
+            "role": "smoke",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": null,
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "rate_limited",
+            "duration": "90s",
+            "exit_code": 124,
+            "rate_limit": true,
+            "final_status": "RATE_LIMITED"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "9bao"
+          }
+        ],
+        "RATE_LIMIT_EVENT_LEDGER": [],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "9bao"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-06-fallback-without-fields",
+      "description": "fallback_used=true but missing fallback_from/to/reason -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-004",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "mimo-v2.5-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": true,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable",
+            "duration": "8s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "final_status": "PASS"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-07-token-usage-forbidden-values",
+      "description": "token_usage is 'unknown' -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-001",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unknown",
+            "duration": "12s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "final_status": "PASS"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-08-rate-limit-as-binary-failure",
+      "description": "Rate limit (exit 124) classified as BIN-FAIL -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "9bao",
+            "job_id": "e2e-002",
+            "role": "smoke",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": null,
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "rate_limited",
+            "duration": "90s",
+            "exit_code": 124,
+            "rate_limit": true,
+            "final_status": "RATE_LIMITED"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "9bao"
+          }
+        ],
+        "RATE_LIMIT_EVENT_LEDGER": [
+          {
+            "timestamp": "2026-06-19T14:00:00Z",
+            "node": "9bao",
+            "affected_model": "opencode/deepseek-v4-flash-free",
+            "provider": "opencode",
+            "error_type": "BIN-FAIL",
+            "exit_code": 124,
+            "binary_ok": true,
+            "rollback_required": true,
+            "cooldown_action": "cooldown_30s",
+            "fallback_action": "none"
+          }
+        ],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "9bao"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-09-incomplete-ledger-entry",
+      "description": "PASS report but MODEL_LEDGER entry missing required fields -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-001"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-10-valid-with-fallback",
+      "description": "Valid report with fallback properly documented",
+      "expected_gate_pass": true,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-004",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "mimo-v2.5-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": true,
+            "fallback_from": "opencode/deepseek-v4-flash-free",
+            "fallback_to": "opencode/mimo-v2.5-free",
+            "fallback_reason": "provider_rate_limit_on_planned_model",
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable_opencode_cli",
+            "duration": "8s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "final_status": "PASS"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao",
+            "opencode_version": "1.17.8",
+            "models_used_this_run": [
+              "mimo-v2.5-free"
+            ],
+            "total_model_calls": 1,
+            "successful_model_calls": 1,
+            "failed_model_calls": 0,
+            "fallback_count": 1,
+            "rate_limit_count": 0,
+            "cooldown_state": "NORMAL"
+          }
+        ],
+        "RATE_LIMIT_EVENT_LEDGER": [],
+        "FALLBACK_DECISION_LEDGER": [
+          {
+            "timestamp": "2026-06-19T14:00:00Z",
+            "job_id": "e2e-004",
+            "node": "5bao",
+            "fallback_from": "opencode/deepseek-v4-flash-free",
+            "fallback_to": "opencode/mimo-v2.5-free",
+            "fallback_reason": "provider_rate_limit_on_planned_model",
+            "fallback_chain_position": 1,
+            "operator_approval_required": false,
+            "final_status": "PASS"
+          }
+        ],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao",
+            "model": "opencode/deepseek-v4-flash-free",
+            "consecutive_rate_limits": 0,
+            "current_cooldown_seconds": 0,
+            "cooldown_action": "NORMAL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-11-missing-cooldown-summary",
+      "description": "PASS status but COOLDOWN_STATE_SUMMARY missing and no reason -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-001",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable",
+            "duration": "12s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "final_status": "PASS"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-12-missing-node-summary-fields",
+      "description": "MODEL_LEDGER complete but NODE_MODEL_SUMMARY only has node -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-001",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable_opencode_cli",
+            "duration": "12s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "binary_ok": true,
+            "final_status": "PASS"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ],
+        "RATE_LIMIT_EVENT_LEDGER": [],
+        "FALLBACK_DECISION_LEDGER": [],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao",
+            "model": "opencode/deepseek-v4-flash-free",
+            "consecutive_rate_limits": 0,
+            "current_cooldown_seconds": 0,
+            "cooldown_action": "NORMAL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-13-missing-cooldown-summary-fields",
+      "description": "MODEL_LEDGER + NODE_MODEL_SUMMARY complete but COOLDOWN_STATE_SUMMARY only has node -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-001",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable_opencode_cli",
+            "duration": "12s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "binary_ok": true,
+            "final_status": "PASS"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao",
+            "opencode_version": "1.17.8",
+            "models_used_this_run": [
+              "deepseek-v4-flash-free"
+            ],
+            "total_model_calls": 1,
+            "successful_model_calls": 1,
+            "failed_model_calls": 0,
+            "fallback_count": 0,
+            "rate_limit_count": 0,
+            "cooldown_state": "NORMAL"
+          }
+        ],
+        "RATE_LIMIT_EVENT_LEDGER": [],
+        "FALLBACK_DECISION_LEDGER": [],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ]
+      }
+    }
+  ]
+}
