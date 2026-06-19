@@ -27,9 +27,11 @@
 - Total jobs in batch: 4
 - Jobs on 5bao: 2
 - Jobs on 9bao: 2
-- Models used: deepseek-v4-flash (2 jobs), MiniMax-M3 (2 jobs)
-- Fallback events: 0
-- Average duration: ~45s per job
+- Models attempted: deepseek-v4-flash (2 jobs), MiniMax-M3 (2 jobs)
+- Models actually executed: deepseek-v4-flash (4 executions)
+- Fallback events: 2 (MiniMax-M3 -> deepseek-v4-flash, model_behavior_fallback)
+- Fallback type: manual, after verifying MiniMax-M3 produced thinking-only output
+- Average duration: ~14s per job
 - All tests passed: yes
 
 ## Failure Handling
