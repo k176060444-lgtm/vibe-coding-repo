@@ -10,10 +10,10 @@ Every model used by the VibeDev cluster is classified into exactly one tier.
 
 | Tier | Description | Smoke Policy | Rate-Limit Expectation |
 |------|-------------|-------------|----------------------|
-| `free-tier` | Provider-hosted free models (e.g. `opencode/deepseek-v4-flash-free`, `opencode/mimo-v2.5-free`) | Low frequency only; interval >= 30s between calls | Expected; provider may throttle at any time |
+| `free-tier` | Provider-hosted free models | Low frequency; interval >= 30s | Expected; provider may throttle |
 | `paid` | Paid API endpoints with explicit billing | Standard frequency | Rare; indicates quota exhaustion |
-| `quota-stable` | Models with confirmed stable quota (verified over >= 5 consecutive calls without rate limit) | Standard frequency | Unexpected; investigate provider status |
-| `quarantined` | Models blocked due to persistent failures (e.g. `ark-code-latest` with `key_format_incorrect`) | BLOCKED | N/A |
+| `quota-stable` | Models with confirmed stable quota (>= 5 consecutive PASS) | Standard frequency | Unexpected; investigate |
+| `quarantined` | Models blocked due to persistent failures | BLOCKED | N/A |
 
 ### Tier Assignment Rules
 
@@ -30,7 +30,7 @@ All provider failures are classified into exactly one category.
 |----------|------|-------------|-----------------|
 | `provider_availability_degraded_transient` | `RL-TRANSIENT` | Provider-side rate limit; binary and config are correct | NO |
 | `model_quota_exhausted` | `RL-QUOTA` | Paid model quota exceeded | NO |
-| `provider_auth_error` | `AUTH-ERR` | Invalid credentials, revoked key, or permission denied | NO (credential issue) |
+| `provider_auth_error` | `AUTH-ERR` | Invalid credentials, revoked key, or permission denied | NO |
 | `binary_failure` | `BIN-FAIL` | OpenCode binary crash, segfault, or path mismatch | YES |
 | `provider_unavailable` | `PROV-UNAVAIL` | Provider endpoint unreachable (DNS, network, 5xx) | NO |
 | `unknown_error` | `UNKNOWN` | Unclassified failure | INVESTIGATE |
@@ -58,8 +58,7 @@ All provider failures are classified into exactly one category.
 
 ```
 NORMAL -> RATE_LIMITED_1 (30s) -> RATE_LIMITED_2 (120s) -> RATE_LIMITED_3 (300s) -> QUARANTINED
-                                                                                       |
-RECOVERY (5 consecutive PASS) <-------------------------------------------------------+
+RECOVERY (5 consecutive PASS) <--------------------------------------------------------+
 ```
 
 ## 4. Fallback Rules
@@ -135,7 +134,7 @@ When a node experiences rate limit:
 
 ### Provider Isolation
 
-- Different providers (e.g. `opencode` vs `deepseek`) have independent rate limits.
+- Different providers have independent rate limits.
 - Rate limit on provider A does not affect provider B.
 - Node routing considers provider independence.
 
@@ -170,7 +169,7 @@ When a node experiences rate limit:
 | `node` | string | YES |
 | `opencode_version` | string | YES |
 | `active_opencode_path` | string | YES |
-| `models_used_this_run` | list[string] | YES |
+| `models_used_this_run` | list | YES |
 | `total_model_calls` | integer | YES |
 | `successful_model_calls` | integer | YES |
 | `failed_model_calls` | integer | YES |
@@ -186,7 +185,7 @@ When a node experiences rate limit:
 | `node` | string | YES |
 | `affected_model` | string | YES |
 | `provider` | string | YES |
-| `error_type` | string | YES (one of the classification codes) |
+| `error_type` | string | YES |
 | `exit_code` | integer | YES |
 | `binary_ok` | boolean | YES |
 | `rollback_required` | boolean | YES |
@@ -195,7 +194,7 @@ When a node experiences rate limit:
 
 ## 8. V1.20.3 Lessons Applied
 
-- 9bao rate limit on `opencode/deepseek-v4-flash-free` was correctly classified as `provider_availability_degraded_transient`.
+- 9bao rate limit on opencode/deepseek-v4-flash-free was correctly classified as provider_availability_degraded_transient.
 - Binary was confirmed OK (v1.17.8, session created, model resolved).
 - Rollback was NOT triggered (correct behavior).
 - High-frequency smoke on free-tier models must be spaced >= 30s apart.

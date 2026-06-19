@@ -19,7 +19,7 @@ Base SHA: c14d03f8c601eb945871abc58131b492915ead5c
 ## Policy Coverage
 
 1. Model Tiers: free-tier / paid / quota-stable / quarantined
-2. Rate-Limit Classification: 6 categories (RL-TRANSIENT, RL-QUOTA, AUTH-ERR, BIN-FAIL, PROV-UNAVAIL, UNKNOWN)
+2. Rate-Limit Classification: 6 categories
 3. Cooldown Rules: 30s / 120s / 300s escalation with recovery path
 4. Fallback Rules: full chain recorded in MODEL_LEDGER
 5. Rollback Rules: rate limit does NOT trigger binary rollback
@@ -49,13 +49,6 @@ Base SHA: c14d03f8c601eb945871abc58131b492915ead5c
 | opencode/north-mini-code-free | free-tier | |
 | opencode/big-pickle | free-tier | |
 | ark-code-latest | quarantined | key_format_incorrect |
-
-## V1.20.3 Lessons Incorporated
-
-- 9bao rate limit event correctly classified as provider_availability_degraded_transient
-- Binary confirmed OK (session created, model resolved, only API layer rejected)
-- Rollback correctly NOT triggered
-- High-frequency smoke spacing rule: >= 30s for free-tier models
 
 ## Safety Declarations
 

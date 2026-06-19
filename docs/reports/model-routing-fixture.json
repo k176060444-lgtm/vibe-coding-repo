@@ -60,8 +60,7 @@
       "duration_seconds": 5,
       "rate_limit": false,
       "fallback_used": false,
-      "expected_final_status": "PASS",
-      "validation_rule": "planned_model_providersuffix_must_match_actual_model"
+      "expected_final_status": "PASS"
     },
     {
       "id": "scenario-04-fallback-occurred",
@@ -100,8 +99,7 @@
       "fallback_from": null,
       "fallback_to": null,
       "fallback_reason": null,
-      "expected_final_status": "PASS",
-      "validation_rule": "when_fallback_used_is_false_fallback_fields_must_be_null"
+      "expected_final_status": "PASS"
     },
     {
       "id": "scenario-06-binary-failure-vs-rate-limit",
@@ -120,8 +118,7 @@
       "expected_final_status": "FAIL",
       "expected_error_type": "BIN-FAIL",
       "expected_binary_ok": false,
-      "expected_rollback_required": true,
-      "validation_rule": "binary_failure_must_not_be_classified_as_rate_limit"
+      "expected_rollback_required": true
     },
     {
       "id": "scenario-07-auth-error",
