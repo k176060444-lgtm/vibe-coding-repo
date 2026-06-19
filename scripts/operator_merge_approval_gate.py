@@ -18,6 +18,7 @@ __version__ = "1.0.0"
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,7 +50,8 @@ DEFAULT_EXPIRY_HOURS = 72
 
 def validate_approval(approval: dict, expected_pr: int = None,
                       expected_head: str = None, expected_base: str = None,
-                      expiry_hours: int = DEFAULT_EXPIRY_HOURS) -> dict:
+                      expiry_hours: int = DEFAULT_EXPIRY_HOURS,
+                      merge_method_requested: str = None) -> dict:
     """Validate an operator merge approval record.
 
     Returns:
@@ -102,11 +104,26 @@ def validate_approval(approval: dict, expected_pr: int = None,
     method = str(approval.get("merge_method_allowed", "")).lower()
     if method not in VALID_MERGE_METHODS:
         errors.append(f"merge_method_allowed is '{method}', expected one of {VALID_MERGE_METHODS}")
+    elif merge_method_requested is not None:
+        requested = str(merge_method_requested).lower()
+        if method == "any":
+            pass  # "any" allows all methods
+        elif method != requested:
+            errors.append(f"merge_method_allowed='{method}' does not permit requested '{requested}'")
 
     # Check approval_scope allows merge
     scope = str(approval.get("approval_scope", "")).lower()
     if scope not in VALID_MERGE_SCOPES:
         errors.append(f"approval_scope is '{scope}', does not include merge permission")
+
+    # Validate SHA format: must be full 40-char hex
+    sha_re = re.compile(r'^[0-9a-fA-F]{40}$')
+    approved_head_raw = str(approval.get("approved_head_sha", ""))
+    approved_base_raw = str(approval.get("approved_base_sha", ""))
+    if not sha_re.match(approved_head_raw):
+        errors.append(f"approved_head_sha is not a valid 40-char hex SHA: got {len(approved_head_raw)} chars")
+    if not sha_re.match(approved_base_raw):
+        errors.append(f"approved_base_sha is not a valid 40-char hex SHA: got {len(approved_base_raw)} chars")
 
     # Check PR number match
     if expected_pr is not None:
@@ -117,17 +134,15 @@ def validate_approval(approval: dict, expected_pr: int = None,
         if pr_num != expected_pr:
             errors.append(f"pr_number mismatch: approval={pr_num}, expected={expected_pr}")
 
-    # Check head SHA match
-    if expected_head is not None:
-        approved_head = str(approval.get("approved_head_sha", ""))
-        if not approved_head.startswith(expected_head[:7]) and not expected_head.startswith(approved_head[:7]):
-            errors.append(f"head SHA mismatch: approval={approved_head[:12]}, expected={expected_head[:12]}")
+    # Check head SHA exact match (full 40-char)
+    if expected_head is not None and sha_re.match(approved_head_raw):
+        if approved_head_raw.lower() != expected_head.lower():
+            errors.append(f"head SHA mismatch: approval={approved_head_raw[:12]}..., expected={expected_head[:12]}...")
 
-    # Check base SHA match
-    if expected_base is not None:
-        approved_base = str(approval.get("approved_base_sha", ""))
-        if not approved_base.startswith(expected_base[:7]) and not expected_base.startswith(approved_base[:7]):
-            errors.append(f"base SHA mismatch: approval={approved_base[:12]}, expected={expected_base[:12]}")
+    # Check base SHA exact match (full 40-char)
+    if expected_base is not None and sha_re.match(approved_base_raw):
+        if approved_base_raw.lower() != expected_base.lower():
+            errors.append(f"base SHA mismatch: approval={approved_base_raw[:12]}..., expected={expected_base[:12]}...")
 
     # Check expiry
     try:
@@ -248,6 +263,41 @@ def self_check() -> dict:
             "expected_head": "8dfcedf9f9509069650df6642ec639421558a08e",
             "expected_base": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
         },
+        {
+            "id": "oa-13-short-head-sha",
+            "description": "short head SHA (7 chars) -> BLOCKED",
+            "approval": {**_make_valid(), "approved_head_sha": "8dfcedf"},
+            "expected": "BLOCKED",
+        },
+        {
+            "id": "oa-14-short-base-sha",
+            "description": "short base SHA (7 chars) -> BLOCKED",
+            "approval": {**_make_valid(), "approved_base_sha": "b3a59f9"},
+            "expected": "BLOCKED",
+        },
+        {
+            "id": "oa-15-non-hex-sha",
+            "description": "non-hex head SHA -> BLOCKED",
+            "approval": {**_make_valid(), "approved_head_sha": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"},
+            "expected": "BLOCKED",
+        },
+        {
+            "id": "oa-16-merge-method-mismatch",
+            "description": "allowed=merge requested=squash -> BLOCKED",
+            "approval": _make_valid(),
+            "expected": "BLOCKED",
+            "merge_method_requested": "squash",
+        },
+        {
+            "id": "oa-17-merge-method-any",
+            "description": "allowed=any requested=rebase -> APPROVED",
+            "approval": {**_make_valid(), "merge_method_allowed": "any"},
+            "expected": "APPROVED",
+            "expected_pr": 174,
+            "expected_head": "8dfcedf9f9509069650df6642ec639421558a08e",
+            "expected_base": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+            "merge_method_requested": "rebase",
+        },
     ]
 
     results = []
@@ -258,6 +308,7 @@ def self_check() -> dict:
             expected_pr=scenario.get("expected_pr"),
             expected_head=scenario.get("expected_head"),
             expected_base=scenario.get("expected_base"),
+            merge_method_requested=scenario.get("merge_method_requested"),
         )
         match = r["result"] == scenario["expected"]
         status = "PASS" if match else "FAIL"
@@ -289,6 +340,7 @@ def main():
     parser.add_argument("--pr", type=int, help="Expected PR number")
     parser.add_argument("--head", help="Expected head SHA")
     parser.add_argument("--base", help="Expected base SHA")
+    parser.add_argument("--merge-method", default=None, help="Requested merge method (merge/squash/rebase)")
     parser.add_argument("--expiry-hours", type=int, default=DEFAULT_EXPIRY_HOURS,
                         help=f"Approval expiry hours (default: {DEFAULT_EXPIRY_HOURS})")
     parser.add_argument("--json", action="store_true", help="JSON output")
@@ -335,6 +387,7 @@ def main():
                 expected_head=args.head,
                 expected_base=args.base,
                 expiry_hours=args.expiry_hours,
+                merge_method_requested=args.merge_method,
             )
 
         if args.json:

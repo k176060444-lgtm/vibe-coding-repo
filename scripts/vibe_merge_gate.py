@@ -351,9 +351,13 @@ def run_gate(args):
         blockers.append('Operator merge approval gate UNAVAILABLE: cannot validate merge approval')
     else:
         approval_file = getattr(args, 'approval_file', None)
+        merge_method = getattr(args, 'merge_method', None)
         if not approval_file:
             operator_approval_result = {'checked': True, 'result': 'BLOCKED', 'errors': ['no --approval-file provided']}
             blockers.append('Operator merge approval FAIL: no --approval-file provided')
+        elif not merge_method:
+            operator_approval_result = {'checked': True, 'result': 'BLOCKED', 'errors': ['no --merge-method provided']}
+            blockers.append('Operator merge approval FAIL: no --merge-method provided')
         else:
             af_path = Path(approval_file)
             if not af_path.exists():
@@ -368,8 +372,10 @@ def run_gate(args):
                     expected_pr = getattr(args, 'pr', None)
                     expected_head = getattr(args, 'expected_head_sha', None)
                     expected_base = getattr(args, 'expected_base_sha', None)
+                    merge_method = getattr(args, 'merge_method', None)
                     operator_approval_result = operator_validate_approval(
-                        af, expected_pr=expected_pr, expected_head=expected_head, expected_base=expected_base)
+                        af, expected_pr=expected_pr, expected_head=expected_head, expected_base=expected_base,
+                        merge_method_requested=merge_method)
                     if operator_approval_result['result'] != 'APPROVED':
                         errs = operator_approval_result.get('errors', [])
                         blockers.append('Operator merge approval FAIL: ' + '; '.join(errs[:3]))
@@ -541,6 +547,11 @@ def build_parser():
         "--approval-file",
         default=None,
         help="Path to operator merge approval JSON (required for merge readiness).",
+    )
+    parser.add_argument(
+        "--merge-method",
+        default=None,
+        help="Requested merge method (merge/squash/rebase). Required for approval validation.",
     )
     parser.add_argument(
         "--json",
