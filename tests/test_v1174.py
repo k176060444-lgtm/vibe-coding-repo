@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import multiprocessing
+import pytest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -362,6 +363,9 @@ def test_adopt_with_valid_plan():
 
 
 # === Test 17: Concurrent lock no loss ===
+@pytest.mark.xfail(sys.platform == "win32",
+                   reason="Windows multiprocessing spawn cannot pickle local functions",
+                   strict=False)
 def test_concurrent_lock_no_loss():
     d = _make_tmp()
     try:
@@ -647,7 +651,7 @@ def test_orchestrator_exists():
     """JobOrchestrator module imports and class instantiates."""
     orch = JobOrchestrator()
     assert orch is not None
-    assert orch_version in ("1.0.0", "2.0.0", "2.1.0", "3.0.0", "3.1.0", "3.2.0", "3.3.0", "3.4.0", "3.5.0", "3.6.0", "3.7.0", "3.8.0", "3.9.0", "3.10.0")
+    assert orch_version in ("1.0.0", "2.0.0", "2.1.0", "3.0.0", "3.1.0", "3.2.0", "3.3.0", "3.4.0", "3.5.0", "3.6.0", "3.7.0", "3.8.0", "3.9.0", "3.10.0", "3.11.0")
     assert wo_version == "1.0.0"
 
 
