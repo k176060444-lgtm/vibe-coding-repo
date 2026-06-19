@@ -194,3 +194,4 @@ Hidden/bidi warning: NONE (verified via GitHub API diff check)
 | provider_env_modified | FALSE |
 | force_push | FALSE |
 | auto_merge | FALSE |
+<!-- raw-rewrite-verified: 2026-06-19T10:51:12Z -->
