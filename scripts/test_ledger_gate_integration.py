@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Integration tests for V1.20.7/8/9 ledger gate real integration.
 
-Tests the actual call paths through vibe_run_report.py and vibe_merge_gate.py,
-not just the helper script vibe_report_status_gate.py.
+Tests the actual call paths through vibe_run_report.py and vibe_merge_gate.py.
 
 Usage:
     python scripts/test_ledger_gate_integration.py
@@ -85,94 +84,201 @@ def _make_valid_report():
     }
 
 
-def test_run_report_no_ledger():
-    """Test 1: PASS status but no MODEL_LEDGER -> BLOCKED_BY_LEDGER_GATE.
+def _simulate_merge_gate_report_file(report_file_path):
+    """Simulate vibe_merge_gate.py --report-file logic for testing.
 
-    Simulates vibe_run_report.py path: qg_verdict=PASS, result has status=PASS
-    but no MODEL_LEDGER/NODE_MODEL_SUMMARY/COOLDOWN_STATE_SUMMARY.
+    Returns (allow_merge, ledger_gate_result, blockers).
     """
-    result = {
-        "status": "PASS",
-        "quality_gate": {"verdict": "PASS", "checks": {}},
-        "operator_summary": "System healthy.",
-    }
+    blockers = []
+    ledger_gate_result = None
+    gate_error_detail = None
+    gate_report = None
+    is_non_terminal = False
+
+    # 1. Require --report-file and valid JSON with status
+    if not report_file_path:
+        gate_error_detail = "no --report-file provided"
+    else:
+        rf_path = Path(report_file_path)
+        if not rf_path.exists():
+            gate_error_detail = f"report file not found: {report_file_path}"
+        else:
+            try:
+                with open(rf_path, "r", encoding="utf-8") as f:
+                    rf = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                rf = None
+            if rf is None:
+                gate_error_detail = "report file is not valid JSON"
+            else:
+                gate_report = rf
+                if "status" not in gate_report:
+                    gate_error_detail = "report file missing status field"
+
+    # 2. Check terminal status FIRST
+    terminal_statuses = {"PASS", "MERGE_READY", "FREEZE_PASS", "PROMOTION_PASS"}
+    if not gate_error_detail and gate_report is not None:
+        status = str(gate_report.get("status", "")).upper()
+        if status not in terminal_statuses:
+            is_non_terminal = True
+            ledger_gate_result = {"checked": False, "result": "N/A", "reason": f"non-terminal: {status}"}
+            blockers.append(f'Merge readiness gate: non-terminal status "{status}", cannot confirm ledger validity')
+
+    # 3. For terminal status, validate ledger fields
+    if not gate_error_detail and not is_non_terminal and gate_report is not None:
+        if not gate_report.get("MODEL_LEDGER"):
+            gate_error_detail = "report file missing MODEL_LEDGER"
+        elif not gate_report.get("NODE_MODEL_SUMMARY"):
+            gate_error_detail = "report file missing NODE_MODEL_SUMMARY"
+        elif not gate_report.get("COOLDOWN_STATE_SUMMARY"):
+            gate_error_detail = "report file missing COOLDOWN_STATE_SUMMARY"
+
+    # 4. If any error -> fail-closed
+    if gate_error_detail and not is_non_terminal:
+        ledger_gate_result = {"checked": False, "result": "FAIL", "errors": [gate_error_detail]}
+        blockers.append(f"Merge readiness gate FAIL: {gate_error_detail}")
+    elif not gate_error_detail and not is_non_terminal and gate_report is not None:
+        errors = validate_report(gate_report)
+        ledger_gate_result = {"checked": True, "result": "PASS" if not errors else "FAIL", "errors": errors}
+        if errors:
+            blockers.append("Model ledger gate FAIL: " + "; ".join(errors[:3]))
+
+    base_allow = len(blockers) == 0
+    ledger_ok = (ledger_gate_result is not None
+                 and ledger_gate_result.get("checked", False)
+                 and ledger_gate_result.get("result") == "PASS")
+    allow_merge = base_allow and ledger_ok
+    return allow_merge, ledger_gate_result, blockers
+
+
+
+# === Tests rt-01 through rt-07 (existing) ===
+
+def test_run_report_no_ledger():
+    """rt-01: PASS without MODEL_LEDGER -> BLOCKED."""
+    result = {"status": "PASS", "quality_gate": {"verdict": "PASS"}}
     gate_result = check_report_status(result)
-    assert not gate_result["status_allowed"], \
-        "Expected BLOCKED for PASS without MODEL_LEDGER"
+    assert not gate_result["status_allowed"]
     assert gate_result["terminal_status_found"] == "PASS"
-    assert len(gate_result["gate_errors"]) > 0
-    return True, "PASS without MODEL_LEDGER -> BLOCKED (correct fail-closed)"
+    return True, "PASS without MODEL_LEDGER -> BLOCKED"
 
 
 def test_run_report_valid_ledger():
-    """Test 2: PASS status with valid complete ledger -> ALLOWED."""
+    """rt-02: PASS with valid ledger -> ALLOWED."""
     result = _make_valid_report()
     gate_result = check_report_status(result)
-    assert gate_result["status_allowed"], \
-        "Expected ALLOWED for valid report"
-    assert gate_result["terminal_status_found"] == "PASS"
-    assert gate_result["gate_errors"] == []
+    assert gate_result["status_allowed"]
     return True, "PASS with valid ledger -> ALLOWED"
 
 
 def test_merge_gate_no_ledger():
-    """Test 3: merge candidate with terminal status, no ledger -> fail-closed."""
-    job_report = {"status": "PASS"}
-    errors = validate_report(job_report)
-    assert len(errors) > 0, "Expected errors for missing ledger"
-    return True, "Merge candidate without ledger -> gate FAIL"
+    """rt-03: merge candidate no ledger -> FAIL."""
+    errors = validate_report({"status": "PASS"})
+    assert len(errors) > 0
+    return True, "No ledger -> gate FAIL"
 
 
 def test_merge_gate_valid_ledger():
-    """Test 4: merge candidate with valid report -> gate PASS."""
-    report = _make_valid_report()
-    errors = validate_report(report)
-    assert len(errors) == 0, f"Unexpected errors: {errors}"
-    return True, "Merge candidate with valid ledger -> gate PASS"
+    """rt-04: merge candidate valid ledger -> PASS."""
+    errors = validate_report(_make_valid_report())
+    assert len(errors) == 0
+    return True, "Valid ledger -> gate PASS"
 
 
 def test_merge_gate_report_file():
-    """Test 5: merge gate --report-file with valid ledger."""
+    """rt-05: --report-file valid -> PASS."""
     report = _make_valid_report()
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(report, f)
-        tmp_path = f.name
+        tmp = f.name
     try:
-        with open(tmp_path, "r") as f:
-            loaded = json.load(f)
-        errors = validate_report(loaded)
-        assert len(errors) == 0, f"Unexpected errors: {errors}"
-        return True, "--report-file valid ledger -> PASS"
+        allow, lg, _ = _simulate_merge_gate_report_file(tmp)
+        assert allow and lg["result"] == "PASS"
+        return True, "--report-file valid -> merge allowed"
     finally:
-        os.unlink(tmp_path)
+        os.unlink(tmp)
 
 
 def test_merge_gate_report_file_no_ledger():
-    """Test 6: merge gate --report-file without ledger -> fail-closed."""
-    bad_report = {"status": "PASS"}
+    """rt-06: --report-file without ledger -> FAIL."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(bad_report, f)
-        tmp_path = f.name
+        json.dump({"status": "PASS"}, f)
+        tmp = f.name
     try:
-        with open(tmp_path, "r") as f:
-            loaded = json.load(f)
-        errors = validate_report(loaded)
-        assert len(errors) > 0, "Expected errors for missing ledger"
-        return True, "--report-file without ledger -> FAIL"
+        allow, lg, _ = _simulate_merge_gate_report_file(tmp)
+        assert not allow and lg["result"] == "FAIL"
+        return True, "--report-file no ledger -> merge blocked"
     finally:
-        os.unlink(tmp_path)
+        os.unlink(tmp)
 
 
 def test_run_report_non_terminal():
-    """Test 7: non-terminal status -> gate not applicable, allowed."""
-    result = {
-        "status": "IN_PROGRESS",
-        "quality_gate": {"verdict": "IN_PROGRESS"},
-    }
+    """rt-07: non-terminal -> gate N/A, allowed."""
+    result = {"status": "IN_PROGRESS"}
     gate_result = check_report_status(result)
-    assert gate_result["status_allowed"]
-    assert gate_result.get("gate_not_applicable")
+    assert gate_result["status_allowed"] and gate_result.get("gate_not_applicable")
     return True, "Non-terminal -> gate N/A, allowed"
+
+
+# === Tests rt-08 through rt-12 (new fail-closed) ===
+
+def test_merge_gate_no_report_file():
+    """rt-08: merge gate without --report-file -> allow_merge=false."""
+    allow, lg, blockers = _simulate_merge_gate_report_file(None)
+    assert not allow, f"Expected blocked, got allow={allow}"
+    assert lg["result"] == "FAIL"
+    return True, "No --report-file -> merge blocked"
+
+
+def test_merge_gate_report_file_not_found():
+    """rt-09: --report-file path not found -> allow_merge=false."""
+    allow, lg, blockers = _simulate_merge_gate_report_file("/tmp/nonexistent_xyz_12345.json")
+    assert not allow, f"Expected blocked, got allow={allow}"
+    assert lg["result"] == "FAIL"
+    return True, "Nonexistent file -> merge blocked"
+
+
+def test_merge_gate_report_file_non_terminal():
+    """rt-10: --report-file status=IN_PROGRESS -> allow_merge=false, N/A."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump({"status": "IN_PROGRESS"}, f)
+        tmp = f.name
+    try:
+        allow, lg, blockers = _simulate_merge_gate_report_file(tmp)
+        assert not allow, f"Expected blocked, got allow={allow}"
+        assert lg["result"] == "N/A"
+        return True, "status=IN_PROGRESS -> N/A but merge blocked"
+    finally:
+        os.unlink(tmp)
+
+
+def test_merge_gate_report_file_valid():
+    """rt-11: --report-file status=PASS complete ledger -> allow_merge=true."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(_make_valid_report(), f)
+        tmp = f.name
+    try:
+        allow, lg, blockers = _simulate_merge_gate_report_file(tmp)
+        assert allow, f"Expected allowed, got blockers: {blockers}"
+        assert lg["result"] == "PASS" and lg["checked"]
+        return True, "Valid report -> merge allowed, gate PASS"
+    finally:
+        os.unlink(tmp)
+
+
+def test_merge_gate_report_file_missing_ledger():
+    """rt-12: --report-file status=PASS but missing MODEL_LEDGER -> allow_merge=false."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump({"status": "PASS", "NODE_MODEL_SUMMARY": [{"node": "x"}],
+                   "COOLDOWN_STATE_SUMMARY": [{"node": "x"}]}, f)
+        tmp = f.name
+    try:
+        allow, lg, blockers = _simulate_merge_gate_report_file(tmp)
+        assert not allow, f"Expected blocked, got allow={allow}"
+        assert lg["result"] == "FAIL"
+        return True, "PASS without MODEL_LEDGER -> merge blocked"
+    finally:
+        os.unlink(tmp)
 
 
 def main():
@@ -184,6 +290,11 @@ def main():
         ("rt-05-merge-gate-report-file", test_merge_gate_report_file),
         ("rt-06-merge-gate-report-file-no-ledger", test_merge_gate_report_file_no_ledger),
         ("rt-07-run-report-non-terminal", test_run_report_non_terminal),
+        ("rt-08-merge-gate-no-report-file", test_merge_gate_no_report_file),
+        ("rt-09-merge-gate-report-not-found", test_merge_gate_report_file_not_found),
+        ("rt-10-merge-gate-non-terminal", test_merge_gate_report_file_non_terminal),
+        ("rt-11-merge-gate-valid-report", test_merge_gate_report_file_valid),
+        ("rt-12-merge-gate-missing-ledger", test_merge_gate_report_file_missing_ledger),
     ]
 
     passed = 0

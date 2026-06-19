@@ -263,37 +263,70 @@ def run_gate(args):
     else:
         warnings.append("Locked job wo-code-repo-status-001 not found")
 
-    # V1.20.8: Model ledger gate check
-    # Priority: --report-file > job_info with ledger > fail-closed
+    # V1.20.8: Model ledger gate check — FAIL-CLOSED
+    # merge_ready=true REQUIRES model_ledger_gate.result=PASS
+    # N/A, GATE_UNAVAILABLE, missing report-file all BLOCK merge
     ledger_gate_result = None
-    if _LEDGER_GATE_AVAILABLE:
-        gate_report = None
+    if not _LEDGER_GATE_AVAILABLE:
+        ledger_gate_result = {'checked': False, 'result': 'GATE_UNAVAILABLE'}
+        blockers.append('Model ledger gate UNAVAILABLE: cannot validate merge readiness')
+    else:
         report_file = getattr(args, 'report_file', None)
+        gate_report = None
+        gate_error_detail = None
 
-        # 1. Try loading from --report-file
-        if report_file:
-            rf = _read_json_file(Path(report_file))
-            if rf:
-                gate_report = rf
-                # Ensure status is set
-                if 'status' not in gate_report:
-                    gate_report['status'] = 'UNKNOWN'
-
-        # 2. Fallback: build from job_info (will fail-closed if no ledger)
-        if gate_report is None:
-            if job_info:
-                gate_report = {
-                    'status': job_info.get('job_status', '').upper(),
-                    'MODEL_LEDGER': job_info.get('MODEL_LEDGER', []),
-                    'NODE_MODEL_SUMMARY': job_info.get('NODE_MODEL_SUMMARY', []),
-                    'COOLDOWN_STATE_SUMMARY': job_info.get('COOLDOWN_STATE_SUMMARY', []),
-                }
+        # 1. Require --report-file and valid JSON with status
+        if not report_file:
+            gate_error_detail = 'no --report-file provided'
+        else:
+            rf_path = Path(report_file)
+            if not rf_path.exists():
+                gate_error_detail = f'report file not found: {report_file}'
+            elif not rf_path.is_file():
+                gate_error_detail = f'report file is not a file: {report_file}'
             else:
-                gate_report = {'status': 'UNKNOWN'}
+                rf = _read_json_file(rf_path)
+                if rf is None:
+                    gate_error_detail = f'report file is not valid JSON: {report_file}'
+                else:
+                    gate_report = rf
+                    if 'status' not in gate_report:
+                        gate_error_detail = 'report file missing status field'
 
-        # Only run gate if status is terminal
+        # 2. Check terminal status FIRST (before ledger field checks)
         terminal_statuses = {'PASS', 'MERGE_READY', 'FREEZE_PASS', 'PROMOTION_PASS'}
-        if gate_report.get('status') in terminal_statuses:
+        is_non_terminal = False
+        if not gate_error_detail and gate_report is not None:
+            status = str(gate_report.get('status', '')).upper()
+            if status not in terminal_statuses:
+                is_non_terminal = True
+                ledger_gate_result = {
+                    'checked': False,
+                    'result': 'N/A',
+                    'reason': f'non-terminal status: {status}',
+                }
+                blockers.append(
+                    f'Merge readiness gate: non-terminal status "{status}", cannot confirm ledger validity')
+
+        # 3. For terminal status, validate ledger fields
+        if not gate_error_detail and not is_non_terminal and gate_report is not None:
+            if not gate_report.get('MODEL_LEDGER'):
+                gate_error_detail = 'report file missing MODEL_LEDGER'
+            elif not gate_report.get('NODE_MODEL_SUMMARY'):
+                gate_error_detail = 'report file missing NODE_MODEL_SUMMARY'
+            elif not gate_report.get('COOLDOWN_STATE_SUMMARY'):
+                gate_error_detail = 'report file missing COOLDOWN_STATE_SUMMARY'
+
+        # 4. If any error -> fail-closed
+        if gate_error_detail and not is_non_terminal:
+            ledger_gate_result = {
+                'checked': False,
+                'result': 'FAIL',
+                'errors': [f'Merge readiness gate: {gate_error_detail}'],
+            }
+            blockers.append(f'Merge readiness gate FAIL: {gate_error_detail}')
+        elif not gate_error_detail and not is_non_terminal and gate_report is not None:
+            # 5. All fields present, terminal status: validate
             ledger_errors = ledger_gate_validate(gate_report)
             ledger_gate_result = {
                 'checked': True,
@@ -302,12 +335,13 @@ def run_gate(args):
             }
             if ledger_errors:
                 blockers.append('Model ledger gate FAIL: ' + '; '.join(ledger_errors[:3]))
-        else:
-            ledger_gate_result = {'checked': False, 'result': 'N/A', 'reason': 'non-terminal status'}
-    else:
-        ledger_gate_result = {'checked': False, 'result': 'GATE_UNAVAILABLE'}
 
-    allow_merge = len(blockers) == 0
+    # allow_merge requires: no blockers AND ledger gate checked AND result=PASS
+    base_allow = len(blockers) == 0
+    ledger_ok = (ledger_gate_result is not None
+                 and ledger_gate_result.get('checked', False)
+                 and ledger_gate_result.get('result') == 'PASS')
+    allow_merge = base_allow and ledger_ok
     return _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info, ledger_gate_result)
 
 
