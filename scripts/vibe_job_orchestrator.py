@@ -1473,6 +1473,14 @@ class JobManifest:
     revision: int = 0  # Monotonic revision for CAS (compare-and-swap)
     sandbox_enabled: bool = False
     sandbox_config: dict = field(default_factory=dict)  # bwrap_path, version, args, network_policy, etc.
+    # Network policy fields (V1.18.4.8: approved_model_egress)
+    network_policy: str = "blocked"  # "blocked" | "approved_model_egress"
+    provider: str = ""  # e.g. "deepseek", "xiaomi", "minimax"
+    model: str = ""  # e.g. "deepseek-v4-pro", "mimo-v2.5-pro"
+    egress_reason: str = ""  # why network is needed (e.g. "opencode_implement", "opencode_review")
+    approved_domains: List[str] = field(default_factory=list)  # domains allowed (informational)
+    approval_id: str = ""  # unique approval reference
+    approval_digest: str = ""  # SHA256(job_id + worker + role + model + approval_id)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -1675,6 +1683,116 @@ class JobOrchestrator:
 
 
     # ================================================================
+    # Approved Model Registry (V1.18.4.8)
+    # ================================================================
+    # Only these provider/model combinations may use approved_model_egress.
+    # Each entry defines allowed task types and egress domains.
+    APPROVED_MODEL_REGISTRY = {
+        "deepseek/deepseek-v4-pro": {
+            "allowed_task_types": ["opencode-implement", "opencode-review"],
+            "allowed_egress_domains": ["api.deepseek.com"],
+            "description": "DeepSeek v4 Pro for code generation/review",
+        },
+        "xiaomi/mimo-v2.5-pro": {
+            "allowed_task_types": ["opencode-implement", "opencode-review"],
+            "allowed_egress_domains": ["api.xiaomi.com", "api.volcengine.com"],
+            "description": "Xiaomi MiMo v2.5 Pro",
+        },
+        "minimax/minimax-m2.5": {
+            "allowed_task_types": ["opencode-implement", "opencode-review"],
+            "allowed_egress_domains": ["api.minimax.chat"],
+            "description": "MiniMax M2.5",
+        },
+        "volcengine/ark-code-latest": {
+            "allowed_task_types": [],  # QUARANTINED: key_format_incorrect
+            "allowed_egress_domains": [],
+            "description": "QUARANTINED — do not use",
+        },
+    }
+
+    @staticmethod
+    def compute_approval_digest(job_id: str, worker: str, egress_reason: str,
+                                 model: str, approval_id: str) -> str:
+        """Compute approval digest for network policy validation."""
+        import hashlib as _hashlib
+        input_str = "|".join([job_id, worker, egress_reason, model, approval_id])
+        return _hashlib.sha256(input_str.encode("utf-8")).hexdigest()[:32]
+
+    def _validate_network_policy(self, manifest: JobManifest) -> dict:
+        """Validate network_policy for a job. Returns {valid, reason, policy_details}.
+
+        Rules:
+        - "blocked": always valid (default)
+        - "approved_model_egress": only for OpenCode tasks with approved provider/model
+        - Unknown policy: fail-closed
+        """
+        policy = manifest.network_policy
+        if policy == "blocked":
+            return {"valid": True, "reason": "default_blocked", "policy_details": {}}
+
+        if policy != "approved_model_egress":
+            return {"valid": False, "reason": "unknown_policy: %s" % policy,
+                    "policy_details": {}}
+
+        # Validate provider/model
+        provider = manifest.provider
+        model = manifest.model
+        model_key = "%s/%s" % (provider, model)
+        entry = self.APPROVED_MODEL_REGISTRY.get(model_key)
+        if entry is None:
+            return {"valid": False,
+                    "reason": "model_not_approved: %s" % model_key,
+                    "policy_details": {}}
+
+        if not entry["allowed_task_types"]:
+            return {"valid": False,
+                    "reason": "model_quarantined: %s" % model_key,
+                    "policy_details": {}}
+
+        # Validate task type (egress_reason maps to task type)
+        egress_reason = manifest.egress_reason
+        if egress_reason not in entry["allowed_task_types"]:
+            return {"valid": False,
+                    "reason": "task_type_not_allowed: %s not in %s" % (
+                        egress_reason, entry["allowed_task_types"]),
+                    "policy_details": {}}
+
+        # Validate approval fields
+        if not manifest.approval_id:
+            return {"valid": False, "reason": "missing_approval_id",
+                    "policy_details": {}}
+        if not manifest.approval_digest:
+            return {"valid": False, "reason": "missing_approval_digest",
+                    "policy_details": {}}
+
+        # Compute expected digest
+        import hashlib as _hashlib
+        expected_input = "|".join([
+            manifest.job_id, manifest.actual_worker or "",
+            egress_reason, model, manifest.approval_id,
+        ])
+        expected_digest = _hashlib.sha256(
+            expected_input.encode("utf-8")).hexdigest()[:32]
+        if manifest.approval_digest != expected_digest:
+            return {"valid": False,
+                    "reason": "approval_digest_mismatch: expected=%s got=%s" % (
+                        expected_digest[:16], manifest.approval_digest[:16]),
+                    "policy_details": {}}
+
+        return {
+            "valid": True,
+            "reason": "approved_model_egress_validated",
+            "policy_details": {
+                "provider": provider,
+                "model": model,
+                "egress_reason": egress_reason,
+                "approved_domains": entry["allowed_egress_domains"],
+                "approval_id": manifest.approval_id,
+                "approval_digest": manifest.approval_digest,
+            },
+        }
+
+    # ================================================================
     # Sandbox Runner (bubblewrap)
     # ================================================================
 
@@ -1795,7 +1913,8 @@ class JobOrchestrator:
             "ro_paths": ["/usr", "/bin", "/lib", "/lib64"],
             "rw_paths": [remote_job_dir],
             "tmpfs_paths": ["/tmp"],
-            "network_policy": "blocked" if not network_allowed else "allowed",
+            "network_policy": "blocked" if not network_allowed else "approved_model_egress",
+            "network_exception": network_allowed,  # True = host network namespace retained
             "unshare_pid": True,
             "unshare_net": not network_allowed,
             "die_with_parent": True,
@@ -1957,12 +2076,30 @@ class JobOrchestrator:
             bwrap_evidence = self._check_bwrap_remote(ssh_opts, ssh_target)
 
             if bwrap_evidence["available"]:
+                # V1.18.4.8: Validate network policy
+                net_policy_result = self._validate_network_policy(manifest)
+                if not net_policy_result["valid"]:
+                    manifest = self._transition_state(
+                        manifest, JobState.BLOCKED.value,
+                        error="network_policy_invalid: %s" % net_policy_result["reason"])
+                    self._persist_manifest(manifest)
+                    self.claim_store.release_claim(job_id, "BLOCKED", success=False)
+                    return {"ok": False, "error": "network_policy_invalid",
+                            "job_id": job_id,
+                            "reason": net_policy_result["reason"]}
+
+                # Determine if network is allowed
+                network_allowed = (manifest.network_policy == "approved_model_egress")
+
                 # Use bwrap sandbox
                 launch_cmd, sandbox_config = self._build_sandbox_launch_cmd(
                     job_script_path, pid_file, manifest.remote_job_dir,
-                    network_allowed=False)
+                    network_allowed=network_allowed)
                 manifest.sandbox_enabled = True
                 manifest.sandbox_config = sandbox_config
+                # Record network exception in sandbox config
+                if network_allowed:
+                    sandbox_config["network_exception_details"] = net_policy_result["policy_details"]
             else:
                 # FAIL-CLOSED: bwrap not available, cannot run without sandbox
                 manifest = self._transition_state(
@@ -3110,14 +3247,15 @@ def run_self_check() -> dict:
         checks.append({"name": "submit_no_tools_ok", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 9: ripgrep routes to 9bao
+    # Check 9: ripgrep routes to capable worker (5bao or 9bao, both have ripgrep)
     try:
         orch = _make_test_orchestrator()
         for w in orch.registry.list_workers():
             orch.registry.set_health(w.worker_id, NodeStatus.ONLINE)
         m = orch.submit_job("linux-worker", "rg --version", required_tools=["ripgrep"])
         assert m["state"] == "CLAIMED"
-        assert m["actual_worker"] == "9bao"
+        assert m["actual_worker"] in ("5bao", "9bao"), (
+            "ripgrep job should go to a capable worker, got: %s" % m["actual_worker"])
         checks.append({"name": "ripgrep_routes_9bao", "passed": True})
     except Exception as e:
         checks.append({"name": "ripgrep_routes_9bao", "passed": False, "error": str(e)})
@@ -3304,8 +3442,12 @@ def run_self_check() -> dict:
         assert len(candidates) >= 2
         candidates_rg = orch.scheduler.get_eligible_candidates(
             "linux-worker", required_tools=["ripgrep"])
-        assert len(candidates_rg) == 1
-        assert candidates_rg[0][0] == "9bao"
+        assert len(candidates_rg) >= 1, (
+            "At least one worker should have ripgrep, got %d" % len(candidates_rg))
+        rg_workers = [c[0] for c in candidates_rg]
+        assert "9bao" in rg_workers, "9bao must have ripgrep"
+        # 5bao also has ripgrep now (operator-installed)
+        assert "5bao" in rg_workers, "5bao must have ripgrep (operator-installed)"
         checks.append({"name": "get_eligible_candidates", "passed": True})
     except Exception as e:
         checks.append({"name": "get_eligible_candidates", "passed": False, "error": str(e)})

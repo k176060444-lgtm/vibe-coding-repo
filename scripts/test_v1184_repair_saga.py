@@ -528,8 +528,8 @@ def test_nonce_ledger_reconcile():
 
 
 def test_ripgrep_routes_9bao():
-    """ripgrep required_tools must route to 9bao."""
-    print("\n=== Test: ripgrep Routes to 9bao ===")
+    """ripgrep required_tools must route to capable worker (5bao or 9bao)."""
+    print("\n=== Test: ripgrep Routes to Capable Worker ===")
     from vibe_job_orchestrator import _make_test_orchestrator, NodeStatus
     orch = _make_test_orchestrator()
     for w in orch.registry.list_workers():
@@ -537,8 +537,8 @@ def test_ripgrep_routes_9bao():
 
     m = orch.submit_job("linux-worker", "rg --version", required_tools=["ripgrep"])
     assert m["state"] == "CLAIMED", "Expected CLAIMED, got %s" % m.get("state")
-    assert m["actual_worker"] == "9bao", "Expected 9bao, got %s" % m.get("actual_worker")
-    print("  ripgrep -> 9bao: PASS")
+    assert m["actual_worker"] in ("5bao", "9bao"), "Expected capable worker, got %s" % m.get("actual_worker")
+    print("  ripgrep -> %s: PASS" % m["actual_worker"])
 
 
 def test_manifest_checksum_integrity():

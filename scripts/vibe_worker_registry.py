@@ -82,7 +82,7 @@ DEFAULT_WORKERS = {
         capabilities=["linux-worker", "read-only", "implementer", "reviewer", "pytest", "smoke"],
         weight=100,
         max_parallel_jobs=1,
-        tools_installed={"ripgrep": "NOT_INSTALLED"},
+        tools_installed={"ripgrep": "13.0.0"},
     ),
     "9bao": WorkerNode(
         worker_id="9bao",
