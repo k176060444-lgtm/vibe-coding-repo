@@ -37,6 +37,14 @@ except ImportError:
     ledger_gate_validate = None
     _LEDGER_GATE_AVAILABLE = False
 
+# V1.20.10: Operator merge approval gate
+try:
+    from operator_merge_approval_gate import validate_approval as operator_validate_approval
+    _OPERATOR_APPROVAL_GATE_AVAILABLE = True
+except ImportError:
+    operator_validate_approval = None
+    _OPERATOR_APPROVAL_GATE_AVAILABLE = False
+
 
 def _run_cmd(*args, check=False):
     """Run a command and return (stdout, stderr, returncode)."""
@@ -336,16 +344,56 @@ def run_gate(args):
             if ledger_errors:
                 blockers.append('Model ledger gate FAIL: ' + '; '.join(ledger_errors[:3]))
 
-    # allow_merge requires: no blockers AND ledger gate checked AND result=PASS
+    # V1.20.10: Operator merge approval check -- FAIL-CLOSED
+    operator_approval_result = None
+    if not _OPERATOR_APPROVAL_GATE_AVAILABLE:
+        operator_approval_result = {'checked': False, 'result': 'BLOCKED', 'errors': ['operator_merge_approval_gate not importable']}
+        blockers.append('Operator merge approval gate UNAVAILABLE: cannot validate merge approval')
+    else:
+        approval_file = getattr(args, 'approval_file', None)
+        merge_method = getattr(args, 'merge_method', None)
+        if not approval_file:
+            operator_approval_result = {'checked': True, 'result': 'BLOCKED', 'errors': ['no --approval-file provided']}
+            blockers.append('Operator merge approval FAIL: no --approval-file provided')
+        elif not merge_method:
+            operator_approval_result = {'checked': True, 'result': 'BLOCKED', 'errors': ['no --merge-method provided']}
+            blockers.append('Operator merge approval FAIL: no --merge-method provided')
+        else:
+            af_path = Path(approval_file)
+            if not af_path.exists():
+                operator_approval_result = {'checked': True, 'result': 'BLOCKED', 'errors': ['approval file not found']}
+                blockers.append(f'Operator merge approval FAIL: approval file not found: {approval_file}')
+            else:
+                af = _read_json_file(af_path)
+                if af is None:
+                    operator_approval_result = {'checked': True, 'result': 'BLOCKED', 'errors': ['approval file is not valid JSON']}
+                    blockers.append('Operator merge approval FAIL: approval file is not valid JSON')
+                else:
+                    expected_pr = getattr(args, 'pr', None)
+                    expected_head = getattr(args, 'expected_head_sha', None)
+                    expected_base = getattr(args, 'expected_base_sha', None)
+                    merge_method = getattr(args, 'merge_method', None)
+                    operator_approval_result = operator_validate_approval(
+                        af, expected_pr=expected_pr, expected_head=expected_head, expected_base=expected_base,
+                        merge_method_requested=merge_method)
+                    if operator_approval_result['result'] != 'APPROVED':
+                        errs = operator_approval_result.get('errors', [])
+                        blockers.append('Operator merge approval FAIL: ' + '; '.join(errs[:3]))
+
+    # allow_merge requires: no blockers AND ledger gate PASS AND operator approval APPROVED
     base_allow = len(blockers) == 0
     ledger_ok = (ledger_gate_result is not None
                  and ledger_gate_result.get('checked', False)
                  and ledger_gate_result.get('result') == 'PASS')
-    allow_merge = base_allow and ledger_ok
-    return _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info, ledger_gate_result)
+    operator_ok = (operator_approval_result is not None
+                   and operator_approval_result.get('checked', False)
+                   and operator_approval_result.get('result') == 'APPROVED')
+    allow_merge = base_allow and ledger_ok and operator_ok
+    return _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info,
+                         ledger_gate_result, operator_approval_result)
 
 
-def _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info, ledger_gate_result=None):
+def _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_info, ledger_gate_result=None, operator_approval_result=None):
     """Build the gate result."""
     result = {
         "allow_merge": allow_merge,
@@ -357,6 +405,8 @@ def _build_result(allow_merge, blockers, warnings, pr_info, job_info, checks_inf
     }
     if ledger_gate_result is not None:
         result["model_ledger_gate"] = ledger_gate_result
+    if operator_approval_result is not None:
+        result["operator_merge_approval"] = operator_approval_result
     return result
 
 
@@ -379,6 +429,16 @@ def _format_text(result):
         lines.append(f"  Model Ledger Gate: {lg_icon} {lg.get('result', 'unknown')}")
         if lg.get("errors"):
             for e in lg["errors"][:3]:
+                lines.append(f"    - {e}")
+        lines.append("----------------------------------------")
+
+    # V1.20.10: Operator approval status
+    oa = result.get("operator_merge_approval", {})
+    if oa:
+        oa_icon = {"APPROVED": "\u2705", "BLOCKED": "\u274c"}.get(oa.get("result", "?"), "\u2753")
+        lines.append(f"  Operator Approval: {oa_icon} {oa.get('result', 'unknown')}")
+        if oa.get("errors"):
+            for e in oa["errors"][:3]:
                 lines.append(f"    - {e}")
         lines.append("----------------------------------------")
 
@@ -482,6 +542,16 @@ def build_parser():
         "--report-file",
         default=None,
         help="Path to report JSON with MODEL_LEDGER/NODE_MODEL_SUMMARY/COOLDOWN_STATE_SUMMARY for ledger gate.",
+    )
+    parser.add_argument(
+        "--approval-file",
+        default=None,
+        help="Path to operator merge approval JSON (required for merge readiness).",
+    )
+    parser.add_argument(
+        "--merge-method",
+        default=None,
+        help="Requested merge method (merge/squash/rebase). Required for approval validation.",
     )
     parser.add_argument(
         "--json",

@@ -1,0 +1,116 @@
+{
+  "description": "Operator merge approval gate test scenarios",
+  "version": "1.0.0",
+  "scenarios": [
+    {
+      "id": "oa-01",
+      "description": "no approval record",
+      "approval": null,
+      "expected": "BLOCKED"
+    },
+    {
+      "id": "oa-02",
+      "description": "missing required fields",
+      "approval": {
+        "pr_number": 174,
+        "approval_status": "APPROVED"
+      },
+      "expected": "BLOCKED"
+    },
+    {
+      "id": "oa-03",
+      "description": "head SHA mismatch",
+      "approval": {
+        "pr_number": 174,
+        "approval_status": "APPROVED",
+        "approved_by": "kk",
+        "approved_at": "2026-06-19T23:21:35.479406+00:00",
+        "approved_head_sha": "aaa",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge",
+        "approval_scope": "merge"
+      },
+      "expected": "BLOCKED",
+      "expected_head": "8dfcedf9f9509069650df6642ec639421558a08e"
+    },
+    {
+      "id": "oa-04",
+      "description": "base SHA mismatch",
+      "approval": {
+        "pr_number": 174,
+        "approval_status": "APPROVED",
+        "approved_by": "kk",
+        "approved_at": "2026-06-19T23:21:35.479406+00:00",
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "bbb",
+        "merge_method_allowed": "merge",
+        "approval_scope": "merge"
+      },
+      "expected": "BLOCKED",
+      "expected_base": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f"
+    },
+    {
+      "id": "oa-05",
+      "description": "status not APPROVED",
+      "approval": {
+        "pr_number": 174,
+        "approval_status": "PENDING",
+        "approved_by": "kk",
+        "approved_at": "2026-06-19T23:21:35.479406+00:00",
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge",
+        "approval_scope": "merge"
+      },
+      "expected": "BLOCKED"
+    },
+    {
+      "id": "oa-06",
+      "description": "expired approval",
+      "approval": {
+        "pr_number": 174,
+        "approval_status": "APPROVED",
+        "approved_by": "kk",
+        "approved_at": "2020-01-01T00:00:00Z",
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge",
+        "approval_scope": "merge"
+      },
+      "expected": "BLOCKED"
+    },
+    {
+      "id": "oa-07",
+      "description": "scope does not include merge",
+      "approval": {
+        "pr_number": 174,
+        "approval_status": "APPROVED",
+        "approved_by": "kk",
+        "approved_at": "2026-06-19T23:21:35.479406+00:00",
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge",
+        "approval_scope": "comment"
+      },
+      "expected": "BLOCKED"
+    },
+    {
+      "id": "oa-08",
+      "description": "valid approval",
+      "approval": {
+        "pr_number": 174,
+        "approval_status": "APPROVED",
+        "approved_by": "operator_kk",
+        "approved_at": "2026-06-19T23:21:35.479406+00:00",
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge",
+        "approval_scope": "merge"
+      },
+      "expected": "APPROVED",
+      "expected_pr": 174,
+      "expected_head": "8dfcedf9f9509069650df6642ec639421558a08e",
+      "expected_base": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f"
+    }
+  ]
+}

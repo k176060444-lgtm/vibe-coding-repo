@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from model_ledger_gate import validate_report, TERMINAL_STATUSES
 from vibe_report_status_gate import check_report_status, check_merge_readiness
+from operator_merge_approval_gate import validate_approval as operator_validate_approval
 
 
 def _make_valid_report():
@@ -281,6 +282,173 @@ def test_merge_gate_report_file_missing_ledger():
         os.unlink(tmp)
 
 
+def test_operator_approval_no_record():
+    """rt-13: no approval record -> BLOCKED."""
+    r = operator_validate_approval(None, expected_pr=174)
+    assert r["result"] == "BLOCKED"
+    return True, "No approval -> BLOCKED"
+
+
+def test_operator_approval_head_mismatch():
+    """rt-14: head SHA mismatch -> BLOCKED."""
+    now = "2026-06-19T16:00:00Z"
+    approval = {
+        "pr_number": 174, "approval_status": "APPROVED",
+        "approved_by": "kk", "approved_at": now,
+        "approved_head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge", "approval_scope": "merge",
+    }
+    r = operator_validate_approval(approval, expected_head="8dfcedf9f9509069650df6642ec639421558a08e")
+    assert r["result"] == "BLOCKED"
+    return True, "Head mismatch -> BLOCKED"
+
+
+def test_operator_approval_valid():
+    """rt-15: valid approval -> APPROVED."""
+    now = "2026-06-19T16:00:00Z"
+    approval = {
+        "pr_number": 174, "approval_status": "APPROVED",
+        "approved_by": "kk", "approved_at": now,
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge", "approval_scope": "merge",
+    }
+    r = operator_validate_approval(approval, expected_pr=174,
+        expected_head="8dfcedf9f9509069650df6642ec639421558a08e",
+        expected_base="b3a59f9271dcbc320cd79e85d2b4470d79ecd50f")
+    assert r["result"] == "APPROVED"
+    return True, "Valid approval -> APPROVED"
+
+
+def test_operator_approval_scope_no_merge():
+    """rt-16: scope=comment -> BLOCKED."""
+    now = "2026-06-19T16:00:00Z"
+    approval = {
+        "pr_number": 174, "approval_status": "APPROVED",
+        "approved_by": "kk", "approved_at": now,
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge", "approval_scope": "comment",
+    }
+    r = operator_validate_approval(approval)
+    assert r["result"] == "BLOCKED"
+    return True, "Scope=comment -> BLOCKED"
+
+
+def test_merge_gate_full_path():
+    """rt-17: valid approval + valid ledger -> allow_merge=true (simulated)."""
+    # Simulate: all gates pass
+    now = "2026-06-19T16:00:00Z"
+    approval = {
+        "pr_number": 174, "approval_status": "APPROVED",
+        "approved_by": "kk", "approved_at": now,
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge", "approval_scope": "merge",
+    }
+    oa = operator_validate_approval(approval, expected_pr=174)
+    assert oa["result"] == "APPROVED"
+
+    report = _make_valid_report()
+    errors = validate_report(report)
+    assert len(errors) == 0
+
+    # Simulate allow_merge logic
+    base_allow = True
+    ledger_ok = True
+    operator_ok = oa["result"] == "APPROVED"
+    allow_merge = base_allow and ledger_ok and operator_ok
+    assert allow_merge
+    return True, "Valid approval + valid ledger -> merge allowed"
+
+
+def test_merge_gate_valid_approval_bad_ledger():
+    """rt-18: valid approval but ledger FAIL -> allow_merge=false."""
+    now = "2026-06-19T16:00:00Z"
+    approval = {
+        "pr_number": 174, "approval_status": "APPROVED",
+        "approved_by": "kk", "approved_at": now,
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge", "approval_scope": "merge",
+    }
+    oa = operator_validate_approval(approval, expected_pr=174)
+    assert oa["result"] == "APPROVED"
+
+    # Bad ledger
+    errors = validate_report({"status": "PASS"})
+    assert len(errors) > 0
+
+    ledger_ok = False
+    operator_ok = oa["result"] == "APPROVED"
+    allow_merge = ledger_ok and operator_ok
+    assert not allow_merge
+    return True, "Valid approval + bad ledger -> merge blocked"
+
+
+
+def test_operator_short_head_sha():
+    """rt-19: short head SHA -> BLOCKED."""
+    approval = {
+        "pr_number": 174, "approval_status": "APPROVED",
+        "approved_by": "kk", "approved_at": "2026-06-19T16:00:00Z",
+        "approved_head_sha": "8dfcedf",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge", "approval_scope": "merge",
+    }
+    r = operator_validate_approval(approval)
+    assert r["result"] == "BLOCKED", f"Expected BLOCKED, got {r['result']}"
+    return True, "Short head SHA -> BLOCKED"
+
+
+def test_operator_merge_method_mismatch():
+    """rt-20: allowed=merge requested=squash -> BLOCKED."""
+    approval = {
+        "pr_number": 174, "approval_status": "APPROVED",
+        "approved_by": "kk", "approved_at": "2026-06-19T16:00:00Z",
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge", "approval_scope": "merge",
+    }
+    r = operator_validate_approval(approval, merge_method_requested="squash")
+    assert r["result"] == "BLOCKED", f"Expected BLOCKED, got {r['result']}"
+    return True, "allowed=merge requested=squash -> BLOCKED"
+
+
+def test_operator_merge_method_any():
+    """rt-21: allowed=any requested=rebase -> APPROVED."""
+    approval = {
+        "pr_number": 174, "approval_status": "APPROVED",
+        "approved_by": "kk", "approved_at": "2026-06-19T16:00:00Z",
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "any", "approval_scope": "merge",
+    }
+    r = operator_validate_approval(approval, merge_method_requested="rebase")
+    assert r["result"] == "APPROVED", f"Expected APPROVED, got {r['result']}"
+    return True, "allowed=any requested=rebase -> APPROVED"
+
+
+def test_merge_gate_no_merge_method():
+    """rt-22: vibe_merge_gate no --merge-method -> allow_merge=false (simulated)."""
+    # Simulate: no merge_method -> operator approval blocked
+    # In real gate, --merge-method missing triggers blocker
+    approval = {
+        "pr_number": 174, "approval_status": "APPROVED",
+        "approved_by": "kk", "approved_at": "2026-06-19T16:00:00Z",
+        "approved_head_sha": "8dfcedf9f9509069650df6642ec639421558a08e",
+        "approved_base_sha": "b3a59f9271dcbc320cd79e85d2b4470d79ecd50f",
+        "merge_method_allowed": "merge", "approval_scope": "merge",
+    }
+    # Without merge_method_requested, approval gate still passes
+    # but vibe_merge_gate requires --merge-method arg
+    # This test validates the gate itself allows it; the CLI check is in merge_gate
+    r = operator_validate_approval(approval)
+    assert r["result"] == "APPROVED"
+    return True, "Approval gate passes without merge_method (CLI enforces)"
+
+
 def main():
     tests = [
         ("rt-01-run-report-no-ledger", test_run_report_no_ledger),
@@ -295,6 +463,16 @@ def main():
         ("rt-10-merge-gate-non-terminal", test_merge_gate_report_file_non_terminal),
         ("rt-11-merge-gate-valid-report", test_merge_gate_report_file_valid),
         ("rt-12-merge-gate-missing-ledger", test_merge_gate_report_file_missing_ledger),
+        ("rt-13-operator-no-approval", test_operator_approval_no_record),
+        ("rt-14-operator-head-mismatch", test_operator_approval_head_mismatch),
+        ("rt-15-operator-valid", test_operator_approval_valid),
+        ("rt-16-operator-scope-no-merge", test_operator_approval_scope_no_merge),
+        ("rt-17-full-path-valid", test_merge_gate_full_path),
+        ("rt-18-valid-approval-bad-ledger", test_merge_gate_valid_approval_bad_ledger),
+        ("rt-19-operator-short-sha", test_operator_short_head_sha),
+        ("rt-20-merge-method-mismatch", test_operator_merge_method_mismatch),
+        ("rt-21-merge-method-any", test_operator_merge_method_any),
+        ("rt-22-no-merge-method", test_merge_gate_no_merge_method),
     ]
 
     passed = 0
