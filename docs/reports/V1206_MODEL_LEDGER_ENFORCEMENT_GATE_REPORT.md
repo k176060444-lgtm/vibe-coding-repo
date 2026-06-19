@@ -1,6 +1,6 @@
 # V1.20.6 MODEL_LEDGER Enforcement Gate Report
 
-Generated: 2026-06-19T14:00:00Z
+Generated: 2026-06-19T14:30:00Z
 Branch: feat/v1206-model-ledger-enforcement-gate
 Base SHA: 8536dbd53f7d324101f5d8a6404078d872ae987d
 Plan Reference: V1.20.6_MODEL_LEDGER_ENFORCEMENT_GATE
@@ -21,10 +21,10 @@ Plan Reference: V1.20.6_MODEL_LEDGER_ENFORCEMENT_GATE
 
 | File | Description | Status |
 |------|-------------|--------|
-| scripts/model_ledger_gate.py | Gate validator (CLI + library) | CREATED |
-| docs/MODEL_LEDGER_ENFORCEMENT_GATE.md | Documentation | CREATED |
-| docs/reports/model-ledger-gate-fixture.json | 11 test scenarios | CREATED |
-| docs/reports/V1206_MODEL_LEDGER_ENFORCEMENT_GATE_REPORT.md | This report | CREATED |
+| scripts/model_ledger_gate.py | Gate validator (CLI + library) | UPDATED |
+| docs/MODEL_LEDGER_ENFORCEMENT_GATE.md | Documentation | UPDATED |
+| docs/reports/model-ledger-gate-fixture.json | 13 test scenarios | UPDATED |
+| docs/reports/V1206_MODEL_LEDGER_ENFORCEMENT_GATE_REPORT.md | This report | UPDATED |
 
 ## Gate Rules Implemented
 
@@ -33,14 +33,36 @@ Plan Reference: V1.20.6_MODEL_LEDGER_ENFORCEMENT_GATE
 | 1 | GATE-01 | Terminal status requires MODEL_LEDGER | IMPLEMENTED |
 | 2 | GATE-02 | MODEL_LEDGER entry completeness | IMPLEMENTED |
 | 3 | GATE-03 | No-model-call format enforcement | IMPLEMENTED |
-| 4 | GATE-04 | NODE_MODEL_SUMMARY required | IMPLEMENTED |
+| 4 | GATE-04 | NODE_MODEL_SUMMARY required + entry validation | IMPLEMENTED |
 | 5 | GATE-05 | rate_limit=true requires RATE_LIMIT_EVENT_LEDGER | IMPLEMENTED |
 | 6 | GATE-06 | rate limit must not trigger rollback | IMPLEMENTED |
 | 6b | GATE-06b | exit_code vs error_type consistency | IMPLEMENTED |
 | 7 | GATE-07 | fallback_used=true requires FALLBACK_DECISION_LEDGER | IMPLEMENTED |
-| 8 | GATE-08 | COOLDOWN_STATE_SUMMARY required | IMPLEMENTED |
+| 8 | GATE-08 | COOLDOWN_STATE_SUMMARY required + entry validation | IMPLEMENTED |
 | 9 | GATE-09 | token_usage forbidden values | IMPLEMENTED |
-| 10 | GATE-10 | Critical field completeness | IMPLEMENTED |
+| 10 | GATE-10 | Critical field completeness (all ledgers) | IMPLEMENTED |
+
+## NODE_MODEL_SUMMARY Validation
+
+Each entry must have:
+- node (non-empty, not unknown/TBD)
+- opencode_version (non-empty, not unknown/TBD)
+- models_used_this_run (must be list)
+- total_model_calls (non-negative integer)
+- successful_model_calls (non-negative integer)
+- failed_model_calls (non-negative integer)
+- fallback_count (non-negative integer)
+- rate_limit_count (non-negative integer)
+- cooldown_state (non-empty, not unknown/TBD)
+
+## COOLDOWN_STATE_SUMMARY Validation
+
+Each entry must have:
+- node (non-empty, not unknown/TBD)
+- model (non-empty, not unknown/TBD)
+- consecutive_rate_limits (non-negative integer)
+- current_cooldown_seconds (non-negative integer)
+- cooldown_action (non-empty, not unknown/TBD)
 
 ## Fixture Validation Results
 
@@ -57,22 +79,20 @@ Plan Reference: V1.20.6_MODEL_LEDGER_ENFORCEMENT_GATE
 | scenario-09 | Incomplete MODEL_LEDGER entry | FAIL | FAIL | PASS |
 | scenario-10 | Valid report with fallback documented | PASS | PASS | PASS |
 | scenario-11 | Missing COOLDOWN_STATE_SUMMARY | FAIL | FAIL | PASS |
+| scenario-12 | NODE_MODEL_SUMMARY only has node | FAIL | FAIL | PASS |
+| scenario-13 | COOLDOWN_STATE_SUMMARY only has node | FAIL | FAIL | PASS |
 
-**Result: 11/11 scenarios passed**
+**Result: 13/13 scenarios passed**
 
 ## Validation Evidence
 
 ```
 === SELF-CHECK ===
   Version: 1.0.0
-  Total: 11
-  Passed: 11
+  Total: 13
+  Passed: 13
   Failed: 0
   Self-check: PASSED
-
-=== FIXTURE VALIDATION ===
-  Scenarios: 11
-  Results: 11/11 passed
 ```
 
 ## py_compile
@@ -99,15 +119,6 @@ COMPILE_OK
 | internal_ip_in_public_files | false |
 | merge_executed | false |
 | upgrade_performed | false |
-
-## Integration Points
-
-The gate should be called by:
-1. Orchestrator before emitting terminal status
-2. CI pipeline as validation step
-3. Reporter before finalizing reports
-
-Gate failure MUST block terminal status emission.
 
 ## PR Requirements
 

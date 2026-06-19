@@ -545,6 +545,104 @@
           }
         ]
       }
+    },
+    {
+      "id": "scenario-12-missing-node-summary-fields",
+      "description": "MODEL_LEDGER complete but NODE_MODEL_SUMMARY only has node -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-001",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable_opencode_cli",
+            "duration": "12s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "binary_ok": true,
+            "final_status": "PASS"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ],
+        "RATE_LIMIT_EVENT_LEDGER": [],
+        "FALLBACK_DECISION_LEDGER": [],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao",
+            "model": "opencode/deepseek-v4-flash-free",
+            "consecutive_rate_limits": 0,
+            "current_cooldown_seconds": 0,
+            "cooldown_action": "NORMAL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scenario-13-missing-cooldown-summary-fields",
+      "description": "MODEL_LEDGER + NODE_MODEL_SUMMARY complete but COOLDOWN_STATE_SUMMARY only has node -> FAIL",
+      "expected_gate_pass": false,
+      "report": {
+        "status": "PASS",
+        "MODEL_LEDGER": [
+          {
+            "node": "5bao",
+            "job_id": "e2e-001",
+            "role": "implementer",
+            "planned_model": "opencode/deepseek-v4-flash-free",
+            "actual_model": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "opencode_provider_alias": "opencode",
+            "fallback_used": false,
+            "fallback_from": null,
+            "fallback_to": null,
+            "fallback_reason": null,
+            "call_count": 1,
+            "token_usage_or_unavailable_reason": "unavailable_opencode_cli",
+            "duration": "12s",
+            "exit_code": 0,
+            "rate_limit": false,
+            "binary_ok": true,
+            "final_status": "PASS"
+          }
+        ],
+        "NODE_MODEL_SUMMARY": [
+          {
+            "node": "5bao",
+            "opencode_version": "1.17.8",
+            "models_used_this_run": [
+              "deepseek-v4-flash-free"
+            ],
+            "total_model_calls": 1,
+            "successful_model_calls": 1,
+            "failed_model_calls": 0,
+            "fallback_count": 0,
+            "rate_limit_count": 0,
+            "cooldown_state": "NORMAL"
+          }
+        ],
+        "RATE_LIMIT_EVENT_LEDGER": [],
+        "FALLBACK_DECISION_LEDGER": [],
+        "COOLDOWN_STATE_SUMMARY": [
+          {
+            "node": "5bao"
+          }
+        ]
+      }
     }
   ]
 }

@@ -121,6 +121,10 @@ def validate_report(report: dict) -> list:
     # Rule 4: NODE_MODEL_SUMMARY must exist
     if has_terminal and not node_summary:
         errors.append("GATE-04: Terminal status found but NODE_MODEL_SUMMARY is missing")
+    # Validate NODE_MODEL_SUMMARY entries
+    for i, entry in enumerate(node_summary):
+        ns_errors = _validate_node_model_summary_entry(entry, i)
+        errors.extend(ns_errors)
 
     # Rule 5: rate_limit=true requires RATE_LIMIT_EVENT_LEDGER
     has_rate_limit = any(e.get("rate_limit") for e in ledger)
@@ -187,6 +191,10 @@ def validate_report(report: dict) -> list:
                 "GATE-08: Terminal status found but COOLDOWN_STATE_SUMMARY "
                 "is missing and no COOLDOWN_NOT_APPLICABLE_REASON provided"
             )
+    # Validate COOLDOWN_STATE_SUMMARY entries
+    for i, entry in enumerate(cooldown_summary):
+        cd_errors = _validate_cooldown_state_entry(entry, i)
+        errors.extend(cd_errors)
 
     # Rule 9: token_usage must not be empty/unknown/TBD
     for i, entry in enumerate(ledger):
@@ -258,6 +266,64 @@ def _validate_fallback_entry(entry: dict, index: int) -> list:
         val = entry.get(field)
         if not val or str(val).lower() in ("null", "none", ""):
             errors.append(f"FALLBACK-{index}: {field} is empty/null")
+    return errors
+
+
+def _validate_node_model_summary_entry(entry: dict, index: int) -> list:
+    """Validate a single NODE_MODEL_SUMMARY entry."""
+    errors = []
+    for field in NODE_MODEL_SUMMARY_REQUIRED_FIELDS:
+        if field not in entry:
+            errors.append(f"NODE_SUMMARY-{index}: missing required field '{field}'")
+    # Check for forbidden values in string fields
+    for field in ("node", "opencode_version", "cooldown_state"):
+        val = str(entry.get(field, "")).strip().lower()
+        if val in ("", "unknown", "tbd"):
+            errors.append(
+                f"NODE_SUMMARY-{index}: {field} is "
+                f"'{entry.get(field, '')}' (must not be empty/unknown/TBD)"
+            )
+    # models_used_this_run must be a list
+    mur = entry.get("models_used_this_run")
+    if mur is not None and not isinstance(mur, list):
+        errors.append(
+            f"NODE_SUMMARY-{index}: models_used_this_run must be a list, "
+            f"got {type(mur).__name__}"
+        )
+    # Numeric fields must be non-negative integers
+    for field in ("total_model_calls", "successful_model_calls", "failed_model_calls",
+                  "fallback_count", "rate_limit_count"):
+        val = entry.get(field)
+        if val is not None and (not isinstance(val, int) or val < 0):
+            errors.append(
+                f"NODE_SUMMARY-{index}: {field} must be non-negative integer, "
+                f"got {val}"
+            )
+    return errors
+
+
+def _validate_cooldown_state_entry(entry: dict, index: int) -> list:
+    """Validate a single COOLDOWN_STATE_SUMMARY entry."""
+    errors = []
+    for field in COOLDOWN_STATE_REQUIRED_FIELDS:
+        if field not in entry:
+            errors.append(f"COOLDOWN-{index}: missing required field '{field}'")
+    # Check for forbidden values in string fields
+    for field in ("node", "model", "cooldown_action"):
+        val = str(entry.get(field, "")).strip().lower()
+        if val in ("", "unknown", "tbd"):
+            errors.append(
+                f"COOLDOWN-{index}: {field} is "
+                f"'{entry.get(field, '')}' (must not be empty/unknown/TBD)"
+            )
+    # Numeric fields must be non-negative integers
+    for field in ("consecutive_rate_limits", "current_cooldown_seconds"):
+        val = entry.get(field)
+        if val is not None and (not isinstance(val, int) or val < 0):
+            errors.append(
+                f"COOLDOWN-{index}: {field} must be non-negative integer, "
+                f"got {val}"
+            )
     return errors
 
 
