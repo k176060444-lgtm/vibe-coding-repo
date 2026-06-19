@@ -1471,6 +1471,8 @@ class JobManifest:
     branch_name: Optional[str] = None
     involves_merge: bool = False
     revision: int = 0  # Monotonic revision for CAS (compare-and-swap)
+    sandbox_enabled: bool = False
+    sandbox_config: dict = field(default_factory=dict)  # bwrap_path, version, args, network_policy, etc.
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -1671,6 +1673,126 @@ class JobOrchestrator:
         self._persist_manifest(manifest)
         return manifest.to_dict()
 
+
+    # ================================================================
+    # Sandbox Runner (bubblewrap)
+    # ================================================================
+
+    def _check_bwrap_remote(self, ssh_opts, ssh_target) -> dict:
+        """Check bwrap availability on remote worker. Returns evidence dict.
+
+        Returns: {available: bool, path: str, version: str, error: str}
+        Fail-closed: any error returns available=False.
+        """
+        evidence = {"available": False, "path": "", "version": "", "error": ""}
+        try:
+            # Check bwrap binary exists
+            which_result = subprocess.run(
+                ["ssh"] + ssh_opts + [ssh_target,
+                 "command -v bwrap && bwrap --version"],
+                capture_output=True, timeout=10)
+            stdout = which_result.stdout.decode("utf-8", errors="replace").strip()
+            stderr = which_result.stderr.decode("utf-8", errors="replace").strip()
+
+            if which_result.returncode != 0:
+                evidence["error"] = "bwrap_not_found: %s" % stderr[:200]
+                return evidence
+
+            lines = stdout.split(chr(10))
+            evidence["path"] = lines[0].strip() if lines else ""
+            evidence["version"] = lines[1].strip() if len(lines) > 1 else ""
+
+            # Verify bwrap actually works with minimal sandbox
+            test_result = subprocess.run(
+                ["ssh"] + ssh_opts + [ssh_target,
+                 "bwrap --ro-bind /usr /usr --ro-bind /bin /bin "
+                 "--ro-bind /lib /lib --ro-bind /lib64 /lib64 "
+                 "--proc /proc --dev /dev --tmpfs /tmp "
+                 "--unshare-pid --unshare-net --die-with-parent --new-session "
+                 "/bin/bash -lc 'echo bwrap_sandbox_ok'"],
+                capture_output=True, timeout=10)
+            test_stdout = test_result.stdout.decode("utf-8", errors="replace").strip()
+
+            if "bwrap_sandbox_ok" in test_stdout:
+                evidence["available"] = True
+            else:
+                evidence["error"] = "bwrap_test_failed: %s" % (
+                    test_result.stderr.decode("utf-8", errors="replace")[:200])
+
+        except Exception as e:
+            evidence["error"] = "bwrap_check_exception: %s" % str(e)[:200]
+
+        return evidence
+
+    def _build_sandbox_launch_cmd(self, job_script_path, pid_file,
+                                   remote_job_dir, network_allowed=False):
+        """Build bwrap sandbox launch command.
+
+        Sandbox rules:
+        - /usr, /bin, /lib, /lib64: read-only bind
+        - /proc, /dev: standard binds
+        - /tmp: tmpfs (NOT host /tmp)
+        - remote_job_dir: read-write bind (the ONLY writable path)
+        - --unshare-pid, --unshare-net (unless network_allowed), --die-with-parent, --new-session
+        - PID capture via bwrap exec
+        """
+        # Read-only system paths
+        ro_binds = " ".join([
+            "--ro-bind /usr /usr",
+            "--ro-bind /bin /bin",
+            "--ro-bind /lib /lib",
+            "--ro-bind /lib64 /lib64",
+        ])
+
+        # Standard mounts
+        std_mounts = "--proc /proc --dev /dev"
+
+        # tmpfs for /tmp (NOT host /tmp)
+        tmpfs = "--tmpfs /tmp"
+
+        # Writable job directory
+        rw_bind = "--bind %s %s" % (
+            _shell_quote(remote_job_dir), _shell_quote(remote_job_dir))
+
+        # Network policy
+        net_flag = "" if network_allowed else "--unshare-net"
+
+        # Process isolation
+        proc_flags = "--unshare-pid --die-with-parent --new-session"
+
+        # Build the full bwrap command
+        # bwrap runs bash which writes PID file then execs the job script
+        bwrap_cmd = (
+            "setsid bwrap %(ro_binds)s %(std_mounts)s %(tmpfs)s "
+            "%(rw_bind)s %(net_flag)s %(proc_flags)s "
+            "/bin/bash -c 'echo $$ > %(pid_file)s; exec bash %(job_script)s' "
+            "</dev/null >/dev/null 2>&1 &"
+        ) % {
+            "ro_binds": ro_binds,
+            "std_mounts": std_mounts,
+            "tmpfs": tmpfs,
+            "rw_bind": rw_bind,
+            "net_flag": net_flag,
+            "proc_flags": proc_flags,
+            "pid_file": _shell_quote(pid_file),
+            "job_script": _shell_quote(job_script_path),
+        }
+
+        config = {
+            "sandbox_enabled": True,
+            "bwrap_path": "/usr/bin/bwrap",
+            "ro_paths": ["/usr", "/bin", "/lib", "/lib64"],
+            "rw_paths": [remote_job_dir],
+            "tmpfs_paths": ["/tmp"],
+            "network_policy": "blocked" if not network_allowed else "allowed",
+            "unshare_pid": True,
+            "unshare_net": not network_allowed,
+            "die_with_parent": True,
+            "new_session": True,
+        }
+
+        return bwrap_cmd, config
+
     def execute_job(self, job_id: str, timeout: int = 600) -> dict:
         _check_fatal_safety()  # BLOCK if fatal safety state
 
@@ -1818,13 +1940,29 @@ class JobOrchestrator:
                 ["ssh"] + ssh_opts + [ssh_target, chmod_cmd],
                 capture_output=True, timeout=10)
 
-            # Launch with setsid + PID file capture
-            # setsid runs the script in a new session; PID file captures the session leader PID
-            # Redirects ensure SSH session closes immediately (no timeout)
-            launch_cmd = (
-                "setsid bash -c 'echo $$ > %s; exec bash %s' </dev/null >/dev/null 2>&1 &"
-                % (_shell_quote(pid_file), _shell_quote(job_script_path))
-            )
+            # V1.18.4.5: Sandbox launch with bubblewrap
+            # Check bwrap availability on remote worker
+            bwrap_evidence = self._check_bwrap_remote(ssh_opts, ssh_target)
+
+            if bwrap_evidence["available"]:
+                # Use bwrap sandbox
+                launch_cmd, sandbox_config = self._build_sandbox_launch_cmd(
+                    job_script_path, pid_file, manifest.remote_job_dir,
+                    network_allowed=False)
+                manifest.sandbox_enabled = True
+                manifest.sandbox_config = sandbox_config
+            else:
+                # FAIL-CLOSED: bwrap not available, cannot run without sandbox
+                manifest = self._transition_state(
+                    manifest, JobState.FAILED.value,
+                    error="sandbox_unavailable: %s" % bwrap_evidence.get("error", "unknown"))
+                self._persist_manifest(manifest)
+                self.claim_store.release_claim(job_id, "FAILED", success=False)
+                return {"ok": False, "error": "sandbox_unavailable",
+                        "job_id": job_id,
+                        "bwrap_error": bwrap_evidence.get("error", ""),
+                        "detail": "bwrap not available on worker %s. "
+                                   "Cannot execute without sandbox isolation." % manifest.actual_worker}
             proc = subprocess.Popen(
                 ["ssh"] + ssh_opts + [ssh_target, launch_cmd],
                 stdout=subprocess.PIPE,
