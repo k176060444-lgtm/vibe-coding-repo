@@ -27,11 +27,15 @@ CLI:
   python3 vibe_job_orchestrator.py self-check
 """
 
-__version__ = "3.10.0"  # V1.18.4: Recoverable repair saga + active-active + nonce reconcile
+__version__ = "3.11.0"  # V1.18.4.10: approved_model_egress hardening
 
 # ===========================================================================
-# V1.18.4.9: Approved Model Egress Policy
+# V1.18.4.10: Approved Model Egress Policy (Hardened)
 # ===========================================================================
+# SECURITY NOTE: approved_model_egress uses host network namespace.
+# bwrap does NOT enforce domain/IP whitelists. The domain list below is
+# for audit logging only. domain_allowlist_enforced is ALWAYS False.
+# To add real enforcement, a proxy or nftables/cgroup policy is needed.
 
 # Approved model registry for network egress.
 # Only models listed here may use network_policy=approved_model_egress.
@@ -48,16 +52,96 @@ QUARANTINED_MODELS = {
     "volcengine-plan/ark-code-latest",
 }
 
-# Approved domains for audit logging (NOT enforced at bwrap level)
-# bwrap uses host network namespace; domain enforcement is aspirational
-APPROVED_EGRESS_DOMAINS = [
+# Approved domains — AUDIT LOGGING ONLY, NOT ENFORCED at bwrap/network level.
+# These are recorded in manifests and evidence for post-hoc audit.
+# domain_allowlist_enforced is ALWAYS False unless a proxy/nftables layer exists.
+APPROVED_EGRESS_DOMAINS_AUDIT_ONLY = [
     "api.deepseek.com",
     "api.minimax.chat",
     "token-plan-cn.xiaomimimo.com",
 ]
 
-# Allowed task types for network egress
+# Allowed task types for network egress — ONLY OpenCode jobs.
 EGRESS_ALLOWED_TASK_TYPES = {"opencode_implement", "opencode_review"}
+
+# Minimum secret files required for OpenCode to function.
+# These are --ro-bind individually; the entire .vibedev-secrets dir is NEVER mounted.
+OPENCODE_SECRET_FILES = [
+    "/home/vibeworker/.vibedev-secrets/opencode.env",
+]
+OPENCODE_CONFIG_FILES = [
+    "/home/vibeworker/.config/vibedev-opencode/opencode.jsonc",
+]
+
+
+def compute_approval_digest(job_id: str, task_type: str, provider_model: str,
+                            worker: str, network_policy: str, base_sha: str,
+                            command_sha: str, operator: str, timestamp: str,
+                            approval_id: str) -> str:
+    """Compute approval receipt digest from bound fields.
+
+    The digest binds ALL critical job parameters to the approval.
+    Any field mismatch between receipt and manifest MUST cause BLOCK.
+    """
+    import hashlib as _hl
+    fields = "|".join([
+        job_id, task_type, provider_model, worker, network_policy,
+        base_sha, command_sha, operator, timestamp, approval_id,
+    ])
+    return _hl.sha256(fields.encode("utf-8")).hexdigest()
+
+
+def verify_approval_receipt(manifest, approval_receipt: dict) -> dict:
+    """Verify approval receipt against manifest fields.
+
+    Returns {ok, reason, ...}. FAIL-CLOSED on any mismatch.
+    """
+    required_fields = [
+        "job_id", "task_type", "provider_model", "worker",
+        "network_policy", "base_sha", "command_sha", "operator",
+        "timestamp", "approval_id", "approval_digest",
+    ]
+    for f in required_fields:
+        if f not in approval_receipt or not approval_receipt[f]:
+            return {"ok": False, "reason": "receipt_missing_field: %s" % f}
+
+    # Field-by-field comparison
+    mismatches = []
+    checks = {
+        "job_id": getattr(manifest, "job_id", ""),
+        "task_type": getattr(manifest, "task_type", ""),
+        "provider_model": getattr(manifest, "provider_model", ""),
+        "worker": getattr(manifest, "actual_worker", ""),
+        "network_policy": getattr(manifest, "network_policy", ""),
+        "approval_id": getattr(manifest, "approval_id", ""),
+    }
+    for field, manifest_val in checks.items():
+        receipt_val = approval_receipt.get(field, "")
+        if str(manifest_val) != str(receipt_val):
+            mismatches.append("%s: manifest=%s receipt=%s" % (field, manifest_val, receipt_val))
+
+    if mismatches:
+        return {"ok": False, "reason": "receipt_field_mismatch", "mismatches": mismatches}
+
+    # Recompute and verify digest
+    expected_digest = compute_approval_digest(
+        approval_receipt["job_id"],
+        approval_receipt["task_type"],
+        approval_receipt["provider_model"],
+        approval_receipt["worker"],
+        approval_receipt["network_policy"],
+        approval_receipt["base_sha"],
+        approval_receipt["command_sha"],
+        approval_receipt["operator"],
+        approval_receipt["timestamp"],
+        approval_receipt["approval_id"],
+    )
+    if expected_digest != approval_receipt["approval_digest"]:
+        return {"ok": False, "reason": "receipt_digest_mismatch",
+                "expected": expected_digest[:16],
+                "actual": approval_receipt["approval_digest"][:16]}
+
+    return {"ok": True, "reason": "receipt_verified", "digest": expected_digest[:16]}
 
 
 # ===========================================================================
@@ -1508,6 +1592,10 @@ class JobManifest:
     provider_model: str = ""  # e.g. deepseek-plan/deepseek-v4-flash
     approval_id: str = ""  # Operator approval reference
     approval_digest: str = ""  # SHA256 of approval binding
+    approval_receipt: dict = field(default_factory=dict)  # full receipt for verification
+    domain_allowlist_enforced: bool = False  # ALWAYS False (host network)
+    host_network_used: bool = False  # True when approved_model_egress
+    secret_bind_paths: List[str] = field(default_factory=list)  # --ro-bind paths recorded
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -1713,21 +1801,19 @@ class JobOrchestrator:
     # Sandbox Runner (bubblewrap)
     # ================================================================
 
-    def _validate_network_policy(self, manifest) -> dict:
+    def _validate_network_policy(self, manifest,
+                                  approval_receipt: dict = None) -> dict:
         """Validate network_policy for a job. Returns {ok, reason, ...}.
 
-        Rules:
-        - network_policy must be one of: blocked, approved_model_egress
-        - approved_model_egress requires: provider_model in APPROVED_MODEL_REGISTRY,
-          task_type in EGRESS_ALLOWED_TASK_TYPES, approval_id, approval_digest
-        - Quarantined models are always BLOCKED
-        - Unknown/missing policy defaults to blocked (fail-closed)
+        V1.18.4.10 HARDENED:
+        - Non-empty checks are insufficient; receipt must match manifest fields.
+        - command/script content must be OpenCode-only for egress.
+        - domain_allowlist_enforced is always False (honest reporting).
         """
         policy = getattr(manifest, 'network_policy', 'blocked')
         task_type = getattr(manifest, 'task_type', '')
         provider_model = getattr(manifest, 'provider_model', '')
-        approval_id = getattr(manifest, 'approval_id', '')
-        approval_digest = getattr(manifest, 'approval_digest', '')
+        command = getattr(manifest, 'command', '')
 
         if policy == 'blocked':
             return {"ok": True, "policy": "blocked", "reason": "default_blocked"}
@@ -1735,30 +1821,90 @@ class JobOrchestrator:
         if policy != 'approved_model_egress':
             return {"ok": False, "reason": "unknown_policy: %s" % policy, "policy": policy}
 
-        # Validate approved_model_egress
+        # --- Model validation ---
         if provider_model in QUARANTINED_MODELS:
             return {"ok": False, "reason": "quarantined_model: %s" % provider_model}
-
         if provider_model not in APPROVED_MODEL_REGISTRY:
             return {"ok": False, "reason": "unapproved_model: %s" % provider_model}
 
+        # --- Task type validation ---
         if task_type not in EGRESS_ALLOWED_TASK_TYPES:
             return {"ok": False, "reason": "task_type_not_allowed_for_egress: %s" % task_type}
 
-        if not approval_id:
-            return {"ok": False, "reason": "missing_approval_id"}
+        # --- Command validation: must be OpenCode-only ---
+        if not self._is_opencode_command(command):
+            return {"ok": False, "reason": "non_opencode_command_blocked",
+                    "detail": "approved_model_egress only allows OpenCode commands"}
 
-        if not approval_digest:
-            return {"ok": False, "reason": "missing_approval_digest"}
+        # --- Approval receipt verification ---
+        if approval_receipt is None:
+            return {"ok": False, "reason": "missing_approval_receipt"}
+
+        receipt_check = verify_approval_receipt(manifest, approval_receipt)
+        if not receipt_check["ok"]:
+            return {"ok": False, "reason": receipt_check["reason"],
+                    "detail": receipt_check.get("mismatches",
+                                                receipt_check.get("expected", ""))}
 
         return {
             "ok": True,
             "policy": "approved_model_egress",
+            "domain_allowlist_enforced": False,
+            "host_network_used": True,
+            "approved_egress_domains_audit_only": APPROVED_EGRESS_DOMAINS_AUDIT_ONLY,
             "provider_model": provider_model,
             "task_type": task_type,
-            "approval_id": approval_id,
-            "note": "bwrap uses host network namespace; domain enforcement is audit-only"
+            "approval_id": getattr(manifest, 'approval_id', ''),
+            "approval_digest": receipt_check["digest"],
         }
+
+    @staticmethod
+    def _build_opencode_env_prefix(job_dir: str) -> str:
+        """Build shell prefix to set OpenCode env vars in sandbox.
+
+        Uses job-scoped tmp dirs for data/cache (not global paths).
+        Sources secret env file (which is --ro-bind mounted).
+        """
+        return (
+            "set -a; source /home/vibeworker/.vibedev-secrets/opencode.env; set +a\n"
+            "export HOME=/home/vibeworker\n"
+            "export XDG_CONFIG_HOME=/home/vibeworker/.config/vibedev-opencode\n"
+            "export XDG_DATA_HOME=%(job_dir)s/.opencode-data\n"
+            "export XDG_CACHE_HOME=%(job_dir)s/.opencode-cache\n"
+            "mkdir -p %(job_dir)s/.opencode-data %(job_dir)s/.opencode-cache\n"
+            "export OPENCODE_CONFIG=/home/vibeworker/.config/vibedev-opencode/opencode.jsonc\n"
+            "export OPENCODE_CONFIG_DIR=/home/vibeworker/.config/vibedev-opencode\n"
+            "export OPENCODE_DISABLE_AUTOUPDATE=1\n"
+            "export OPENCODE_AUTO_SHARE=0\n"
+            "export OPENCODE_DISABLE_DEFAULT_PLUGINS=1\n"
+            "export OPENCODE_DISABLE_LSP_DOWNLOAD=1\n"
+            "export OPENCODE_DISABLE_CLAUDE_CODE=1\n"
+            "export OPENCODE_DISABLE_MODELS_FETCH=1\n"
+            "export TERM=dumb\n"
+        ) % {"job_dir": job_dir}
+
+    @staticmethod
+    def _is_opencode_command(command: str) -> bool:
+        """Check if command is an OpenCode invocation (not arbitrary shell).
+
+        Allowed patterns:
+        - Commands containing 'opencode run' or 'opencode' binary path
+        - Must NOT contain shell pipes, redirects, command chaining (;, &&, ||)
+          that could inject arbitrary commands after opencode.
+        """
+        import re
+        if not command or not command.strip():
+            return False
+        cmd = command.strip()
+        # Must reference opencode binary
+        if "opencode" not in cmd:
+            return False
+        # Block shell metacharacters that could chain arbitrary commands
+        dangerous = [";", "&&", "||", "|", ">", "<", "$(", "`", "\n"]
+        for ch in dangerous:
+            if ch in cmd:
+                return False
+        return True
 
     def _check_bwrap_remote(self, ssh_opts, ssh_target) -> dict:
         """Check bwrap availability on remote worker. Returns evidence dict.
@@ -1809,7 +1955,8 @@ class JobOrchestrator:
     def _build_sandbox_launch_cmd(self, job_script_path, pid_file,
                                    remote_job_dir, network_allowed=False,
                                    network_policy="blocked",
-                                   extra_binds=None):
+                                   extra_binds=None,
+                                   secret_binds=None):
         """Build bwrap sandbox launch command.
 
         Sandbox rules:
@@ -1844,12 +1991,20 @@ class JobOrchestrator:
         rw_bind = "--bind %s %s" % (
             _shell_quote(remote_job_dir), _shell_quote(remote_job_dir))
 
-        # Extra binds for approved_model_egress (opencode config, secrets, etc.)
+        # Extra binds for approved_model_egress (opencode binary, config, secrets)
+        # V1.18.4.10: secrets are --ro-bind; binary/config are --ro-bind via /usr-style
         extra_bind_str = ""
         if extra_binds:
             for eb in extra_binds:
-                extra_bind_str += " --bind %s %s" % (
+                extra_bind_str += " --ro-bind %s %s" % (
                     _shell_quote(eb), _shell_quote(eb))
+
+        # Secret binds (always --ro-bind, individual files)
+        secret_bind_str = ""
+        if secret_binds:
+            for sb in secret_binds:
+                secret_bind_str += " --ro-bind %s %s" % (
+                    _shell_quote(sb), _shell_quote(sb))
 
         # Network policy
         net_flag = "" if network_allowed else "--unshare-net"
@@ -1861,7 +2016,7 @@ class JobOrchestrator:
         # bwrap runs bash which writes PID file then execs the job script
         bwrap_cmd = (
             "setsid bwrap %(ro_binds)s %(std_mounts)s %(tmpfs)s "
-            "%(rw_bind)s %(extra_binds)s %(net_flag)s %(proc_flags)s "
+            "%(rw_bind)s %(extra_binds)s %(secret_binds)s %(net_flag)s %(proc_flags)s "
             "/bin/bash -c 'echo $$ > %(pid_file)s; exec bash %(job_script)s' "
             "</dev/null >/dev/null 2>&1 &"
         ) % {
@@ -1870,6 +2025,7 @@ class JobOrchestrator:
             "tmpfs": tmpfs,
             "rw_bind": rw_bind,
             "extra_binds": extra_bind_str,
+            "secret_binds": secret_bind_str,
             "net_flag": net_flag,
             "proc_flags": proc_flags,
             "pid_file": _shell_quote(pid_file),
@@ -1883,6 +2039,9 @@ class JobOrchestrator:
             "rw_paths": [remote_job_dir],
             "tmpfs_paths": ["/tmp"],
             "network_policy": network_policy,
+            "domain_allowlist_enforced": False,
+            "host_network_used": network_allowed,
+            "approved_egress_domains_audit_only": APPROVED_EGRESS_DOMAINS_AUDIT_ONLY if network_allowed else [],
             "unshare_pid": True,
             "unshare_net": not network_allowed,
             "die_with_parent": True,
@@ -2056,8 +2215,9 @@ class JobOrchestrator:
 
                 network_allowed = (manifest.network_policy == "approved_model_egress")
 
-                # For approved_model_egress, bind OpenCode config, secrets, and binary
+                # For approved_model_egress, bind minimal OpenCode requirements (all --ro-bind)
                 extra_binds = []
+                secret_binds = []
                 if network_allowed:
                     # Detect OpenCode binary location per node
                     opencode_bind = "/home/vibeworker/.npm-global"  # 5bao default
@@ -2067,20 +2227,30 @@ class JobOrchestrator:
                         capture_output=True, timeout=5)
                     if "opencode-local" in detect_result.stdout.decode():
                         opencode_bind = "/home/vibeworker/.opencode"
+
+                    # Binary and read-only config/data (writable cache uses job-scoped tmp)
+                    # opencode binary and config are --ro-bind (see _build_sandbox_launch_cmd)
+                    # data/cache dirs use job-scoped tmp dirs inside the sandbox
                     extra_binds = [
-                        opencode_bind,
-                        "/home/vibeworker/.config/vibedev-opencode",
-                        "/home/vibeworker/.vibedev-secrets",
-                        "/home/vibeworker/.cache/vibedev-opencode",
-                        "/home/vibeworker/.local/share/vibedev-opencode",
+                        opencode_bind,  # opencode binary (ro via bwrap ro-bind)
+                        "/home/vibeworker/.config/vibedev-opencode/opencode.jsonc",  # config file (ro)
                     ]
+
+                    # Secret files: --ro-bind individual files, NOT the directory
+                    secret_binds = list(OPENCODE_SECRET_FILES)
+
+                    # Record secret bind paths in manifest (NO content)
+                    manifest.secret_bind_paths = secret_binds
+                    manifest.host_network_used = True
+                    manifest.domain_allowlist_enforced = False
 
                 # Use bwrap sandbox
                 launch_cmd, sandbox_config = self._build_sandbox_launch_cmd(
                     job_script_path, pid_file, manifest.remote_job_dir,
                     network_allowed=network_allowed,
                     network_policy=manifest.network_policy,
-                    extra_binds=extra_binds if extra_binds else None)
+                    extra_binds=extra_binds if extra_binds else None,
+                    secret_binds=secret_binds if secret_binds else None)
                 manifest.sandbox_enabled = True
                 manifest.sandbox_config = sandbox_config
             else:
@@ -2353,6 +2523,11 @@ class JobOrchestrator:
 
         # Use a wrapper that captures exit code even on failure.
         # 'set -e' is NOT used — we manually capture the exit code.
+        # For approved_model_egress, prepend OpenCode env vars.
+        env_prefix = ""
+        if self._is_opencode_command(command):
+            env_prefix = self._build_opencode_env_prefix(remote_job_dir)
+
         script = (
             "#!/bin/bash\n"
             "# Job: %s\n"
@@ -2363,12 +2538,12 @@ class JobOrchestrator:
             "# Integrity-Digest: %s\n"
             "# WARNING: This is an integrity-bound digest, NOT a cryptographic signature.\n"
             "cd %s\n"
-            "%s >stdout.txt 2>stderr.txt\n"
+            "%s%s >stdout.txt 2>stderr.txt\n"
             "EXIT_CODE=$?\n"
             "echo $EXIT_CODE > .exit_code\n"
             "exit $EXIT_CODE\n"
         ) % (job_id, worker_id, command_sha, base_sha, approval_digest,
-             integrity_digest, _shell_quote(remote_job_dir), command)
+             integrity_digest, _shell_quote(remote_job_dir), env_prefix, command)
 
         return script
 
