@@ -1824,6 +1824,9 @@ class JobOrchestrator:
         # --- Model validation ---
         if provider_model in QUARANTINED_MODELS:
             return {"ok": False, "reason": "quarantined_model: %s" % provider_model}
+        # Enforce full provider/model format (not short model name)
+        if provider_model and "/" not in provider_model:
+            return {"ok": False, "reason": "invalid_model_format: %s (must be provider/model)" % provider_model}
         if provider_model not in APPROVED_MODEL_REGISTRY:
             return {"ok": False, "reason": "unapproved_model: %s" % provider_model}
 
