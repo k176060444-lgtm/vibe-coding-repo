@@ -100,7 +100,7 @@ found in any new file.
 
 ### 6.4 Internal Path Scan
 
-No internal IPs (192.168.x.x) found in public docs.
+No internal IPs found in public docs. Worker hosts read from env vars (VIBEDEV_WORKER_*_HOST).
 No Windows absolute paths found in public docs.
 
 ### 6.5 runtime_code_changed
@@ -132,7 +132,37 @@ This PR must NOT be merged automatically. It requires:
 
 Merge requires explicit operator approval after review.
 
-## 9. Security Declarations
+## 9. Blocker Resolution (PR #168 Fix Commit)
+
+### 9.1 Hidden/Bidi Unicode
+
+All 7 files re-verified as ASCII-only (0 non-ASCII), LF line endings, no BOM,
+no ANSI escapes, no bidi control characters, no zero-width characters.
+
+### 9.2 Python Script Executability
+
+All 3 scripts verified via py_compile and --self-check:
+
+| Script | Lines | py_compile | self-check |
+|--------|-------|------------|------------|
+| runtime_inventory.py | ~310 | PASS | PASS |
+| upgrade_plan_validate.py | 298 | PASS | PASS |
+| upgrade_evidence_validate.py | 328 | PASS | PASS |
+
+### 9.3 Internal IP Removal
+
+Hardcoded worker IPs removed from runtime_inventory.py.
+Worker hosts now read from environment variables:
+- VIBEDEV_WORKER_5BAO_HOST
+- VIBEDEV_WORKER_9BAO_HOST
+
+Default value is "UNCONFIGURED" when env vars not set.
+
+### 9.4 Evidence Fixture Line Ending
+
+upgrade-evidence-fixture.json converted from CRLF to LF.
+
+## 10. Security Declarations
 
 | Declaration | Value |
 |-------------|-------|

@@ -95,8 +95,8 @@ SSH_KNOWN_DEFAULT = os.path.expanduser(
 SSH_PORT = 22222
 SSH_USER = "vibeworker"
 WORKER_IPS = {
-    "5bao": "192.168.5.6",
-    "9bao": "192.168.9.6",
+    "5bao": os.environ.get("VIBEDEV_WORKER_5BAO_HOST", "UNCONFIGURED"),
+    "9bao": os.environ.get("VIBEDEV_WORKER_9BAO_HOST", "UNCONFIGURED"),
 }
 
 
@@ -271,9 +271,14 @@ def self_check():
 
     # Check WORKER_IPS
     assert "5bao" in WORKER_IPS and "9bao" in WORKER_IPS, "missing worker IPs"
-    assert WORKER_IPS["5bao"].startswith("192.168."), "5bao IP should be 192.168.x.x"
-    assert WORKER_IPS["9bao"].startswith("192.168."), "9bao IP should be 192.168.x.x"
-    print("  PASS  worker IPs configured")
+    assert "5bao" in WORKER_IPS and "9bao" in WORKER_IPS, "missing worker IPs"
+    # IPs come from env vars; in self-check mode they may be UNCONFIGURED
+    for node, ip in WORKER_IPS.items():
+        if ip == "UNCONFIGURED":
+            print(f"  WARN  {node} host not configured (set VIBEDEV_WORKER_{node.upper()}_HOST)")
+        else:
+            print(f"  PASS  {node} host configured")
+    print("  PASS  worker IP config structure valid")
 
     # Check output format
     sample = {
