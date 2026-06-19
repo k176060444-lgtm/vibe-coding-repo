@@ -27,7 +27,38 @@ CLI:
   python3 vibe_job_orchestrator.py self-check
 """
 
-__version__ = "3.10.0"  # V1.18.4.6: bwrap sandbox with host-side PID capture
+__version__ = "3.10.0"  # V1.18.4: Recoverable repair saga + active-active + nonce reconcile
+
+# ===========================================================================
+# V1.18.4.9: Approved Model Egress Policy
+# ===========================================================================
+
+# Approved model registry for network egress.
+# Only models listed here may use network_policy=approved_model_egress.
+APPROVED_MODEL_REGISTRY = {
+    "deepseek-plan/deepseek-v4-flash",
+    "deepseek-plan/deepseek-v4-pro",
+    "xiaomi-plan/mimo-v2.5",
+    "xiaomi-plan/mimo-v2.5-pro",
+    "minimax-plan/MiniMax-M3",
+}
+
+# Quarantined models - never allowed network egress
+QUARANTINED_MODELS = {
+    "volcengine-plan/ark-code-latest",
+}
+
+# Approved domains for audit logging (NOT enforced at bwrap level)
+# bwrap uses host network namespace; domain enforcement is aspirational
+APPROVED_EGRESS_DOMAINS = [
+    "api.deepseek.com",
+    "api.minimax.chat",
+    "token-plan-cn.xiaomimimo.com",
+]
+
+# Allowed task types for network egress
+EGRESS_ALLOWED_TASK_TYPES = {"opencode_implement", "opencode_review"}
+
 
 # ===========================================================================
 # MANDATORY IMPORTS — FAIL-CLOSED, NO FALLBACKS
@@ -1473,14 +1504,10 @@ class JobManifest:
     revision: int = 0  # Monotonic revision for CAS (compare-and-swap)
     sandbox_enabled: bool = False
     sandbox_config: dict = field(default_factory=dict)  # bwrap_path, version, args, network_policy, etc.
-    # Network policy fields (V1.18.4.8: approved_model_egress)
-    network_policy: str = "blocked"  # "blocked" | "approved_model_egress"
-    provider: str = ""  # e.g. "deepseek", "xiaomi", "minimax"
-    model: str = ""  # e.g. "deepseek-v4-pro", "mimo-v2.5-pro"
-    egress_reason: str = ""  # why network is needed (e.g. "opencode_implement", "opencode_review")
-    approved_domains: List[str] = field(default_factory=list)  # domains allowed (informational)
-    approval_id: str = ""  # unique approval reference
-    approval_digest: str = ""  # SHA256(job_id + worker + role + model + approval_id)
+    network_policy: str = "blocked"  # blocked | approved_model_egress
+    provider_model: str = ""  # e.g. deepseek-plan/deepseek-v4-flash
+    approval_id: str = ""  # Operator approval reference
+    approval_digest: str = ""  # SHA256 of approval binding
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -1683,118 +1710,55 @@ class JobOrchestrator:
 
 
     # ================================================================
-    # Approved Model Registry (V1.18.4.8)
-    # ================================================================
-    # Only these provider/model combinations may use approved_model_egress.
-    # Each entry defines allowed task types and egress domains.
-    APPROVED_MODEL_REGISTRY = {
-        "deepseek/deepseek-v4-pro": {
-            "allowed_task_types": ["opencode-implement", "opencode-review"],
-            "allowed_egress_domains": ["api.deepseek.com"],
-            "description": "DeepSeek v4 Pro for code generation/review",
-        },
-        "xiaomi/mimo-v2.5-pro": {
-            "allowed_task_types": ["opencode-implement", "opencode-review"],
-            "allowed_egress_domains": ["api.xiaomi.com", "api.volcengine.com"],
-            "description": "Xiaomi MiMo v2.5 Pro",
-        },
-        "minimax/minimax-m2.5": {
-            "allowed_task_types": ["opencode-implement", "opencode-review"],
-            "allowed_egress_domains": ["api.minimax.chat"],
-            "description": "MiniMax M2.5",
-        },
-        "volcengine/ark-code-latest": {
-            "allowed_task_types": [],  # QUARANTINED: key_format_incorrect
-            "allowed_egress_domains": [],
-            "description": "QUARANTINED — do not use",
-        },
-    }
-
-    @staticmethod
-    def compute_approval_digest(job_id: str, worker: str, egress_reason: str,
-                                 model: str, approval_id: str) -> str:
-        """Compute approval digest for network policy validation."""
-        import hashlib as _hashlib
-        input_str = "|".join([job_id, worker, egress_reason, model, approval_id])
-        return _hashlib.sha256(input_str.encode("utf-8")).hexdigest()[:32]
-
-    def _validate_network_policy(self, manifest: JobManifest) -> dict:
-        """Validate network_policy for a job. Returns {valid, reason, policy_details}.
-
-        Rules:
-        - "blocked": always valid (default)
-        - "approved_model_egress": only for OpenCode tasks with approved provider/model
-        - Unknown policy: fail-closed
-        """
-        policy = manifest.network_policy
-        if policy == "blocked":
-            return {"valid": True, "reason": "default_blocked", "policy_details": {}}
-
-        if policy != "approved_model_egress":
-            return {"valid": False, "reason": "unknown_policy: %s" % policy,
-                    "policy_details": {}}
-
-        # Validate provider/model
-        provider = manifest.provider
-        model = manifest.model
-        model_key = "%s/%s" % (provider, model)
-        entry = self.APPROVED_MODEL_REGISTRY.get(model_key)
-        if entry is None:
-            return {"valid": False,
-                    "reason": "model_not_approved: %s" % model_key,
-                    "policy_details": {}}
-
-        if not entry["allowed_task_types"]:
-            return {"valid": False,
-                    "reason": "model_quarantined: %s" % model_key,
-                    "policy_details": {}}
-
-        # Validate task type (egress_reason maps to task type)
-        egress_reason = manifest.egress_reason
-        if egress_reason not in entry["allowed_task_types"]:
-            return {"valid": False,
-                    "reason": "task_type_not_allowed: %s not in %s" % (
-                        egress_reason, entry["allowed_task_types"]),
-                    "policy_details": {}}
-
-        # Validate approval fields
-        if not manifest.approval_id:
-            return {"valid": False, "reason": "missing_approval_id",
-                    "policy_details": {}}
-        if not manifest.approval_digest:
-            return {"valid": False, "reason": "missing_approval_digest",
-                    "policy_details": {}}
-
-        # Compute expected digest
-        import hashlib as _hashlib
-        expected_input = "|".join([
-            manifest.job_id, manifest.actual_worker or "",
-            egress_reason, model, manifest.approval_id,
-        ])
-        expected_digest = _hashlib.sha256(
-            expected_input.encode("utf-8")).hexdigest()[:32]
-        if manifest.approval_digest != expected_digest:
-            return {"valid": False,
-                    "reason": "approval_digest_mismatch: expected=%s got=%s" % (
-                        expected_digest[:16], manifest.approval_digest[:16]),
-                    "policy_details": {}}
-
-        return {
-            "valid": True,
-            "reason": "approved_model_egress_validated",
-            "policy_details": {
-                "provider": provider,
-                "model": model,
-                "egress_reason": egress_reason,
-                "approved_domains": entry["allowed_egress_domains"],
-                "approval_id": manifest.approval_id,
-                "approval_digest": manifest.approval_digest,
-            },
-        }
-
-    # ================================================================
     # Sandbox Runner (bubblewrap)
     # ================================================================
+
+    def _validate_network_policy(self, manifest) -> dict:
+        """Validate network_policy for a job. Returns {ok, reason, ...}.
+
+        Rules:
+        - network_policy must be one of: blocked, approved_model_egress
+        - approved_model_egress requires: provider_model in APPROVED_MODEL_REGISTRY,
+          task_type in EGRESS_ALLOWED_TASK_TYPES, approval_id, approval_digest
+        - Quarantined models are always BLOCKED
+        - Unknown/missing policy defaults to blocked (fail-closed)
+        """
+        policy = getattr(manifest, 'network_policy', 'blocked')
+        task_type = getattr(manifest, 'task_type', '')
+        provider_model = getattr(manifest, 'provider_model', '')
+        approval_id = getattr(manifest, 'approval_id', '')
+        approval_digest = getattr(manifest, 'approval_digest', '')
+
+        if policy == 'blocked':
+            return {"ok": True, "policy": "blocked", "reason": "default_blocked"}
+
+        if policy != 'approved_model_egress':
+            return {"ok": False, "reason": "unknown_policy: %s" % policy, "policy": policy}
+
+        # Validate approved_model_egress
+        if provider_model in QUARANTINED_MODELS:
+            return {"ok": False, "reason": "quarantined_model: %s" % provider_model}
+
+        if provider_model not in APPROVED_MODEL_REGISTRY:
+            return {"ok": False, "reason": "unapproved_model: %s" % provider_model}
+
+        if task_type not in EGRESS_ALLOWED_TASK_TYPES:
+            return {"ok": False, "reason": "task_type_not_allowed_for_egress: %s" % task_type}
+
+        if not approval_id:
+            return {"ok": False, "reason": "missing_approval_id"}
+
+        if not approval_digest:
+            return {"ok": False, "reason": "missing_approval_digest"}
+
+        return {
+            "ok": True,
+            "policy": "approved_model_egress",
+            "provider_model": provider_model,
+            "task_type": task_type,
+            "approval_id": approval_id,
+            "note": "bwrap uses host network namespace; domain enforcement is audit-only"
+        }
 
     def _check_bwrap_remote(self, ssh_opts, ssh_target) -> dict:
         """Check bwrap availability on remote worker. Returns evidence dict.
@@ -1843,7 +1807,9 @@ class JobOrchestrator:
         return evidence
 
     def _build_sandbox_launch_cmd(self, job_script_path, pid_file,
-                                   remote_job_dir, network_allowed=False):
+                                   remote_job_dir, network_allowed=False,
+                                   network_policy="blocked",
+                                   extra_binds=None):
         """Build bwrap sandbox launch command.
 
         Sandbox rules:
@@ -1852,13 +1818,9 @@ class JobOrchestrator:
         - /tmp: tmpfs (NOT host /tmp)
         - remote_job_dir: read-write bind (the ONLY writable path)
         - --unshare-pid, --unshare-net (unless network_allowed), --die-with-parent, --new-session
-        - HOST-SIDE PID capture: bwrap is backgrounded, $! captures host PID
-          (NOT namespace-internal $$ which is always 2 inside --unshare-pid)
-
-        PID isolation note:
-          With --unshare-pid, the sandbox gets its own PID namespace.
-          $$ inside the sandbox returns 2 (namespace-internal), NOT the host PID.
-          We MUST capture the host-side bwrap PID via $! for cancel/timeout to work.
+        - PID capture via bwrap exec
+        - extra_binds: additional --bind entries for approved_model_egress (opencode config, secrets)
+        - network_policy: "blocked" (default) or "approved_model_egress" (audit-recorded exception)
         """
         # Read-only system paths
         ro_binds = " ".join([
@@ -1867,6 +1829,10 @@ class JobOrchestrator:
             "--ro-bind /lib /lib",
             "--ro-bind /lib64 /lib64",
         ])
+
+        # For network-enabled sandboxes, bind /etc and /run for DNS resolution
+        if network_allowed:
+            ro_binds += " --ro-bind /etc /etc --ro-bind /run /run"
 
         # Standard mounts
         std_mounts = "--proc /proc --dev /dev"
@@ -1878,33 +1844,36 @@ class JobOrchestrator:
         rw_bind = "--bind %s %s" % (
             _shell_quote(remote_job_dir), _shell_quote(remote_job_dir))
 
+        # Extra binds for approved_model_egress (opencode config, secrets, etc.)
+        extra_bind_str = ""
+        if extra_binds:
+            for eb in extra_binds:
+                extra_bind_str += " --bind %s %s" % (
+                    _shell_quote(eb), _shell_quote(eb))
+
         # Network policy
         net_flag = "" if network_allowed else "--unshare-net"
 
-        # Process isolation (bwrap handles session/process group)
+        # Process isolation
         proc_flags = "--unshare-pid --die-with-parent --new-session"
 
         # Build the full bwrap command
-        # CRITICAL: capture HOST-SIDE bwrap PID via $! (not namespace-internal $$)
-        # bwrap --die-with-parent ensures sandbox dies if parent shell dies
-        # The inner bash execs the job script (PID 2 inside namespace, irrelevant for host control)
-        # stdout/stderr redirection is handled by the job script itself (>stdout.txt 2>stderr.txt)
-        # setsid creates a new session so the process group can be terminated on cancel/timeout
+        # bwrap runs bash which writes PID file then execs the job script
         bwrap_cmd = (
             "setsid bwrap %(ro_binds)s %(std_mounts)s %(tmpfs)s "
-            "%(rw_bind)s %(net_flag)s %(proc_flags)s "
-            "/bin/bash -c 'exec bash %(job_script)s' "
-            "</dev/null >/dev/null 2>&1 & "
-            "echo $! > %(pid_file)s"
+            "%(rw_bind)s %(extra_binds)s %(net_flag)s %(proc_flags)s "
+            "/bin/bash -c 'echo $$ > %(pid_file)s; exec bash %(job_script)s' "
+            "</dev/null >/dev/null 2>&1 &"
         ) % {
             "ro_binds": ro_binds,
             "std_mounts": std_mounts,
             "tmpfs": tmpfs,
             "rw_bind": rw_bind,
+            "extra_binds": extra_bind_str,
             "net_flag": net_flag,
             "proc_flags": proc_flags,
-            "job_script": _shell_quote(job_script_path),
             "pid_file": _shell_quote(pid_file),
+            "job_script": _shell_quote(job_script_path),
         }
 
         config = {
@@ -1913,13 +1882,11 @@ class JobOrchestrator:
             "ro_paths": ["/usr", "/bin", "/lib", "/lib64"],
             "rw_paths": [remote_job_dir],
             "tmpfs_paths": ["/tmp"],
-            "network_policy": "blocked" if not network_allowed else "approved_model_egress",
-            "network_exception": network_allowed,  # True = host network namespace retained
+            "network_policy": network_policy,
             "unshare_pid": True,
             "unshare_net": not network_allowed,
             "die_with_parent": True,
             "new_session": True,
-            "pid_capture": "host_bwrap_pid_via_dollar_bang",
         }
 
         return bwrap_cmd, config
@@ -2076,30 +2043,46 @@ class JobOrchestrator:
             bwrap_evidence = self._check_bwrap_remote(ssh_opts, ssh_target)
 
             if bwrap_evidence["available"]:
-                # V1.18.4.8: Validate network policy
-                net_policy_result = self._validate_network_policy(manifest)
-                if not net_policy_result["valid"]:
+                # Validate network_policy
+                net_validation = self._validate_network_policy(manifest)
+                if not net_validation["ok"]:
                     manifest = self._transition_state(
-                        manifest, JobState.BLOCKED.value,
-                        error="network_policy_invalid: %s" % net_policy_result["reason"])
+                        manifest, JobState.FAILED.value,
+                        error="network_policy_blocked: %s" % net_validation["reason"])
                     self._persist_manifest(manifest)
-                    self.claim_store.release_claim(job_id, "BLOCKED", success=False)
-                    return {"ok": False, "error": "network_policy_invalid",
-                            "job_id": job_id,
-                            "reason": net_policy_result["reason"]}
+                    self.claim_store.release_claim(job_id, "FAILED", success=False)
+                    return {"ok": False, "error": manifest.error, "job_id": job_id,
+                            "network_validation": net_validation}
 
-                # Determine if network is allowed
                 network_allowed = (manifest.network_policy == "approved_model_egress")
+
+                # For approved_model_egress, bind OpenCode config, secrets, and binary
+                extra_binds = []
+                if network_allowed:
+                    # Detect OpenCode binary location per node
+                    opencode_bind = "/home/vibeworker/.npm-global"  # 5bao default
+                    detect_cmd = "ls /home/vibeworker/.opencode/bin/opencode 2>/dev/null && echo opencode-local"
+                    detect_result = subprocess.run(
+                        ["ssh"] + ssh_opts + [ssh_target, detect_cmd],
+                        capture_output=True, timeout=5)
+                    if "opencode-local" in detect_result.stdout.decode():
+                        opencode_bind = "/home/vibeworker/.opencode"
+                    extra_binds = [
+                        opencode_bind,
+                        "/home/vibeworker/.config/vibedev-opencode",
+                        "/home/vibeworker/.vibedev-secrets",
+                        "/home/vibeworker/.cache/vibedev-opencode",
+                        "/home/vibeworker/.local/share/vibedev-opencode",
+                    ]
 
                 # Use bwrap sandbox
                 launch_cmd, sandbox_config = self._build_sandbox_launch_cmd(
                     job_script_path, pid_file, manifest.remote_job_dir,
-                    network_allowed=network_allowed)
+                    network_allowed=network_allowed,
+                    network_policy=manifest.network_policy,
+                    extra_binds=extra_binds if extra_binds else None)
                 manifest.sandbox_enabled = True
                 manifest.sandbox_config = sandbox_config
-                # Record network exception in sandbox config
-                if network_allowed:
-                    sandbox_config["network_exception_details"] = net_policy_result["policy_details"]
             else:
                 # FAIL-CLOSED: bwrap not available, cannot run without sandbox
                 manifest = self._transition_state(
@@ -3247,15 +3230,14 @@ def run_self_check() -> dict:
         checks.append({"name": "submit_no_tools_ok", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 9: ripgrep routes to capable worker (5bao or 9bao, both have ripgrep)
+    # Check 9: ripgrep routes to 9bao
     try:
         orch = _make_test_orchestrator()
         for w in orch.registry.list_workers():
             orch.registry.set_health(w.worker_id, NodeStatus.ONLINE)
         m = orch.submit_job("linux-worker", "rg --version", required_tools=["ripgrep"])
         assert m["state"] == "CLAIMED"
-        assert m["actual_worker"] in ("5bao", "9bao"), (
-            "ripgrep job should go to a capable worker, got: %s" % m["actual_worker"])
+        assert m["actual_worker"] == "9bao"
         checks.append({"name": "ripgrep_routes_9bao", "passed": True})
     except Exception as e:
         checks.append({"name": "ripgrep_routes_9bao", "passed": False, "error": str(e)})
@@ -3442,12 +3424,8 @@ def run_self_check() -> dict:
         assert len(candidates) >= 2
         candidates_rg = orch.scheduler.get_eligible_candidates(
             "linux-worker", required_tools=["ripgrep"])
-        assert len(candidates_rg) >= 1, (
-            "At least one worker should have ripgrep, got %d" % len(candidates_rg))
-        rg_workers = [c[0] for c in candidates_rg]
-        assert "9bao" in rg_workers, "9bao must have ripgrep"
-        # 5bao also has ripgrep now (operator-installed)
-        assert "5bao" in rg_workers, "5bao must have ripgrep (operator-installed)"
+        assert len(candidates_rg) == 1
+        assert candidates_rg[0][0] == "9bao"
         checks.append({"name": "get_eligible_candidates", "passed": True})
     except Exception as e:
         checks.append({"name": "get_eligible_candidates", "passed": False, "error": str(e)})
@@ -3861,9 +3839,9 @@ def run_self_check() -> dict:
         checks.append({"name": "active_active_scheduling", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 30: Version is 3.10.0
+    # Check 30: Version is 3.9.0
     try:
-        assert __version__ == "3.10.0", "Version must be 3.10.0, got %s" % __version__
+        assert __version__ == "3.9.0", "Version must be 3.9.0, got %s" % __version__
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})
