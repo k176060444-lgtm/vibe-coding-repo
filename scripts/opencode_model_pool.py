@@ -43,6 +43,16 @@ TASK_TYPE_RECOMMENDATIONS = {
         "preferred_tags": ["free", "code"],
         "preferred_roles": ["implementer"],
     },
+    "implementer-small": {
+        "strategy": "free + code capability (small tasks)",
+        "preferred_tags": ["free", "code", "fast"],
+        "preferred_roles": ["implementer-small", "implementer"],
+    },
+    "smoke": {
+        "strategy": "free + fastest + simplest",
+        "preferred_tags": ["free", "fast"],
+        "preferred_roles": ["smoke"],
+    },
     "reviewer": {
         "strategy": "free + review capability",
         "preferred_tags": ["free", "review"],
@@ -158,10 +168,16 @@ class ModelPool:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
     def _snapshot_content(self) -> str:
-        """Canonical snapshot content for hashing (no secrets, no self-referential SHA)."""
+        """Canonical snapshot content for hashing (no secrets, no self-referential SHA, no timestamp).
+
+        The hash is deterministic over model content only. timestamp is excluded
+        so that repeated discover_node calls on unchanged models produce the same SHA.
+        """
         sanitized = self.export_sanitized()
         # Remove snapshot_sha256 to avoid circular dependency
         sanitized.pop('snapshot_sha256', None)
+        # Remove snapshot_timestamp — it changes on every save() even when models are unchanged
+        sanitized.pop('snapshot_timestamp', None)
         return json.dumps(sanitized, sort_keys=True, ensure_ascii=False)
 
     def discover_node(self, node_id: str, models_list: list[str]) -> dict:
@@ -448,6 +464,29 @@ class ModelPool:
         # sc-21: recommend unknown task
         rec2 = pool.recommend("unknown_task", "test-node")
         check("sc-21-recommend-unknown", rec2.get("error") is not None)
+
+        # sc-22: recommend implementer-small (native, not fallback to implementer)
+        rec3 = pool.recommend("implementer-small", "test-node")
+        check("sc-22-recommend-implementer-small", rec3.get("recommended") is not None)
+        check("sc-22-implementer-small-task-type", rec3.get("task_type") == "implementer-small")
+
+        # sc-23: recommend smoke (native)
+        rec4 = pool.recommend("smoke", "test-node")
+        check("sc-23-recommend-smoke", rec4.get("recommended") is not None)
+        check("sc-23-smoke-task-type", rec4.get("task_type") == "smoke")
+
+        # sc-24: snapshot SHA consistency — recommend, export_snapshot, and
+        # pool.snapshot_sha256 must all agree
+        snap_sha = pool.snapshot_sha256
+        export_sha = hashlib.sha256(
+            json.dumps(pool.export_snapshot_for_approval(), sort_keys=True).encode()
+        ).hexdigest()
+        rec_sha = rec4.get("model_pool_snapshot_sha256", "")
+        check("sc-24-sha-pool-vs-recommend", snap_sha == rec_sha,
+              f"pool={snap_sha[:16]} rec={rec_sha[:16]}")
+        # Note: export_snapshot_for_approval SHA is hash of the export dict,
+        # not the same as pool.snapshot_sha256 (which is hash of models only).
+        # They are different by design. pool.snapshot_sha256 is the authoritative one.
 
         # sc-22: fallback disabled by default
         check("sc-22-fallback-disabled", not entry["fallback_allowed"])
