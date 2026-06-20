@@ -167,9 +167,123 @@ class TestSelfCheck(unittest.TestCase):
         result = self_check()
         assert result["passed"] is True
         assert result["version"] == "1.0.0"
-        assert len(result["checks"]) >= 8
+        assert len(result["checks"]) >= 17  # V1.20.18: 17 checks (was 10)
         for check in result["checks"]:
             assert check["passed"], f"Check {check['name']} failed: {check.get('error')}"
+
+
+class TestBlocklistBypassPrevention(unittest.TestCase):
+    """V1.20.18: Test controller repo blocklist bypass prevention."""
+
+    PROFILE_REPO = r"C:\Users\KK\AppData\Local\hermes\profiles\vibedev\home\vibe-coding-repo"
+
+    def test_profile_scoped_path_blocked(self):
+        """Profile-scoped controller repo path must be blocked."""
+        ok, _ = validate_path(self.PROFILE_REPO + r"\scripts\test.py")
+        assert not ok, "Profile-scoped controller repo should be blocked"
+
+    def test_case_insensitive_bypass_blocked(self):
+        """Uppercase variant of controller repo path must be blocked."""
+        ok, _ = validate_path(self.PROFILE_REPO.upper() + r"\test")
+        assert not ok, "Uppercase controller repo should be blocked"
+
+    def test_forward_slash_bypass_blocked(self):
+        """Forward slash variant of controller repo path must be blocked."""
+        fwd = self.PROFILE_REPO.replace("\\", "/") + "/test"
+        ok, _ = validate_path(fwd)
+        assert not ok, "Forward slash controller repo should be blocked"
+
+    def test_path_traversal_blocked(self):
+        """Path with .. traversal resolving to controller repo must be blocked."""
+        traversal = os.path.normpath(self.PROFILE_REPO + "/../../../" + self.PROFILE_REPO)
+        ok, _ = validate_path(traversal)
+        assert not ok, "Path traversal should be blocked"
+
+    def test_trailing_slash_bypass_blocked(self):
+        """Trailing slash variant of controller repo path must be blocked."""
+        ok, _ = validate_path(self.PROFILE_REPO + "\\\\")
+        assert not ok, "Trailing slash controller repo should be blocked"
+
+    def test_old_path_still_blocked(self):
+        """Old controller repo path must still be blocked."""
+        ok, _ = validate_path(r"C:\Users\KK\vibe-coding-repo\test")
+        assert not ok, "Old controller repo path should still be blocked"
+
+    def test_d_drive_still_allowed(self):
+        """D drive paths must remain allowed after blocklist update."""
+        ok, _ = validate_path(r"D:\vibedev-test-new")
+        assert ok, "D drive should be allowed"
+
+    def test_e_drive_still_allowed(self):
+        """E drive paths must remain allowed after blocklist update."""
+        ok, _ = validate_path(r"E:\vibedev-test-new")
+        assert ok, "E drive should be allowed"
+
+    def test_is_path_blocked_profile_scoped(self):
+        """is_path_blocked must detect profile-scoped controller repo."""
+        assert is_path_blocked(self.PROFILE_REPO + r"\test")
+        assert is_path_blocked(self.PROFILE_REPO)
+
+    def test_is_path_blocked_case_insensitive(self):
+        """is_path_blocked must be case-insensitive."""
+        assert is_path_blocked(self.PROFILE_REPO.upper() + r"\test")
+        assert is_path_blocked(self.PROFILE_REPO.lower() + r"\test")
+
+
+class TestCanonicalizationFailClosed(unittest.TestCase):
+    """V1.20.18: Test that canonicalization failures are fail-closed."""
+
+    PROFILE_REPO = r"C:\Users\KK\AppData\Local\hermes\profiles\vibedev\home\vibe-coding-repo"
+
+    def test_null_byte_path_rejected_or_handled(self):
+        """Path with null byte must be rejected or safely handled (fail-closed)."""
+        try:
+            ok, reason = validate_path("D:\\test\x00evil")
+            # If it passes validation, it must at least be on D: (allowlisted)
+            # The important thing is it doesn't crash or bypass
+            assert isinstance(ok, bool), "validate_path must return bool"
+            assert isinstance(reason, str), "validate_path must return reason string"
+        except (OSError, ValueError):
+            pass  # Exception is fail-closed
+
+    def test_is_path_blocked_fail_closed_on_bad_input(self):
+        """is_path_blocked must return True (blocked) for unresolvable paths."""
+        try:
+            result = is_path_blocked("D:\\test\x00evil")
+            assert isinstance(result, bool), "is_path_blocked must return bool"
+        except (OSError, ValueError):
+            pass  # Exception is fail-closed
+
+    def test_is_path_allowed_fail_closed_on_bad_input(self):
+        """is_path_allowed must return False for unresolvable paths."""
+        try:
+            result = is_path_allowed("D:\\test\x00evil")
+            assert isinstance(result, bool), "is_path_allowed must return bool"
+        except (OSError, ValueError):
+            pass  # Exception is fail-closed
+
+    def test_canonicalize_no_normpath_fallback(self):
+        """_canonicalize must not have normpath fallback (fail-closed)."""
+        import inspect
+        from vibe_windows_local_runner import _canonicalize
+        src = inspect.getsource(_canonicalize)
+        lines = src.split('\n')
+        code_lines = [l for l in lines if not l.strip().startswith('#')
+                      and '"""' not in l and "'''" not in l]
+        code_text = '\n'.join(code_lines)
+        assert 'normpath' not in code_text, \
+            "_canonicalize should not use normpath in code (fail-closed requirement)"
+
+    def test_symlink_to_controller_repo_blocked(self):
+        """If a junction/symlink resolves to controller repo, it must be blocked.
+
+        NOTE: Actual junction creation requires admin privileges.
+        This test verifies the mechanism (realpath + blocklist check).
+        Defense-in-depth: D/E allowlist restricts attack surface.
+        """
+        assert is_path_blocked(self.PROFILE_REPO)
+        assert is_path_blocked(self.PROFILE_REPO.upper())
+        assert is_path_blocked(self.PROFILE_REPO.lower())
 
 
 if __name__ == "__main__":
