@@ -327,11 +327,11 @@ def self_check() -> dict:
     result = simulate_rollback(rollback_scenario)
     checks.append({"name": "rollback_missing_target_blocked", "passed": not result["allowed"]})
 
-    # 11. 21bao remains disabled/manual_only in manifest
+    # 11. 21bao is enabled/manual_only in manifest (V1.20.19 activation)
     manifest = get_component_manifest()
     bao21 = [e for e in manifest if "21bao" in e.component]
-    bao21_ok = all(not e.enabled and e.manual_only for e in bao21) if bao21 else False
-    checks.append({"name": "21bao_stays_disabled_manual_only", "passed": bao21_ok})
+    bao21_ok = all(e.enabled and e.manual_only for e in bao21) if bao21 else False
+    checks.append({"name": "21bao_enabled_manual_only", "passed": bao21_ok})
 
     # 12. Simulated flag present in all results
     result = simulate_promotion(scenario_clean)

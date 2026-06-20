@@ -121,7 +121,8 @@ class TestComponentManifest:
         bao21 = [e for e in all_components if "21bao" in e.component]
         assert len(bao21) >= 1, "21bao not in manifest"
         for entry in bao21:
-            assert not entry.enabled, f"{entry.component} should be disabled"
+            # 21bao is now enabled=True, manual_only=True (V1.20.19 activation)
+            assert entry.enabled, f"{entry.component} should be enabled (manual-only activation)"
             assert entry.manual_only, f"{entry.component} should be manual_only"
 
     def test_valid_upgrade_classes(self, all_components):
@@ -486,7 +487,8 @@ class Test21baoSafety:
         bao21 = [e for e in all_components if "21bao" in e.component]
         assert len(bao21) >= 1
         for entry in bao21:
-            assert not entry.enabled
+            # 21bao is now enabled=True, manual_only=True (V1.20.19 activation)
+            assert entry.enabled
             assert entry.manual_only
 
     def test_21bao_not_auto_scheduled(self, all_components):

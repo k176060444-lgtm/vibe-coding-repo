@@ -83,7 +83,7 @@ class TestWorkerNodeSerialization(unittest.TestCase):
         assert w2.worker_id == "21bao"
         assert w2.transport == "local-exec"
         assert w2.manual_only is True
-        assert w2.enabled is False
+        assert w2.enabled is True
 
 
 class TestTransportRouting(unittest.TestCase):
@@ -214,7 +214,8 @@ class TestDisabledWorkerFiltering(unittest.TestCase):
         reg = WorkerRegistry()
         for wid in reg.workers:
             reg.set_health(wid, NodeStatus.ONLINE)
-        # 21bao is enabled=False by default, manual_only=True
+        # Temporarily disable 21bao to verify disabled-worker exclusion
+        reg.workers["21bao"].enabled = False
         # Even with include_manual_only, disabled workers stay excluded
         avail = reg.available_workers("implementer", include_manual_only=True)
         ids = {w.worker_id for w in avail}
@@ -295,7 +296,7 @@ class TestDefaultWorkers(unittest.TestCase):
         assert w.ssh_user == ""
         assert w.ssh_key_path == ""
         assert w.repo_root == ""
-        assert w.enabled is False
+        assert w.enabled is True
         assert w.manual_only is True
         assert "windows-worker" in w.capabilities
         assert "opencode" in w.capabilities

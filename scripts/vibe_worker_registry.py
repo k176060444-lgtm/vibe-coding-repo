@@ -160,7 +160,7 @@ DEFAULT_WORKERS = {
         capabilities=["windows-worker", "implementer", "reviewer", "powershell", "local-job", "opencode"],
         weight=100,
         max_parallel_jobs=1,
-        enabled=False,
+        enabled=True,
         manual_only=True,
         tools_installed={"opencode": "1.17.8"},
     ),
@@ -592,6 +592,8 @@ def self_check() -> dict:
         reg.set_health("5bao", NodeStatus.ONLINE)
         reg.set_health("9bao", NodeStatus.ONLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
+        # Temporarily disable 21bao to verify disabled-worker exclusion
+        reg.workers["21bao"].enabled = False
         # 21bao is enabled=False, manual_only=True — should not appear
         avail = reg.available_workers("implementer")
         ids = [w.worker_id for w in avail]

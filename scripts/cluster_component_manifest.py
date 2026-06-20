@@ -159,7 +159,7 @@ def get_component_manifest() -> list[ComponentEntry]:
             program_path_alias="$OPENCODE_INSTALL/21bao/",
             state_path_alias=_STATE_PATH_MAP["opencode-engine-21bao"],
             rollback_available=True,
-            enabled=False,
+            enabled=True,
             manual_only=True,
             protocol_version=RUNNER_PROTOCOL_VERSION,
             notes="OpenCode 1.17.8 on Windows 21bao; SHA256=5fa54e6d...; manual-only, not auto-scheduled"
@@ -172,7 +172,7 @@ def get_component_manifest() -> list[ComponentEntry]:
             program_path_alias="$REPO/scripts/vibe_windows_local_runner.py",
             state_path_alias=_STATE_PATH_MAP["windows-local-runner"],
             rollback_available=True,
-            enabled=False,
+            enabled=True,
             manual_only=True,
             protocol_version=RUNNER_PROTOCOL_VERSION,
             notes="Windows local-exec runner for 21bao; path allowlist D:\\+E:\\; blocklist controller repo"
@@ -293,10 +293,10 @@ def self_check() -> dict:
     checks.append({"name": "no_real_secrets_in_manifest", "passed": len(found_real) == 0,
                    "details": found_real if found_real else None})
 
-    # 3. 21bao is disabled + manual_only
+    # 3. 21bao is enabled + manual_only (V1.20.19 activation)
     bao21 = [e for e in manifest if "21bao" in e.component]
-    bao21_ok = all(not e.enabled and e.manual_only for e in bao21) if bao21 else False
-    checks.append({"name": "21bao_disabled_manual_only", "passed": bao21_ok})
+    bao21_ok = all(e.enabled and e.manual_only for e in bao21) if bao21 else False
+    checks.append({"name": "21bao_enabled_manual_only", "passed": bao21_ok})
 
     # 4. Upgrade classes are valid
     valid_classes = {c.value for c in UpgradeClass}
