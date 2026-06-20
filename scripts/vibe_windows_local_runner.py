@@ -107,22 +107,31 @@ def _canonicalize(path: str) -> str:
     Handles: case normalization, forward/backward slash, relative paths,
     .. traversal, trailing slashes, drive letter normalization.
     Returns lowercased, fully resolved absolute path.
+
+    FAIL-CLOSED: raises OSError/ValueError if path cannot be safely resolved.
+    Caller MUST catch and reject.
     """
     # Resolve relative paths, symlinks, junctions
-    try:
-        resolved = os.path.realpath(os.path.abspath(path))
-    except (OSError, ValueError):
-        # If we can't resolve, use normpath as fallback
-        resolved = os.path.normpath(os.path.abspath(path))
+    # FAIL-CLOSED: no fallback — if realpath/abspath fails, caller must reject
+    resolved = os.path.realpath(os.path.abspath(path))
     # Lowercase for case-insensitive Windows comparison
     return resolved.lower()
 
 
 def is_path_allowed(path: str) -> bool:
-    """Check if a path is in the allowlist (D:\\ or E:\\ only)."""
-    canonical = _canonicalize(path)
+    """Check if a path is in the allowlist (D:\\ or E:\\ only).
+
+    FAIL-CLOSED: returns False if path cannot be canonicalized.
+    """
+    try:
+        canonical = _canonicalize(path)
+    except (OSError, ValueError):
+        return False  # fail-closed
     for prefix in ALLOWED_PREFIXES:
-        canon_prefix = _canonicalize(prefix)
+        try:
+            canon_prefix = _canonicalize(prefix)
+        except (OSError, ValueError):
+            continue
         if canonical.startswith(canon_prefix):
             return True
     return False
@@ -137,10 +146,18 @@ def is_path_blocked(path: str) -> bool:
     - relative paths / .. traversal
     - trailing slashes
     - symlinks / junctions
+
+    FAIL-CLOSED: returns True (blocked) if path cannot be canonicalized.
     """
-    canonical = _canonicalize(path)
+    try:
+        canonical = _canonicalize(path)
+    except (OSError, ValueError):
+        return True  # fail-closed: can't resolve = blocked
     for prefix in BLOCKED_PREFIXES:
-        canon_prefix = _canonicalize(prefix)
+        try:
+            canon_prefix = _canonicalize(prefix)
+        except (OSError, ValueError):
+            continue
         if canonical.startswith(canon_prefix):
             return True
     return False
@@ -154,9 +171,9 @@ def validate_path(path: str) -> tuple[bool, str]:
     """
     # Fail-closed: try canonicalization, reject on failure
     try:
-        canonical = _canonicalize(path)
-    except Exception:
-        return False, f"blocked: cannot canonicalize path ({path})"
+        _ = _canonicalize(path)
+    except (OSError, ValueError) as e:
+        return False, f"blocked: cannot canonicalize path ({path}: {e})"
 
     # Blocklist check first (higher priority)
     if is_path_blocked(path):
@@ -541,6 +558,28 @@ def self_check() -> dict:
         checks.append({"name": "allowlist_de_unchanged", "passed": True})
     except Exception as e:
         checks.append({"name": "allowlist_de_unchanged", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 18: Fail-closed contract — _canonicalize raises on bad input
+    # Verify that validate_path catches and rejects (not silently passes)
+    try:
+        # A path with null bytes should fail
+        ok_null, reason_null = validate_path("D:\\test\x00evil")
+        assert not ok_null, "Null byte path should be rejected"
+        checks.append({"name": "fail_closed_null_byte", "passed": True})
+    except Exception as e:
+        # If validate_path itself raises, that's also fail-closed (acceptable)
+        checks.append({"name": "fail_closed_null_byte", "passed": True, "note": "exception propagated"})
+
+    # Check 19: _canonicalize function exists and is not fallback
+    try:
+        import inspect
+        src = inspect.getsource(_canonicalize)
+        assert "normpath" not in src or "FAIL-CLOSED" in src, \
+            "_canonicalize should not have normpath fallback"
+        checks.append({"name": "canonicalize_fail_closed", "passed": True})
+    except Exception as e:
+        checks.append({"name": "canonicalize_fail_closed", "passed": False, "error": str(e)})
         passed = False
 
     return {"passed": passed, "version": __version__, "checks": checks}

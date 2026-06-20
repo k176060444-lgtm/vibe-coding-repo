@@ -2,7 +2,7 @@
 
 **Version:** 1.20.18
 **Date:** 2026-06-20
-**Status:** Blocklist fix + plan document only — NOT enabling 21bao
+**Status:** Blocklist fix + plan document only -- NOT enabling 21bao
 
 ---
 
@@ -21,33 +21,33 @@
 
 ### A. Controller Repo Blocklist Gap Fix
 
-**Problem:** `BLOCKED_PREFIXES` only referenced `C:\Users\KK\vibe-coding-repo`, but the actual controller repo is at `C:\Users\KK\AppData\Local\hermes\profiles\vibedev\home\vibe-coding-repo`.
+**Problem:** `BLOCKED_PREFIXES` only referenced the legacy controller repo path, but the actual controller repo is at a profile-scoped location under the Hermes profile home directory.
 
-**Fix:** 
-1. Added profile-scoped path to `BLOCKED_PREFIXES`
+**Fix:**
+1. Added profile-scoped controller repo path to `BLOCKED_PREFIXES`
 2. Added `_canonicalize()` function for safe path comparison:
    - Case-insensitive (Windows)
    - Forward/backward slash normalization
    - Relative path / `..` traversal resolution
    - Trailing slash normalization
    - Symlink/junction resolution via `os.path.realpath`
-3. Fail-closed: any path that can't be canonicalized is rejected
+3. Fail-closed: any path that cannot be canonicalized is rejected
 
 **Bypass prevention matrix:**
 
 | Bypass attempt | Before fix | After fix |
 |---|---|---|
-| Profile-scoped path | ❌ NOT blocked | ✅ BLOCKED |
-| Case difference (`c:\users\...`) | ❌ NOT blocked | ✅ BLOCKED |
-| Forward slashes (`C:/Users/...`) | ❌ NOT blocked | ✅ BLOCKED |
-| Path traversal (`../../..`) | ❌ NOT blocked | ✅ BLOCKED |
-| Trailing slash | ❌ NOT blocked | ✅ BLOCKED |
-| Old path (`C:\Users\KK\vibe-coding-repo`) | ✅ blocked | ✅ still blocked |
-| D/E allowlist | ✅ allowed | ✅ still allowed |
+| Profile-scoped path | NOT blocked | BLOCKED |
+| Case difference | NOT blocked | BLOCKED |
+| Forward slashes | NOT blocked | BLOCKED |
+| Path traversal (..) | NOT blocked | BLOCKED |
+| Trailing slash | NOT blocked | BLOCKED |
+| Old legacy path | blocked | still blocked |
+| D/E allowlist | allowed | still allowed |
 
 ### B. Plan Documentation
 
-`docs/reports/V1218_21BAO_MANUAL_ONLY_DRY_RUN_ACTIVATION_PLAN.md` — activation design, job specs, rollback plan, operator decision points.
+Activation design, job specs, rollback plan, operator decision points.
 
 ---
 
@@ -73,21 +73,21 @@
 ### Dry-Run Job Spec
 ```python
 JobSpec(job_id="21bao-dry-run-001", branch="feat/test", task="implementer",
-        worktree_path=r"E:\vibedev-worktrees\21bao\dry-run-001",
+        worktree_path="<21bao_worktree_root>/dry-run-001",
         dry_run=True, timeout_s=30)
 ```
-Expected: `status=dry_run, exit_code=0, opencode_called=false, model_calls=0`
+Expected: status=dry_run, exit_code=0, opencode_called=false, model_calls=0
 
 ### No-Op Job Spec
 ```python
 JobSpec(job_id="21bao-noop-001", branch="feat/test", task="reviewer",
-        worktree_path=r"E:\vibedev-worktrees\21bao\noop-001",
+        worktree_path="<21bao_worktree_root>/noop-001",
         no_op=True, timeout_s=10)
 ```
-Expected: `status=no_op, exit_code=0`
+Expected: status=no_op, exit_code=0
 
 ### Rollback
-Revert 21bao `enabled` → False. Evidence/logs preserved on D/E.
+Revert 21bao enabled to False. Evidence/logs preserved on worker storage drives.
 
 ---
 
@@ -95,10 +95,10 @@ Revert 21bao `enabled` → False. Evidence/logs preserved on D/E.
 
 | Evidence | Result |
 |---|---|
-| `manual_only=True` in registry | ✅ |
-| scheduler skips manual_only workers | ✅ |
-| `get_eligible_candidates()` excludes 21bao | ✅ |
-| unknown transport fail-closed | ✅ |
+| manual_only=True in registry | YES |
+| scheduler skips manual_only workers | YES |
+| get_eligible_candidates() excludes 21bao | YES |
+| unknown transport fail-closed | YES |
 
 ---
 
@@ -110,6 +110,24 @@ Revert 21bao `enabled` → False. Evidence/logs preserved on D/E.
 | Enable 21bao (enabled=True)? | Separate PR, requires approval |
 | Execute dry-run job? | After enabled=True merge, operator trigger |
 | Execute no-op job? | After dry-run pass, operator trigger |
+
+---
+
+## 6. Canonicalization Failure Handling
+
+`_canonicalize()` is fail-closed:
+- If `os.path.realpath()` or `os.path.abspath()` raises OSError or ValueError, the exception propagates
+- `is_path_blocked()` returns True (blocked) on canonicalization failure
+- `is_path_allowed()` returns False (not allowed) on canonicalization failure
+- `validate_path()` returns (False, reason) on canonicalization failure
+- No fallback to `os.path.normpath()` -- if we cannot resolve, we reject
+
+### Limitation: Symlink/Junction Detection
+
+On Windows, `os.path.realpath()` resolves junctions and symlinks. However:
+- If the junction target is on a different volume, resolution may fail (fail-closed: blocked)
+- If the junction target is the controller repo from a D:/E: path, `realpath` will resolve to the controller repo path, which is then caught by the blocklist
+- We do NOT claim to detect all possible reparse points; the defense-in-depth is that D:/E: allowlist already restricts the attack surface
 
 ---
 
