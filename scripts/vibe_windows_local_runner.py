@@ -40,9 +40,15 @@ WRAPPER_PATH = r"D:\vibedev-tools\bin\opencode-21bao.ps1"
 # Path allowlist: only D:\ and E:\ are allowed for worktrees/evidence/logs
 ALLOWED_PREFIXES = (r"D:\\", r"E:\\")
 # Blocked paths: controller repo must never be written to
-BLOCKED_PREFIXES = (
+# V1.20.18: Added profile-scoped path + canonical path resolution
+_CONTROLLER_REPO_PATHS = [
     r"C:\Users\KK\vibe-coding-repo",
-    r"C:\Users\KK\vibe-coding-repo\\",
+    r"C:\Users\KK\AppData\Local\hermes\profiles\vibedev\home\vibe-coding-repo",
+]
+BLOCKED_PREFIXES = tuple(
+    p for p in _CONTROLLER_REPO_PATHS
+) + tuple(
+    p + "\\" for p in _CONTROLLER_REPO_PATHS
 )
 
 DEFAULT_TIMEOUT_S = 1800  # 30 minutes
@@ -95,32 +101,71 @@ class JobResult:
 
 # --- Path validation ---
 
+def _canonicalize(path: str) -> str:
+    """Canonicalize a Windows path for safe comparison.
+
+    Handles: case normalization, forward/backward slash, relative paths,
+    .. traversal, trailing slashes, drive letter normalization.
+    Returns lowercased, fully resolved absolute path.
+    """
+    # Resolve relative paths, symlinks, junctions
+    try:
+        resolved = os.path.realpath(os.path.abspath(path))
+    except (OSError, ValueError):
+        # If we can't resolve, use normpath as fallback
+        resolved = os.path.normpath(os.path.abspath(path))
+    # Lowercase for case-insensitive Windows comparison
+    return resolved.lower()
+
+
 def is_path_allowed(path: str) -> bool:
     """Check if a path is in the allowlist (D:\\ or E:\\ only)."""
-    normalized = os.path.normpath(path)
+    canonical = _canonicalize(path)
     for prefix in ALLOWED_PREFIXES:
-        norm_prefix = os.path.normpath(prefix)
-        if normalized.startswith(norm_prefix):
+        canon_prefix = _canonicalize(prefix)
+        if canonical.startswith(canon_prefix):
             return True
     return False
 
 
 def is_path_blocked(path: str) -> bool:
-    """Check if a path is explicitly blocked (controller repo)."""
-    normalized = os.path.normpath(path)
+    """Check if a path is explicitly blocked (controller repo).
+
+    Uses canonical path resolution to prevent bypass via:
+    - case differences (c:/Users vs C:/Users)
+    - forward slashes (C:/Users/KK/...)
+    - relative paths / .. traversal
+    - trailing slashes
+    - symlinks / junctions
+    """
+    canonical = _canonicalize(path)
     for prefix in BLOCKED_PREFIXES:
-        norm_prefix = os.path.normpath(prefix)
-        if normalized.startswith(norm_prefix):
+        canon_prefix = _canonicalize(prefix)
+        if canonical.startswith(canon_prefix):
             return True
     return False
 
 
 def validate_path(path: str) -> tuple[bool, str]:
-    """Validate a path against allowlist and blocklist. Returns (ok, reason)."""
+    """Validate a path against allowlist and blocklist. Returns (ok, reason).
+
+    Fail-closed: blocklist check first, then allowlist.
+    Any path that can't be safely canonicalized is rejected.
+    """
+    # Fail-closed: try canonicalization, reject on failure
+    try:
+        canonical = _canonicalize(path)
+    except Exception:
+        return False, f"blocked: cannot canonicalize path ({path})"
+
+    # Blocklist check first (higher priority)
     if is_path_blocked(path):
         return False, f"blocked: path is in controller repo ({path})"
+
+    # Allowlist check
     if not is_path_allowed(path):
         return False, f"blocked: path not in allowlist D:\\ or E:\\ ({path})"
+
     return True, "ok"
 
 
@@ -426,6 +471,76 @@ def self_check() -> dict:
         checks.append({"name": "version_check", "passed": True})
     except Exception as e:
         checks.append({"name": "version_check", "passed": False, "error": str(e)})
+        passed = False
+
+    # V1.20.18: Check 11-17: Controller repo blocklist gap closure
+    _ctrl_profile = r"C:\Users\KK\AppData\Local\hermes\profiles\vibedev\home\vibe-coding-repo"
+
+    # Check 11: Profile-scoped controller repo blocked
+    try:
+        ok, _ = validate_path(_ctrl_profile + r"\scripts\test.py")
+        assert not ok, "Profile-scoped controller repo should be blocked"
+        checks.append({"name": "blocklist_profile_scoped", "passed": True})
+    except Exception as e:
+        checks.append({"name": "blocklist_profile_scoped", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 12: Case-insensitive bypass blocked
+    try:
+        ok, _ = validate_path(_ctrl_profile.upper() + r"\test")
+        assert not ok, "Uppercase controller repo should be blocked"
+        checks.append({"name": "blocklist_case_insensitive", "passed": True})
+    except Exception as e:
+        checks.append({"name": "blocklist_case_insensitive", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 13: Forward slash bypass blocked
+    try:
+        fwd = _ctrl_profile.replace("\\", "/") + "/test"
+        ok, _ = validate_path(fwd)
+        assert not ok, "Forward slash controller repo should be blocked"
+        checks.append({"name": "blocklist_forward_slash", "passed": True})
+    except Exception as e:
+        checks.append({"name": "blocklist_forward_slash", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 14: Path traversal with .. blocked
+    try:
+        traversal = os.path.normpath(_ctrl_profile + "/../../../" + _ctrl_profile)
+        ok, _ = validate_path(traversal)
+        assert not ok, "Path traversal should be blocked"
+        checks.append({"name": "blocklist_path_traversal", "passed": True})
+    except Exception as e:
+        checks.append({"name": "blocklist_path_traversal", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 15: Trailing slash bypass blocked
+    try:
+        ok, _ = validate_path(_ctrl_profile + r"\\")
+        assert not ok, "Trailing slash controller repo should be blocked"
+        checks.append({"name": "blocklist_trailing_slash", "passed": True})
+    except Exception as e:
+        checks.append({"name": "blocklist_trailing_slash", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 16: Old path still blocked
+    try:
+        ok, _ = validate_path(r"C:\Users\KK\vibe-coding-repo\test")
+        assert not ok, "Old controller repo path should still be blocked"
+        checks.append({"name": "blocklist_old_path_still_blocked", "passed": True})
+    except Exception as e:
+        checks.append({"name": "blocklist_old_path_still_blocked", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 17: D/E paths remain allowed after blocklist update
+    try:
+        ok_d, _ = validate_path(r"D:\vibedev-test-new")
+        ok_e, _ = validate_path(r"E:\vibedev-test-new")
+        assert ok_d, "D drive should still be allowed"
+        assert ok_e, "E drive should still be allowed"
+        checks.append({"name": "allowlist_de_unchanged", "passed": True})
+    except Exception as e:
+        checks.append({"name": "allowlist_de_unchanged", "passed": False, "error": str(e)})
         passed = False
 
     return {"passed": passed, "version": __version__, "checks": checks}
