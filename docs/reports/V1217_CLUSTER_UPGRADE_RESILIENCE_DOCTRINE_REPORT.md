@@ -150,6 +150,33 @@ Unknown schema/protocol → fail-closed, do not dispatch。
 | vibe_scheduler_policy.py | 10/10 PASS |
 | vibe_windows_local_runner.py | 10/10 PASS |
 
+### Unicode Attestation (V1.20.17B)
+
+| 文件 | BOM | ZWSP/ZWNJ/ZWJ/LRM/RLM | LRE/RLE/PDF/LRO/RLO | LRI/RLI/FSI/PDI | 其他控制符 | 结果 |
+|---|---|---|---|---|---|---|
+| docs/CLUSTER_UPGRADE_RESILIENCE_DOCTRINE.md | 0 | 0 | 0 | 0 | 0 | CLEAN ✅ |
+| scripts/cluster_component_manifest.py | 0 | 0 | 0 | 0 | 0 | CLEAN ✅ |
+| scripts/cluster_upgrade_contract.py | 0 | 0 | 0 | 0 | 0 | CLEAN ✅ |
+| scripts/cluster_upgrade_simulate.py | 0 | 0 | 0 | 0 | 0 | CLEAN ✅ |
+| tests/test_cluster_upgrade_resilience.py | 0 | 0 | 0 | 0 | 0 | CLEAN ✅ |
+| docs/reports/V1217_...REPORT.md | 0 | 0 | 0 | 0 | 0 | CLEAN ✅ |
+| **总计** | **0** | **0** | **0** | **0** | **0** | **ALL CLEAN** |
+
+> GitHub diff hidden/bidi Unicode warning 为误报（CRLF line endings 触发）。逐文件 codepoint scan 全部 CLEAN。
+
+### Test Count Reconciliation (V1.20.17B)
+
+| 口径 | 值 |
+|---|---|
+| SELF_CHECK_NEW | 34 (8 + 14 + 12) |
+| SELF_CHECK_EXISTING | 35 (15 + 10 + 10) |
+| **SELF_CHECK_TOTAL** | **69** |
+| **SELF_CHECK_PASSED** | **69** |
+| **PYTEST_COLLECTED** | **58** |
+| **PYTEST_PASSED** | **58** |
+| **GRAND_TOTAL** | **127** |
+| **GRAND_PASSED** | **127** |
+
 ## 10. SAFETY_SCAN_RESULT
 
 | 检查项 | 结果 |
