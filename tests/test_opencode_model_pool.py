@@ -390,14 +390,15 @@ class TestRecommendationGateNative(unittest.TestCase):
         selected = reg.select_worker("implementer")
         assert selected is None, "21bao canary should reject implementer"
 
-    def test_21bao_canary_admission_still_rejects_reviewer(self):
+    def test_21bao_canary_admission_now_allows_reviewer(self):
         from vibe_worker_registry import WorkerRegistry, NodeStatus
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
         selected = reg.select_worker("reviewer")
-        assert selected is None
+        assert selected is not None
+        assert selected.worker_id == "21bao"
 
     def test_21bao_canary_admission_still_rejects_merge(self):
         from vibe_worker_registry import WorkerRegistry, NodeStatus
