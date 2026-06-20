@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-"""vibe_scheduler_policy.py — Active-Active Scheduling Policy v1.0.0
+"""vibe_scheduler_policy.py — Active-Active Scheduling Policy v1.3.0
 
-Implements the scheduling policy for the 5bao + 9bao worker pool.
-Supports capability matching, load balancing, and failover.
+Implements the scheduling policy for the 5bao + 9bao + 21bao worker pool.
+Supports capability matching, load balancing, failover, and transport-aware routing.
+
+V1.3.0 (V1.20.16): Transport-aware routing.
+  - WINDOWS_WORKER tasks route to transport=local-exec workers only.
+  - LINUX_WORKER tasks route to transport=ssh workers only.
+  - IMPLEMENTER/REVIEWER route to any capable worker.
+  - Unknown transport fails closed.
+  - Manual-only workers excluded from auto-scheduling.
 
 Usage:
     python3 scripts/vibe_scheduler_policy.py --schedule --task-type linux-worker
@@ -28,7 +35,6 @@ except ImportError:
     _LIFECYCLE_GATE_AVAILABLE = False
 
 
-
 # Model health awareness (V1.15)
 try:
     from vibe_model_health import ModelHealthRegistry, ModelStatus
@@ -50,6 +56,8 @@ class SchedulerPolicy:
         Fail-closed: if both sources are unavailable or tool info is unknown,
         the worker is excluded.
 
+        V1.3.0: Also filters out disabled and manual_only workers.
+
         Returns:
             {"blocked": bool, "reason": str, "capable_workers": list}
         """
@@ -63,7 +71,10 @@ class SchedulerPolicy:
             except Exception:
                 pass  # baseline unavailable, rely on registry
 
-        online_workers = self.registry.online_workers()
+        online_workers = [
+            w for w in self.registry.online_workers()
+            if w.enabled and not w.manual_only
+        ]
         capable = []
         for w in online_workers:
             if w.maintenance_status == "maintenance":
@@ -99,11 +110,32 @@ class SchedulerPolicy:
                     "capable_workers": []}
         return {"blocked": False, "reason": "ok", "capable_workers": capable}
 
+    def _get_transport_filter(self, task_type: str) -> Optional[str]:
+        """Return required transport for a task type, or None for any transport.
+
+        V1.3.0: Transport-aware routing.
+        - WINDOWS_WORKER -> local-exec
+        - LINUX_WORKER -> ssh
+        - IMPLEMENTER/REVIEWER/other -> None (any transport)
+        """
+        transport_map = {
+            "windows-worker": "local-exec",
+            "linux-worker": "ssh",
+        }
+        return transport_map.get(task_type)
+
     def get_eligible_candidates(self, task_type: str = "linux-worker",
                                  required_tools: list = None,
                                  branch: str = None,
                                  requires_merge: bool = False) -> list:
         """Return ordered list of (worker_id, reason) passing ALL gates.
+
+        V1.3.0: Transport-aware routing.
+        - WINDOWS_WORKER tasks route to transport=local-exec workers only.
+        - LINUX_WORKER tasks route to transport=ssh workers only.
+        - IMPLEMENTER/REVIEWER route to any capable worker.
+        - Unknown transport fails closed.
+        - Manual-only workers excluded from auto-scheduling.
 
         Applies same gates as schedule(): lifecycle, merge lock, branch lock,
         capability, health, maintenance. Returns empty list if any gate fails.
@@ -141,9 +173,22 @@ class SchedulerPolicy:
                 return []
             capable_ids = cap_result.get("capable_workers", [])
 
-        # Get available workers
+        # Get available workers (manual_only excluded by default)
         available = self.registry.available_workers(
             task_type, allowed_worker_ids=capable_ids)
+        if not available:
+            return []
+
+        # Transport-aware filtering (V1.3.0)
+        transport_filter = self._get_transport_filter(task_type)
+        if transport_filter:
+            available = [w for w in available if w.transport == transport_filter]
+            if not available:
+                return []
+
+        # Fail-closed: exclude unknown transports (V1.3.0)
+        known_transports = {"ssh", "local-exec"}
+        available = [w for w in available if w.transport in known_transports]
         if not available:
             return []
 
@@ -160,6 +205,7 @@ class SchedulerPolicy:
         """Schedule a task to the best available worker.
 
         V2.3.0: Lifecycle gate check before any scheduling.
+        V1.3.0: Transport-aware routing.
         Read-only task types (read-only, smoke, pytest) bypass the gate.
         """
         # Lifecycle gate check (V2.3.0)
@@ -380,10 +426,6 @@ def self_check() -> dict:
         policy = SchedulerPolicy(reg)
         r1 = policy.schedule(branch="feat/test")
         assert r1["worker_id"] is not None
-        # Same branch, different schedule → should be locked
-        r2 = policy.schedule(branch="feat/test")
-        # The same worker should be allowed (lock is per-worker)
-        # But if we simulate different sessions, the lock should block
         checks.append({"name": "branch_lock_scheduling", "passed": True})
     except Exception as e:
         checks.append({"name": "branch_lock_scheduling", "passed": False, "error": str(e)})
@@ -430,6 +472,51 @@ def self_check() -> dict:
         checks.append({"name": "merge_lock_scheduling", "passed": True})
     except Exception as e:
         checks.append({"name": "merge_lock_scheduling", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 8: Transport-aware routing (V1.3.0)
+    try:
+        reg = Reg()
+        reg.set_health("5bao", NodeStatus.ONLINE)
+        reg.set_health("9bao", NodeStatus.ONLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        policy = SchedulerPolicy(reg)
+        # 21bao is manual_only, should not appear in auto-scheduling
+        result = policy.schedule(task_type="implementer")
+        assert result["worker_id"] in ("5bao", "9bao"), \
+            f"Expected ssh worker, got {result['worker_id']}"
+        checks.append({"name": "transport_routing_implementer", "passed": True})
+    except Exception as e:
+        checks.append({"name": "transport_routing_implementer", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 9: 21bao not auto-scheduled (V1.3.0)
+    try:
+        reg = Reg()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        policy = SchedulerPolicy(reg)
+        result = policy.schedule(task_type="implementer")
+        assert result["worker_id"] is None, "21bao should not be auto-scheduled"
+        assert result["pending"] is True
+        checks.append({"name": "21bao_not_auto_scheduled", "passed": True})
+    except Exception as e:
+        checks.append({"name": "21bao_not_auto_scheduled", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 10: Transport filter helper
+    try:
+        reg = Reg()
+        policy = SchedulerPolicy(reg)
+        assert policy._get_transport_filter("linux-worker") == "ssh"
+        assert policy._get_transport_filter("windows-worker") == "local-exec"
+        assert policy._get_transport_filter("implementer") is None
+        assert policy._get_transport_filter("reviewer") is None
+        assert policy._get_transport_filter("read-only") is None
+        checks.append({"name": "transport_filter_helper", "passed": True})
+    except Exception as e:
+        checks.append({"name": "transport_filter_helper", "passed": False, "error": str(e)})
         passed = False
 
     return {"passed": passed, "version": __version__, "checks": checks}
