@@ -43,6 +43,16 @@ TASK_TYPE_RECOMMENDATIONS = {
         "preferred_tags": ["free", "code"],
         "preferred_roles": ["implementer"],
     },
+    "implementer-small": {
+        "strategy": "free + code capability (small tasks)",
+        "preferred_tags": ["free", "code", "fast"],
+        "preferred_roles": ["implementer-small", "implementer"],
+    },
+    "smoke": {
+        "strategy": "free + fastest + simplest",
+        "preferred_tags": ["free", "fast"],
+        "preferred_roles": ["smoke"],
+    },
     "reviewer": {
         "strategy": "free + review capability",
         "preferred_tags": ["free", "review"],
@@ -448,6 +458,16 @@ class ModelPool:
         # sc-21: recommend unknown task
         rec2 = pool.recommend("unknown_task", "test-node")
         check("sc-21-recommend-unknown", rec2.get("error") is not None)
+
+        # sc-22: recommend implementer-small (native, not fallback to implementer)
+        rec3 = pool.recommend("implementer-small", "test-node")
+        check("sc-22-recommend-implementer-small", rec3.get("recommended") is not None)
+        check("sc-22-implementer-small-task-type", rec3.get("task_type") == "implementer-small")
+
+        # sc-23: recommend smoke (native)
+        rec4 = pool.recommend("smoke", "test-node")
+        check("sc-23-recommend-smoke", rec4.get("recommended") is not None)
+        check("sc-23-smoke-task-type", rec4.get("task_type") == "smoke")
 
         # sc-22: fallback disabled by default
         check("sc-22-fallback-disabled", not entry["fallback_allowed"])

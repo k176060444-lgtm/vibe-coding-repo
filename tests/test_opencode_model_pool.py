@@ -6,6 +6,7 @@ import sys
 import tempfile
 
 import pytest
+import unittest
 
 # Add scripts to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
@@ -338,3 +339,80 @@ class TestOperatorModelApprovalGate:
         )
         assert tmpl["fallback_policy"] == "disabled"
         assert tmpl["approval_status"] == "NOT_APPROVED"
+
+
+
+class TestRecommendationGateNative(unittest.TestCase):
+    """Test native recommendation for implementer-small and smoke (V1.20.29J)."""
+
+    def test_recommend_implementer_small_native(self):
+        from opencode_model_pool import ModelPool
+        pool = ModelPool()
+        rec = pool.recommend("implementer-small", "21bao")
+        assert rec.get("error") is None, f"implementer-small should be supported: {rec}"
+        assert rec.get("task_type") == "implementer-small"
+        assert rec.get("recommended") is not None
+        assert rec.get("node") == "21bao"
+
+    def test_recommend_implementer_small_not_implementer_fallback(self):
+        from opencode_model_pool import ModelPool
+        pool = ModelPool()
+        rec = pool.recommend("implementer-small", "21bao")
+        assert rec.get("task_type") == "implementer-small"
+        assert rec.get("task_type") != "implementer"
+
+    def test_recommend_smoke_native(self):
+        from opencode_model_pool import ModelPool
+        pool = ModelPool()
+        rec = pool.recommend("smoke", "21bao")
+        assert rec.get("error") is None, f"smoke should be supported: {rec}"
+        assert rec.get("task_type") == "smoke"
+        assert rec.get("recommended") is not None
+
+    def test_recommend_implementer_small_has_snapshot_sha(self):
+        from opencode_model_pool import ModelPool
+        pool = ModelPool()
+        rec = pool.recommend("implementer-small", "21bao")
+        assert rec.get("model_pool_snapshot_sha256") is not None
+
+    def test_recommend_smoke_has_alternatives(self):
+        from opencode_model_pool import ModelPool
+        pool = ModelPool()
+        rec = pool.recommend("smoke", "21bao")
+        assert rec.get("alternatives") is not None
+
+    def test_21bao_canary_admission_still_rejects_implementer(self):
+        from vibe_worker_registry import WorkerRegistry, NodeStatus
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("implementer")
+        assert selected is None, "21bao canary should reject implementer"
+
+    def test_21bao_canary_admission_still_rejects_reviewer(self):
+        from vibe_worker_registry import WorkerRegistry, NodeStatus
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("reviewer")
+        assert selected is None
+
+    def test_21bao_canary_admission_still_rejects_merge(self):
+        from vibe_worker_registry import WorkerRegistry, NodeStatus
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("merge")
+        assert selected is None
+
+    def test_21bao_canary_admission_still_rejects_windows_worker(self):
+        from vibe_worker_registry import WorkerRegistry, NodeStatus
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("windows-worker")
+        assert selected is None

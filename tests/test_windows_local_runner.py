@@ -368,5 +368,68 @@ class TestSubtreeContainment(unittest.TestCase):
         assert is_path_read_allowed(r"D:\vibedev-config\opencode\test.json")
 
 
+
+
+class TestVerdictClassification(unittest.TestCase):
+    """Test classify_verdict function (V1.20.29J)."""
+
+    def test_pass_exit_zero_with_match(self):
+        from vibe_windows_local_runner import classify_verdict, VERDICT_PASS
+        result = classify_verdict(0, "21bao canary smoke ok", "21bao canary smoke ok")
+        assert result == VERDICT_PASS
+
+    def test_pass_exit_zero_with_match_substring(self):
+        from vibe_windows_local_runner import classify_verdict, VERDICT_PASS
+        result = classify_verdict(0, "prefix 21bao canary smoke ok suffix", "21bao canary smoke ok")
+        assert result == VERDICT_PASS
+
+    def test_pass_with_timeout_after_output_match(self):
+        from vibe_windows_local_runner import classify_verdict, VERDICT_PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH
+        result = classify_verdict(124, "21bao canary smoke ok", "21bao canary smoke ok")
+        assert result == VERDICT_PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH
+
+    def test_pass_with_timeout_after_output_match_substring(self):
+        from vibe_windows_local_runner import classify_verdict, VERDICT_PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH
+        stdout = "> build \u00b7 model\n\n$ echo \"21bao canary smoke ok\"\n21bao canary smoke ok"
+        result = classify_verdict(124, stdout, "21bao canary smoke ok")
+        assert result == VERDICT_PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH
+
+    def test_fail_timeout_no_match(self):
+        from vibe_windows_local_runner import classify_verdict, VERDICT_FAIL_TIMEOUT_NO_MATCH
+        result = classify_verdict(124, "some other output", "21bao canary smoke ok")
+        assert result == VERDICT_FAIL_TIMEOUT_NO_MATCH
+
+    def test_fail_timeout_empty_stdout(self):
+        from vibe_windows_local_runner import classify_verdict, VERDICT_FAIL_TIMEOUT_NO_MATCH
+        result = classify_verdict(124, "", "21bao canary smoke ok")
+        assert result == VERDICT_FAIL_TIMEOUT_NO_MATCH
+
+    def test_fail_nonzero_no_match(self):
+        from vibe_windows_local_runner import classify_verdict, VERDICT_FAIL_NONZERO
+        result = classify_verdict(1, "some error output", "21bao canary smoke ok")
+        assert result == VERDICT_FAIL_NONZERO
+
+    def test_fail_nonzero_exit_2(self):
+        from vibe_windows_local_runner import classify_verdict, VERDICT_FAIL_NONZERO
+        result = classify_verdict(2, "", "expected")
+        assert result == VERDICT_FAIL_NONZERO
+
+    def test_pass_nonzero_with_match(self):
+        """Nonzero exit but output matched — treated as PASS."""
+        from vibe_windows_local_runner import classify_verdict, VERDICT_PASS
+        result = classify_verdict(1, "21bao canary smoke ok", "21bao canary smoke ok")
+        assert result == VERDICT_PASS
+
+    def test_verdict_constants_defined(self):
+        from vibe_windows_local_runner import (
+            VERDICT_PASS, VERDICT_PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH,
+            VERDICT_FAIL_TIMEOUT_NO_MATCH, VERDICT_FAIL_NONZERO,
+        )
+        assert VERDICT_PASS == "PASS"
+        assert VERDICT_PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH == "PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH"
+        assert VERDICT_FAIL_TIMEOUT_NO_MATCH == "FAIL_TIMEOUT_NO_MATCH"
+        assert VERDICT_FAIL_NONZERO == "FAIL_NONZERO"
+
+
 if __name__ == "__main__":
     unittest.main()

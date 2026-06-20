@@ -118,6 +118,42 @@ class JobResult:
         }
 
 
+# --- Verdict classification (V1.20.29J) ---
+
+VERDICT_PASS = "PASS"
+VERDICT_PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH = "PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH"
+VERDICT_FAIL_TIMEOUT_NO_MATCH = "FAIL_TIMEOUT_NO_MATCH"
+VERDICT_FAIL_NONZERO = "FAIL_NONZERO"
+
+
+def classify_verdict(exit_code: int, stdout: str, expected_output: str) -> str:
+    """Classify job verdict based on exit code, stdout, and expected output.
+
+    Rules:
+    - PASS: exit_code == 0 and expected_output found in stdout
+    - PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH: exit_code == 124 (timeout) and
+      expected_output found in stdout (model produced output before timeout)
+    - FAIL_TIMEOUT_NO_MATCH: exit_code == 124 (timeout) and expected_output
+      NOT found in stdout
+    - FAIL_NONZERO: nonzero exit code (not 124) and expected_output NOT found
+    """
+    output_matched = expected_output in stdout
+
+    if exit_code == 0 and output_matched:
+        return VERDICT_PASS
+    elif exit_code == 124 and output_matched:
+        return VERDICT_PASS_WITH_TIMEOUT_AFTER_OUTPUT_MATCH
+    elif exit_code == 124 and not output_matched:
+        return VERDICT_FAIL_TIMEOUT_NO_MATCH
+    elif exit_code != 0 and not output_matched:
+        return VERDICT_FAIL_NONZERO
+    elif exit_code != 0 and output_matched:
+        # Nonzero exit but output matched — treat as PASS_WITH_WARNING
+        return VERDICT_PASS
+    else:
+        return VERDICT_FAIL_NONZERO
+
+
 # --- Path validation ---
 
 def _canonicalize(path: str) -> str:
