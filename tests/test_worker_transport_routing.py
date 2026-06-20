@@ -82,7 +82,8 @@ class TestWorkerNodeSerialization(unittest.TestCase):
         w2 = WorkerNode.from_dict(d2)
         assert w2.worker_id == "21bao"
         assert w2.transport == "local-exec"
-        assert w2.manual_only is True
+        assert w2.manual_only is False
+        assert w2.admission_mode == "canary"
         assert w2.enabled is True
 
 
@@ -107,21 +108,19 @@ class TestTransportRouting(unittest.TestCase):
 
     def test_localexec_workers_for_windows_worker(self):
         reg = self._make_registry()
-        # 21bao has windows-worker capability but is manual_only
+        # 21bao is canary, windows-worker NOT in allowed_operations -> rejected
         avail = reg.available_workers("windows-worker")
         ids = {w.worker_id for w in avail}
-        # 21bao is manual_only, excluded by default
-        assert "21bao" not in ids
+        assert "21bao" not in ids, "21bao canary should be rejected for windows-worker"
         assert "5bao" not in ids
         assert "9bao" not in ids
 
-    def test_windows_worker_with_include_manual_only(self):
+    def test_windows_worker_canary_rejected(self):
         reg = self._make_registry()
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
-        avail = reg.available_workers("windows-worker", include_manual_only=True)
+        # 21bao is canary, windows-worker NOT in allowed_operations -> rejected
+        avail = reg.available_workers("windows-worker")
         ids = {w.worker_id for w in avail}
-        assert "21bao" in ids
+        assert "21bao" not in ids
 
     def test_implementer_routes_to_ssh_workers(self):
         reg = self._make_registry()
@@ -129,18 +128,17 @@ class TestTransportRouting(unittest.TestCase):
         ids = {w.worker_id for w in avail}
         assert "5bao" in ids
         assert "9bao" in ids
-        # 21bao excluded by manual_only
+        # 21bao is canary, implementer NOT in allowed_operations -> excluded
         assert "21bao" not in ids
 
     def test_implementer_with_manual_only_included(self):
         reg = self._make_registry()
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
-        avail = reg.available_workers("implementer", include_manual_only=True)
+        # 21bao is canary, implementer NOT in allowed_operations
+        avail = reg.available_workers("implementer")
         ids = {w.worker_id for w in avail}
         assert "5bao" in ids
         assert "9bao" in ids
-        assert "21bao" in ids
+        assert "21bao" not in ids
 
     def test_reviewer_routes_similarly(self):
         reg = self._make_registry()
@@ -158,28 +156,34 @@ class TestManualOnlyFiltering(unittest.TestCase):
         reg = WorkerRegistry()
         for wid in reg.workers:
             reg.set_health(wid, NodeStatus.ONLINE)
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
+        # 21bao is canary, implementer NOT in allowed_operations -> excluded
         avail = reg.available_workers("implementer")
         ids = {w.worker_id for w in avail}
         assert "21bao" not in ids
+        # But implementer-small should include 21bao
+        avail_small = reg.available_workers("implementer-small")
+        small_ids = {w.worker_id for w in avail_small}
+        assert "21bao" in small_ids
 
     def test_manual_only_included_when_requested(self):
         reg = WorkerRegistry()
         for wid in reg.workers:
             reg.set_health(wid, NodeStatus.ONLINE)
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
+        # 21bao is canary, implementer NOT in capabilities/allowed_operations
+        # include_manual_only bypasses manual_only filter but not canary admission
         avail = reg.available_workers("implementer", include_manual_only=True)
         ids = {w.worker_id for w in avail}
-        assert "21bao" in ids
+        assert "21bao" not in ids
+        # smoke should include 21bao with include_manual_only
+        avail_smoke = reg.available_workers("smoke", include_manual_only=True)
+        smoke_ids = {w.worker_id for w in avail_smoke}
+        assert "21bao" in smoke_ids
 
     def test_select_worker_excludes_manual_only(self):
         reg = WorkerRegistry()
         for wid in reg.workers:
             reg.set_health(wid, NodeStatus.ONLINE)
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
+        # 21bao is canary, implementer NOT in allowed_operations -> excluded
         selected = reg.select_worker("implementer")
         assert selected is not None
         assert selected.worker_id != "21bao"
@@ -190,21 +194,30 @@ class TestManualOnlyFiltering(unittest.TestCase):
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
+        # 21bao is canary, implementer blocked even with include_manual_only
         selected = reg.select_worker("implementer", include_manual_only=True)
-        assert selected is not None
-        assert selected.worker_id == "21bao"
+        assert selected is None, "canary admission blocks implementer regardless of include_manual_only"
+        # smoke should work
+        selected_smoke = reg.select_worker("smoke", include_manual_only=True)
+        assert selected_smoke is not None
+        assert selected_smoke.worker_id == "21bao"
 
-    def test_21bao_not_auto_scheduled_when_only_worker(self):
+    def test_21bao_canary_enforced_when_only_worker(self):
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
-        selected = reg.select_worker("implementer")
-        assert selected is None, "21bao should never be auto-scheduled"
+        # implementer NOT in canary allowed_operations -> rejected
+        selected_impl = reg.select_worker("implementer")
+        assert selected_impl is None, "21bao canary should NOT be auto-scheduled for implementer"
+        # smoke IS in canary allowed_operations -> accepted
+        selected_smoke = reg.select_worker("smoke")
+        assert selected_smoke is not None
+        assert selected_smoke.worker_id == "21bao"
+        # implementer-small IS in canary allowed_operations -> accepted
+        selected_small = reg.select_worker("implementer-small")
+        assert selected_small is not None
+        assert selected_small.worker_id == "21bao"
 
 
 class TestDisabledWorkerFiltering(unittest.TestCase):
@@ -227,9 +240,14 @@ class TestDisabledWorkerFiltering(unittest.TestCase):
             reg.set_health(wid, NodeStatus.ONLINE)
         reg.workers["21bao"].enabled = True
         reg.workers["21bao"].manual_only = False
+        # 21bao is canary, implementer NOT in allowed_operations
         avail = reg.available_workers("implementer")
         ids = {w.worker_id for w in avail}
-        assert "21bao" in ids
+        assert "21bao" not in ids
+        # But implementer-small should include 21bao
+        avail_small = reg.available_workers("implementer-small")
+        small_ids = {w.worker_id for w in avail_small}
+        assert "21bao" in small_ids
 
 
 class TestUnknownTransportFailClosed(unittest.TestCase):
@@ -278,7 +296,7 @@ class TestUnknownTransportFailClosed(unittest.TestCase):
         # Should not match linux-worker
         avail = reg.available_workers("linux-worker")
         assert len(avail) == 0
-        # Should match implementer
+        # Should match implementer (admission_mode=normal, no canary filter)
         avail2 = reg.available_workers("implementer")
         assert len(avail2) == 1
 
@@ -297,7 +315,8 @@ class TestDefaultWorkers(unittest.TestCase):
         assert w.ssh_key_path == ""
         assert w.repo_root == ""
         assert w.enabled is True
-        assert w.manual_only is True
+        assert w.manual_only is False
+        assert w.admission_mode == "canary"
         assert "windows-worker" in w.capabilities
         assert "opencode" in w.capabilities
 
@@ -315,6 +334,124 @@ class TestDefaultWorkers(unittest.TestCase):
 
     def test_three_workers_total(self):
         assert len(DEFAULT_WORKERS) == 3
+
+
+
+
+class TestCanaryAdmissionEnforcement(unittest.TestCase):
+    """Test canary admission enforcement V120H3."""
+
+    def test_canary_smoke_allowed(self):
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("smoke")
+        assert selected is not None
+        assert selected.worker_id == "21bao"
+
+    def test_canary_implementer_small_allowed(self):
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("implementer-small")
+        assert selected is not None
+        assert selected.worker_id == "21bao"
+
+    def test_canary_implementer_rejected(self):
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("implementer")
+        assert selected is None
+
+    def test_canary_reviewer_rejected(self):
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("reviewer")
+        assert selected is None
+
+    def test_canary_merge_release_production_rejected(self):
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        for task in ["merge", "release", "production"]:
+            selected = reg.select_worker(task)
+            assert selected is None, f"21bao should not be selected for {task}"
+
+    def test_canary_windows_worker_rejected(self):
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("windows-worker")
+        assert selected is None
+
+    def test_all_online_implementer_prefers_non_canary(self):
+        reg = WorkerRegistry()
+        for wid in reg.workers:
+            reg.set_health(wid, NodeStatus.ONLINE)
+        selected = reg.select_worker("implementer")
+        assert selected is not None
+        assert selected.worker_id in ("5bao", "9bao")
+        assert selected.worker_id != "21bao"
+
+    def test_allowed_operations_enforced(self):
+        w = DEFAULT_WORKERS["21bao"]
+        assert "implementer" not in w.capabilities
+        assert "implementer" not in w.allowed_operations
+        assert "smoke" in w.allowed_operations
+        assert "implementer-small" in w.allowed_operations
+
+    def test_canary_missing_allowed_operations_fail_closed(self):
+        w = WorkerNode(
+            worker_id="test-canary-empty", node_type="debian-worker",
+            transport="ssh", ssh_host="", ssh_port=0, ssh_user="",
+            ssh_key_path="", repo_root="", workspace_root="",
+            capabilities=["implementer", "smoke"],
+            admission_mode="canary",
+            allowed_operations=[],
+        )
+        reg = WorkerRegistry(workers={"test-canary-empty": w})
+        reg.set_health("test-canary-empty", NodeStatus.ONLINE)
+        for task in ["implementer", "smoke", "reviewer"]:
+            avail = reg.available_workers(task)
+            assert len(avail) == 0, f"canary with empty allowed_operations should reject {task}"
+
+    def test_normal_worker_ignores_allowed_operations(self):
+        w = WorkerNode(
+            worker_id="test-normal", node_type="debian-worker",
+            transport="ssh", ssh_host="", ssh_port=0, ssh_user="",
+            ssh_key_path="", repo_root="", workspace_root="",
+            capabilities=["implementer", "reviewer"],
+            admission_mode="normal",
+            allowed_operations=["smoke"],
+        )
+        reg = WorkerRegistry(workers={"test-normal": w})
+        reg.set_health("test-normal", NodeStatus.ONLINE)
+        avail = reg.available_workers("implementer")
+        assert len(avail) == 1, "normal worker should not be filtered by allowed_operations"
+        avail2 = reg.available_workers("reviewer")
+        assert len(avail2) == 1
+
+    def test_21bao_capabilities_exclude_implementer(self):
+        w = DEFAULT_WORKERS["21bao"]
+        assert "implementer" not in w.capabilities
+        assert "implementer-small" in w.capabilities
+        assert "smoke" in w.capabilities
+
+    def test_21bao_canary_policy_exact(self):
+        w = DEFAULT_WORKERS["21bao"]
+        assert w.enabled is True
+        assert w.manual_only is False
+        assert w.admission_mode == "canary"
+        assert w.max_parallel_jobs == 1
+        assert set(w.allowed_operations) == {"smoke", "implementer-small"}
 
 
 if __name__ == "__main__":
