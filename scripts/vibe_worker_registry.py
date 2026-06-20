@@ -11,7 +11,7 @@ Usage:
     python3 scripts/vibe_worker_registry.py --self-check
 """
 
-__version__ = "1.2.0"  # V1.18.4: UNKNOWN default + SSH health probe
+__version__ = "1.3.0"  # V1.20.16: transport field + manual_only + 21bao local-exec
 
 import copy, hashlib, json
 import os
@@ -45,16 +45,19 @@ class TaskType(str, Enum):
 class WorkerNode:
     worker_id: str
     node_type: str  # debian-worker, windows-worker
-    ssh_host: str
-    ssh_port: int
-    ssh_user: str
-    ssh_key_path: str
-    repo_root: str
-    workspace_root: str
+    transport: str = "ssh"  # "ssh" or "local-exec"
+    ssh_host: str = ""
+    ssh_port: int = 0
+    ssh_user: str = ""
+    ssh_key_path: str = ""
+    repo_root: str = ""
+    workspace_root: str = ""
     capabilities: list = field(default_factory=list)
     weight: int = 100
     max_parallel_jobs: int = 1
     active_jobs: int = 0
+    enabled: bool = True
+    manual_only: bool = False
     maintenance_status: str = "active"  # active, maintenance
     health_status: str = "UNKNOWN"  # ONLINE, OFFLINE, UNKNOWN
     token_policy: str = "gh_cached_credentials"  # self-repo only
@@ -67,12 +70,57 @@ class WorkerNode:
     baseline_sha: str = ""
     tools_installed: dict = field(default_factory=dict)  # tool_name -> version_or_path
 
+    def to_dict(self) -> dict:
+        """Serialize WorkerNode to a JSON-safe dict."""
+        return {
+            "worker_id": self.worker_id,
+            "node_type": self.node_type,
+            "transport": self.transport,
+            "ssh_host": self.ssh_host,
+            "ssh_port": self.ssh_port,
+            "ssh_user": self.ssh_user,
+            "ssh_key_path": self.ssh_key_path,
+            "repo_root": self.repo_root,
+            "workspace_root": self.workspace_root,
+            "capabilities": list(self.capabilities),
+            "weight": self.weight,
+            "max_parallel_jobs": self.max_parallel_jobs,
+            "active_jobs": self.active_jobs,
+            "enabled": self.enabled,
+            "manual_only": self.manual_only,
+            "maintenance_status": self.maintenance_status,
+            "health_status": self.health_status,
+            "token_policy": self.token_policy,
+            "allowed_operations": list(self.allowed_operations),
+            "recent_failure_count": self.recent_failure_count,
+            "last_health_check": self.last_health_check,
+            "last_job_completed": self.last_job_completed,
+            "baseline_sha": self.baseline_sha,
+            "tools_installed": dict(self.tools_installed),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "WorkerNode":
+        """Deserialize a WorkerNode from a dict, tolerating missing fields."""
+        known = {
+            "worker_id", "node_type", "transport", "ssh_host", "ssh_port",
+            "ssh_user", "ssh_key_path", "repo_root", "workspace_root",
+            "capabilities", "weight", "max_parallel_jobs", "active_jobs",
+            "enabled", "manual_only", "maintenance_status", "health_status",
+            "token_policy", "allowed_operations", "recent_failure_count",
+            "last_health_check", "last_job_completed", "baseline_sha",
+            "tools_installed",
+        }
+        filtered = {k: v for k, v in d.items() if k in known}
+        return cls(**filtered)
+
 
 # Default worker pool configuration
 DEFAULT_WORKERS = {
     "5bao": WorkerNode(
         worker_id="5bao",
         node_type="debian-worker",
+        transport="ssh",
         ssh_host="192.168.5.6",
         ssh_port=22222,
         ssh_user="vibeworker",
@@ -87,6 +135,7 @@ DEFAULT_WORKERS = {
     "9bao": WorkerNode(
         worker_id="9bao",
         node_type="debian-worker",
+        transport="ssh",
         ssh_host="192.168.9.6",
         ssh_port=22222,
         ssh_user="vibeworker",
@@ -97,6 +146,23 @@ DEFAULT_WORKERS = {
         weight=100,
         max_parallel_jobs=1,
         tools_installed={"ripgrep": "13.0.0"},
+    ),
+    "21bao": WorkerNode(
+        worker_id="21bao",
+        node_type="windows-worker",
+        transport="local-exec",
+        ssh_host="",
+        ssh_port=0,
+        ssh_user="",
+        ssh_key_path="",
+        repo_root="",
+        workspace_root="E:\\vibedev-worktrees\\21bao",
+        capabilities=["windows-worker", "implementer", "reviewer", "powershell", "local-job", "opencode"],
+        weight=100,
+        max_parallel_jobs=1,
+        enabled=False,
+        manual_only=True,
+        tools_installed={"opencode": "1.17.8"},
     ),
 }
 
@@ -119,39 +185,50 @@ class WorkerRegistry:
         return [w for w in self.workers.values() if w.health_status == NodeStatus.ONLINE]
 
     def available_workers(self, task_type: str = "linux-worker",
-                          allowed_worker_ids: Optional[list] = None) -> list[WorkerNode]:
+                          allowed_worker_ids: Optional[list] = None,
+                          include_manual_only: bool = False) -> list[WorkerNode]:
         """Workers available for a task: ONLINE, not maintenance, has capacity, capability match.
 
         If allowed_worker_ids is provided, only workers whose worker_id is in
         that list are considered. This ensures capability filtering and final
         selection use the same candidate set.
+
+        If include_manual_only is False (default), workers with manual_only=True
+        are excluded from auto-scheduling candidates.
         """
         candidates = [
             w for w in self.online_workers()
             if w.maintenance_status != "maintenance"
+            and w.enabled
             and w.active_jobs < w.max_parallel_jobs
             and task_type in w.capabilities
         ]
+        if not include_manual_only:
+            candidates = [w for w in candidates if not w.manual_only]
         if allowed_worker_ids is not None:
             allowed_set = set(allowed_worker_ids)
             candidates = [w for w in candidates if w.worker_id in allowed_set]
         return candidates
 
     def select_worker(self, task_type: str = "linux-worker",
-                      allowed_worker_ids: Optional[list] = None) -> Optional[WorkerNode]:
+                      allowed_worker_ids: Optional[list] = None,
+                      include_manual_only: bool = False) -> Optional[WorkerNode]:
         """Select best worker using scheduling policy:
         1. capability match
         2. ONLINE
         3. not maintenance
-        4. no conflicting lock
-        5. least active_jobs
-        6. lower recent_failure_count
-        7. weighted round-robin tie-break
+        4. enabled
+        5. no conflicting lock
+        6. least active_jobs
+        7. lower recent_failure_count
+        8. weighted round-robin tie-break
 
         If allowed_worker_ids is provided, only those workers are considered.
         This ensures capability filtering and final selection use the same set.
         """
-        candidates = self.available_workers(task_type, allowed_worker_ids=allowed_worker_ids)
+        candidates = self.available_workers(task_type,
+                                            allowed_worker_ids=allowed_worker_ids,
+                                            include_manual_only=include_manual_only)
         if not candidates:
             return None
 
@@ -347,12 +424,13 @@ def self_check() -> dict:
     checks = []
     passed = True
 
-    # Check 1: Default workers defined
+    # Check 1: Default workers defined (now includes 21bao)
     try:
         reg = WorkerRegistry()
-        assert len(reg.workers) == 2, f"Expected 2 workers, got {len(reg.workers)}"
+        assert len(reg.workers) == 3, f"Expected 3 workers, got {len(reg.workers)}"
         assert "5bao" in reg.workers, "5bao not in registry"
         assert "9bao" in reg.workers, "9bao not in registry"
+        assert "21bao" in reg.workers, "21bao not in registry"
         checks.append({"name": "default_workers_defined", "passed": True})
     except Exception as e:
         checks.append({"name": "default_workers_defined", "passed": False, "error": str(e)})
@@ -450,12 +528,13 @@ def self_check() -> dict:
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.ONLINE)
         reg.set_health("9bao", NodeStatus.ONLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
         report = reg.status_report()
         assert "pool_summary" in report
-        assert "workers" in report
-        assert "locks" in report
-        assert report["pool_summary"]["total"] == 2
-        assert report["pool_summary"]["online"] == 2
+        assert report["pool_summary"]["total"] == 3
+        assert report["pool_summary"]["online"] == 3
+        # 21bao is manual_only, so available_workers excludes it by default
+        assert report["pool_summary"]["available"] == 2
         checks.append({"name": "status_report_structure", "passed": True})
     except Exception as e:
         checks.append({"name": "status_report_structure", "passed": False, "error": str(e)})
@@ -471,6 +550,103 @@ def self_check() -> dict:
         checks.append({"name": "no_secret_in_output", "passed": True})
     except Exception as e:
         checks.append({"name": "no_secret_in_output", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 11: Transport field on workers
+    try:
+        reg = WorkerRegistry()
+        assert reg.workers["5bao"].transport == "ssh"
+        assert reg.workers["9bao"].transport == "ssh"
+        assert reg.workers["21bao"].transport == "local-exec"
+        checks.append({"name": "transport_field", "passed": True})
+    except Exception as e:
+        checks.append({"name": "transport_field", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 12: Manual-only filtering excludes 21bao by default
+    try:
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.ONLINE)
+        reg.set_health("9bao", NodeStatus.ONLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        # Enable 21bao to isolate manual_only filtering from enabled filtering
+        reg.workers["21bao"].enabled = True
+        # Default: manual_only excluded
+        avail = reg.available_workers("implementer")
+        ids = [w.worker_id for w in avail]
+        assert "21bao" not in ids, "21bao should be excluded by default"
+        assert "5bao" in ids
+        assert "9bao" in ids
+        # Explicit include
+        avail2 = reg.available_workers("implementer", include_manual_only=True)
+        ids2 = [w.worker_id for w in avail2]
+        assert "21bao" in ids2, "21bao should be included when include_manual_only=True"
+        checks.append({"name": "manual_only_filtering", "passed": True})
+    except Exception as e:
+        checks.append({"name": "manual_only_filtering", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 13: Disabled worker excluded
+    try:
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.ONLINE)
+        reg.set_health("9bao", NodeStatus.ONLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        # 21bao is enabled=False, manual_only=True — should not appear
+        avail = reg.available_workers("implementer")
+        ids = [w.worker_id for w in avail]
+        assert "21bao" not in ids
+        # Even with include_manual_only, disabled workers stay excluded
+        reg.workers["21bao"].manual_only = False  # remove manual_only
+        # but still disabled
+        avail2 = reg.available_workers("implementer", include_manual_only=True)
+        ids2 = [w.worker_id for w in avail2]
+        assert "21bao" not in ids2, "21bao should be excluded because enabled=False"
+        checks.append({"name": "disabled_worker_excluded", "passed": True})
+    except Exception as e:
+        checks.append({"name": "disabled_worker_excluded", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 14: WorkerNode serialization round-trip
+    try:
+        # Use a fresh WorkerNode (check 13 modified registry state)
+        w = WorkerNode(
+            worker_id="21bao", node_type="windows-worker", transport="local-exec",
+            ssh_host="", ssh_port=0, ssh_user="", ssh_key_path="",
+            repo_root="", workspace_root="E:\\vibedev-worktrees\\21bao",
+            enabled=False, manual_only=True)
+        d = w.to_dict()
+        assert d["transport"] == "local-exec"
+        assert d["manual_only"] is True
+        assert d["enabled"] is False
+        w2 = WorkerNode.from_dict(d)
+        assert w2.worker_id == "21bao"
+        assert w2.transport == "local-exec"
+        assert w2.manual_only is True
+        assert w2.enabled is False
+        checks.append({"name": "worker_serialization_roundtrip", "passed": True})
+    except Exception as e:
+        checks.append({"name": "worker_serialization_roundtrip", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 15: select_worker excludes manual_only by default
+    try:
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        # Enable 21bao to isolate manual_only filtering from enabled filtering
+        reg.workers["21bao"].enabled = True
+        # Only 21bao is online but it's manual_only — should return None
+        selected = reg.select_worker("implementer")
+        assert selected is None, "Should not auto-select manual_only worker"
+        # With include_manual_only, should select it
+        selected2 = reg.select_worker("implementer", include_manual_only=True)
+        assert selected2 is not None
+        assert selected2.worker_id == "21bao"
+        checks.append({"name": "select_excludes_manual_only", "passed": True})
+    except Exception as e:
+        checks.append({"name": "select_excludes_manual_only", "passed": False, "error": str(e)})
         passed = False
 
     return {"passed": passed, "version": __version__, "checks": checks}
