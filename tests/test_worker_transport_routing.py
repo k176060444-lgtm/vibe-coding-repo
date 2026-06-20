@@ -146,7 +146,8 @@ class TestTransportRouting(unittest.TestCase):
         ids = {w.worker_id for w in avail}
         assert "5bao" in ids
         assert "9bao" in ids
-        assert "21bao" not in ids
+        # 21bao is canary with reviewer in allowed_operations -> included
+        assert "21bao" in ids
 
 
 class TestManualOnlyFiltering(unittest.TestCase):
@@ -367,13 +368,15 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         selected = reg.select_worker("implementer")
         assert selected is None
 
-    def test_canary_reviewer_rejected(self):
+    def test_canary_reviewer_allowed(self):
+        """Only 21bao online: reviewer selects 21bao (now in allowed_operations)."""
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
         selected = reg.select_worker("reviewer")
-        assert selected is None
+        assert selected is not None
+        assert selected.worker_id == "21bao"
 
     def test_canary_merge_release_production_rejected(self):
         reg = WorkerRegistry()
@@ -451,7 +454,71 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         assert w.manual_only is False
         assert w.admission_mode == "canary"
         assert w.max_parallel_jobs == 1
-        assert set(w.allowed_operations) == {"smoke", "implementer-small"}
+        assert set(w.allowed_operations) == {"smoke", "implementer-small", "reviewer"}
+
+    def test_canary_reviewer_allowed_only_21bao(self):
+        """Only 21bao online: reviewer selects 21bao."""
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("reviewer")
+        assert selected is not None
+        assert selected.worker_id == "21bao"
+
+    def test_all_online_reviewer_prefers_non_canary(self):
+        """All nodes online: reviewer prefers 5bao/9bao, not 21bao."""
+        reg = WorkerRegistry()
+        for wid in reg.workers:
+            reg.set_health(wid, NodeStatus.ONLINE)
+        selected = reg.select_worker("reviewer")
+        assert selected is not None
+        assert selected.worker_id in ("5bao", "9bao")
+        assert selected.worker_id != "21bao"
+
+    def test_canary_still_allows_smoke_and_implementer_small(self):
+        """21bao still allows smoke and implementer-small."""
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        smoke = reg.select_worker("smoke")
+        assert smoke is not None and smoke.worker_id == "21bao"
+        small = reg.select_worker("implementer-small")
+        assert small is not None and small.worker_id == "21bao"
+
+    def test_canary_still_rejects_implementer(self):
+        """21bao still rejects implementer (not in allowed_operations)."""
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("implementer")
+        assert selected is None
+
+    def test_canary_still_rejects_merge_release_production(self):
+        """21bao still rejects merge/release/production."""
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        for task in ["merge", "release", "production"]:
+            selected = reg.select_worker(task)
+            assert selected is None, f"21bao should reject {task}"
+
+    def test_canary_still_rejects_windows_worker(self):
+        """21bao still rejects windows-worker."""
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        selected = reg.select_worker("windows-worker")
+        assert selected is None
+
+    def test_max_parallel_jobs_still_1(self):
+        """21bao max_parallel_jobs remains 1."""
+        w = DEFAULT_WORKERS["21bao"]
+        assert w.max_parallel_jobs == 1
 
 
 if __name__ == "__main__":

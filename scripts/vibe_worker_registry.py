@@ -160,13 +160,13 @@ DEFAULT_WORKERS = {
         ssh_key_path="",
         repo_root="",
         workspace_root="E:\\vibedev-worktrees\\21bao",
-        capabilities=["windows-worker", "implementer-small", "smoke", "powershell", "local-job", "opencode"],
+        capabilities=["windows-worker", "implementer-small", "reviewer", "smoke", "powershell", "local-job", "opencode"],
         weight=100,
         max_parallel_jobs=1,
         enabled=True,
         manual_only=False,
         admission_mode="canary",
-        allowed_operations=["smoke", "implementer-small"],
+        allowed_operations=["smoke", "implementer-small", "reviewer"],
         tools_installed={"opencode": "1.17.8"},
     ),
 }
@@ -589,6 +589,10 @@ def self_check() -> dict:
         avail_small = reg.available_workers("implementer-small")
         small_ids = [w.worker_id for w in avail_small]
         assert "21bao" in small_ids, "21bao canary should be included for implementer-small"
+        # reviewer should include 21bao (canary with reviewer allowed)
+        avail_rev = reg.available_workers("reviewer")
+        rev_ids = [w.worker_id for w in avail_rev]
+        assert "21bao" in rev_ids, "21bao canary should be included for reviewer"
         checks.append({"name": "manual_only_filtering", "passed": True})
     except Exception as e:
         checks.append({"name": "manual_only_filtering", "passed": False, "error": str(e)})
