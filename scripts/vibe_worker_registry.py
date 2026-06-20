@@ -58,6 +58,7 @@ class WorkerNode:
     active_jobs: int = 0
     enabled: bool = True
     manual_only: bool = False
+    admission_mode: str = "normal"  # normal, canary
     maintenance_status: str = "active"  # active, maintenance
     health_status: str = "UNKNOWN"  # ONLINE, OFFLINE, UNKNOWN
     token_policy: str = "gh_cached_credentials"  # self-repo only
@@ -88,6 +89,7 @@ class WorkerNode:
             "active_jobs": self.active_jobs,
             "enabled": self.enabled,
             "manual_only": self.manual_only,
+            "admission_mode": self.admission_mode,
             "maintenance_status": self.maintenance_status,
             "health_status": self.health_status,
             "token_policy": self.token_policy,
@@ -105,6 +107,8 @@ class WorkerNode:
         known = {
             "worker_id", "node_type", "transport", "ssh_host", "ssh_port",
             "ssh_user", "ssh_key_path", "repo_root", "workspace_root",
+            "admission_mode",
+            "admission_mode",
             "capabilities", "weight", "max_parallel_jobs", "active_jobs",
             "enabled", "manual_only", "maintenance_status", "health_status",
             "token_policy", "allowed_operations", "recent_failure_count",
@@ -157,11 +161,13 @@ DEFAULT_WORKERS = {
         ssh_key_path="",
         repo_root="",
         workspace_root="E:\\vibedev-worktrees\\21bao",
-        capabilities=["windows-worker", "implementer", "reviewer", "powershell", "local-job", "opencode"],
+        capabilities=["windows-worker", "implementer", "smoke", "powershell", "local-job", "opencode"],
         weight=100,
         max_parallel_jobs=1,
         enabled=True,
-        manual_only=True,
+        manual_only=False,
+        admission_mode="canary",
+        allowed_operations=["smoke", "implementer-small"],
         tools_installed={"opencode": "1.17.8"},
     ),
 }
@@ -533,7 +539,7 @@ def self_check() -> dict:
         assert "pool_summary" in report
         assert report["pool_summary"]["total"] == 3
         assert report["pool_summary"]["online"] == 3
-        # 21bao is manual_only, so available_workers excludes it by default
+        # available_workers() defaults to linux-worker task type; 21bao has windows-worker only
         assert report["pool_summary"]["available"] == 2
         checks.append({"name": "status_report_structure", "passed": True})
     except Exception as e:
@@ -569,18 +575,12 @@ def self_check() -> dict:
         reg.set_health("5bao", NodeStatus.ONLINE)
         reg.set_health("9bao", NodeStatus.ONLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
-        # Enable 21bao to isolate manual_only filtering from enabled filtering
-        reg.workers["21bao"].enabled = True
-        # Default: manual_only excluded
+        # 21bao is canary (manual_only=False), included by default
         avail = reg.available_workers("implementer")
         ids = [w.worker_id for w in avail]
-        assert "21bao" not in ids, "21bao should be excluded by default"
+        assert "21bao" in ids, "21bao should be included (canary)"
         assert "5bao" in ids
         assert "9bao" in ids
-        # Explicit include
-        avail2 = reg.available_workers("implementer", include_manual_only=True)
-        ids2 = [w.worker_id for w in avail2]
-        assert "21bao" in ids2, "21bao should be included when include_manual_only=True"
         checks.append({"name": "manual_only_filtering", "passed": True})
     except Exception as e:
         checks.append({"name": "manual_only_filtering", "passed": False, "error": str(e)})
@@ -631,21 +631,16 @@ def self_check() -> dict:
         checks.append({"name": "worker_serialization_roundtrip", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 15: select_worker excludes manual_only by default
+    # Check 15: select_worker - 21bao is canary (manual_only=False), can be selected
     try:
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
-        # Enable 21bao to isolate manual_only filtering from enabled filtering
-        reg.workers["21bao"].enabled = True
-        # Only 21bao is online but it's manual_only — should return None
+        # 21bao is canary (manual_only=False), can be auto-selected
         selected = reg.select_worker("implementer")
-        assert selected is None, "Should not auto-select manual_only worker"
-        # With include_manual_only, should select it
-        selected2 = reg.select_worker("implementer", include_manual_only=True)
-        assert selected2 is not None
-        assert selected2.worker_id == "21bao"
+        assert selected is not None, "21bao canary should be auto-selectable"
+        assert selected.worker_id == "21bao"
         checks.append({"name": "select_excludes_manual_only", "passed": True})
     except Exception as e:
         checks.append({"name": "select_excludes_manual_only", "passed": False, "error": str(e)})

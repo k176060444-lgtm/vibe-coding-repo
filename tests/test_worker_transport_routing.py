@@ -82,7 +82,8 @@ class TestWorkerNodeSerialization(unittest.TestCase):
         w2 = WorkerNode.from_dict(d2)
         assert w2.worker_id == "21bao"
         assert w2.transport == "local-exec"
-        assert w2.manual_only is True
+        assert w2.manual_only is False
+        assert w2.admission_mode == "canary"
         assert w2.enabled is True
 
 
@@ -107,19 +108,17 @@ class TestTransportRouting(unittest.TestCase):
 
     def test_localexec_workers_for_windows_worker(self):
         reg = self._make_registry()
-        # 21bao has windows-worker capability but is manual_only
+        # 21bao is canary (manual_only=False), available for windows-worker
         avail = reg.available_workers("windows-worker")
         ids = {w.worker_id for w in avail}
-        # 21bao is manual_only, excluded by default
-        assert "21bao" not in ids
+        assert "21bao" in ids
         assert "5bao" not in ids
         assert "9bao" not in ids
 
     def test_windows_worker_with_include_manual_only(self):
         reg = self._make_registry()
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
-        avail = reg.available_workers("windows-worker", include_manual_only=True)
+        # 21bao is canary (manual_only=False), included by default
+        avail = reg.available_workers("windows-worker")
         ids = {w.worker_id for w in avail}
         assert "21bao" in ids
 
@@ -129,14 +128,13 @@ class TestTransportRouting(unittest.TestCase):
         ids = {w.worker_id for w in avail}
         assert "5bao" in ids
         assert "9bao" in ids
-        # 21bao excluded by manual_only
-        assert "21bao" not in ids
+        # 21bao is canary, has implementer capability
+        assert "21bao" in ids
 
     def test_implementer_with_manual_only_included(self):
         reg = self._make_registry()
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
-        avail = reg.available_workers("implementer", include_manual_only=True)
+        # 21bao is canary (manual_only=False), included by default
+        avail = reg.available_workers("implementer")
         ids = {w.worker_id for w in avail}
         assert "5bao" in ids
         assert "9bao" in ids
@@ -158,11 +156,10 @@ class TestManualOnlyFiltering(unittest.TestCase):
         reg = WorkerRegistry()
         for wid in reg.workers:
             reg.set_health(wid, NodeStatus.ONLINE)
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
+        # 21bao is canary (manual_only=False), now included
         avail = reg.available_workers("implementer")
         ids = {w.worker_id for w in avail}
-        assert "21bao" not in ids
+        assert "21bao" in ids
 
     def test_manual_only_included_when_requested(self):
         reg = WorkerRegistry()
@@ -196,15 +193,15 @@ class TestManualOnlyFiltering(unittest.TestCase):
         assert selected is not None
         assert selected.worker_id == "21bao"
 
-    def test_21bao_not_auto_scheduled_when_only_worker(self):
+    def test_21bao_canary_scheduled_when_only_worker(self):
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
-        # Enable 21bao to isolate manual_only from enabled filtering
-        reg.workers["21bao"].enabled = True
+        # 21bao is canary (manual_only=False), can be auto-scheduled
         selected = reg.select_worker("implementer")
-        assert selected is None, "21bao should never be auto-scheduled"
+        assert selected is not None, "21bao canary should be auto-scheduled when only available"
+        assert selected.worker_id == "21bao"
 
 
 class TestDisabledWorkerFiltering(unittest.TestCase):
@@ -297,7 +294,8 @@ class TestDefaultWorkers(unittest.TestCase):
         assert w.ssh_key_path == ""
         assert w.repo_root == ""
         assert w.enabled is True
-        assert w.manual_only is True
+        assert w.manual_only is False
+        assert w.admission_mode == "canary"
         assert "windows-worker" in w.capabilities
         assert "opencode" in w.capabilities
 

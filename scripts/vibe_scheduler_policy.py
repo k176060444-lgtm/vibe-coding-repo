@@ -490,7 +490,7 @@ def self_check() -> dict:
         checks.append({"name": "transport_routing_implementer", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 9: 21bao not auto-scheduled (V1.3.0)
+    # Check 9: 21bao canary can be auto-scheduled for implementer (V1.20.29H)
     try:
         reg = Reg()
         reg.set_health("5bao", NodeStatus.OFFLINE)
@@ -498,8 +498,7 @@ def self_check() -> dict:
         reg.set_health("21bao", NodeStatus.ONLINE)
         policy = SchedulerPolicy(reg)
         result = policy.schedule(task_type="implementer")
-        assert result["worker_id"] is None, "21bao should not be auto-scheduled"
-        assert result["pending"] is True
+        assert result["worker_id"] == "21bao", "21bao canary should be auto-scheduled for implementer"
         checks.append({"name": "21bao_not_auto_scheduled", "passed": True})
     except Exception as e:
         checks.append({"name": "21bao_not_auto_scheduled", "passed": False, "error": str(e)})
