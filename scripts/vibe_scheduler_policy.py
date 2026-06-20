@@ -490,15 +490,22 @@ def self_check() -> dict:
         checks.append({"name": "transport_routing_implementer", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 9: 21bao canary can be auto-scheduled for implementer (V1.20.29H)
+    # Check 9: 21bao canary admission enforcement (V1.20.29H3)
     try:
         reg = Reg()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
         policy = SchedulerPolicy(reg)
-        result = policy.schedule(task_type="implementer")
-        assert result["worker_id"] == "21bao", "21bao canary should be auto-scheduled for implementer"
+        # implementer is NOT in 21bao canary allowed_operations → rejected
+        result_impl = policy.schedule(task_type="implementer")
+        assert result_impl["worker_id"] is None, "21bao canary should NOT be scheduled for implementer"
+        # smoke IS in 21bao canary allowed_operations → accepted
+        result_smoke = policy.schedule(task_type="smoke")
+        assert result_smoke["worker_id"] == "21bao", "21bao canary should be scheduled for smoke"
+        # implementer-small IS in 21bao canary allowed_operations → accepted
+        result_small = policy.schedule(task_type="implementer-small")
+        assert result_small["worker_id"] == "21bao", "21bao canary should be scheduled for implementer-small"
         checks.append({"name": "21bao_not_auto_scheduled", "passed": True})
     except Exception as e:
         checks.append({"name": "21bao_not_auto_scheduled", "passed": False, "error": str(e)})
