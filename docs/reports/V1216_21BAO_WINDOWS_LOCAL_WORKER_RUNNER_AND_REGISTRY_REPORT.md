@@ -32,7 +32,7 @@
 | `test_worker_transport_routing.py` | TestUnknownTransportFailClosed | 3 | unknown transport → no match, local-exec only matches its caps |
 | `test_worker_transport_routing.py` | TestDefaultWorkers | 4 | 21bao/5bao/9bao registration, 3 workers total |
 
-**Total: 46 test cases, all fixture-based (no live model calls)**
+**Total: 47 pytest test cases + 35 self-check scenarios = 82 total, all fixture-based (no live model calls)**
 
 ## Self-Check Scenarios
 
@@ -105,3 +105,20 @@
 7. **Job lock**: File-based locking prevents concurrent execution of the same job.
 
 8. **Serialization round-trip**: to_dict/from_dict handles all new fields (transport, enabled, manual_only) and tolerates missing fields for backward compatibility.
+
+## Test Count Reconciliation (V1.20.16B)
+
+| Source | Collected | Passed |
+|--------|-----------|--------|
+| pytest (test_worker_transport_routing.py) | 25 | 25 |
+| pytest (test_windows_local_runner.py) | 22 | 22 |
+| **PYTEST_TOTAL** | **47** | **47** |
+| self-check (vibe_worker_registry.py) | 15 | 15 |
+| self-check (vibe_scheduler_policy.py) | 10 | 10 |
+| self-check (vibe_windows_local_runner.py) | 10 | 10 |
+| **SELF_CHECK_TOTAL** | **35** | **35** |
+| **GRAND_TOTAL** | **82** | **82** |
+
+## Unicode Hardening (V1.20.16B)
+
+All 6 PR files scanned for BOM (U+FEFF), zero-width (U+200B-200F), bidi override (U+202A-202E), isolate controls (U+2066-2069). **Result: 0 dangerous characters found.** GitHub diff warning is a false positive (legitimate CJK text in report).
