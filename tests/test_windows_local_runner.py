@@ -14,10 +14,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from vibe_windows_local_runner import (
-    JobSpec, JobResult, run_job,
+    JobSpec, JobResult, run_job, self_check,
     is_path_allowed, is_path_blocked, validate_path,
+    is_path_write_allowed, is_path_read_allowed,
     WORKTREE_ROOT, EVIDENCE_ROOT, LOG_ROOT, WRAPPER_PATH,
-    self_check,
 )
 
 
@@ -31,7 +31,7 @@ class TestPathAllowlist(unittest.TestCase):
 
     def test_drive_e_allowed(self):
         assert is_path_allowed(r"E:\vibedev-worktrees\21bao\test")
-        assert is_path_allowed(r"E:\some-other-path")
+        assert not is_path_allowed(r"E:\some-other-path")  # V1.20.23: not in subtree
 
     def test_drive_c_not_allowed(self):
         assert not is_path_allowed(r"C:\Windows\System32")
@@ -56,7 +56,7 @@ class TestPathAllowlist(unittest.TestCase):
     def test_validate_path_disallowed(self):
         ok, reason = validate_path(r"C:\Users\KK\something")
         assert not ok
-        assert "not in allowlist" in reason
+        assert "subtree" in reason  # V1.20.23: subtree containment message
 
 
 class TestDryRunMode(unittest.TestCase):
@@ -167,7 +167,7 @@ class TestSelfCheck(unittest.TestCase):
         result = self_check()
         assert result["passed"] is True
         assert result["version"] == "1.0.0"
-        assert len(result["checks"]) >= 17  # V1.20.18: 17 checks (was 10)
+        assert len(result["checks"]) >= 28  # V1.20.23: 28 checks
         for check in result["checks"]:
             assert check["passed"], f"Check {check['name']} failed: {check.get('error')}"
 
@@ -209,15 +209,15 @@ class TestBlocklistBypassPrevention(unittest.TestCase):
         ok, _ = validate_path(r"C:\Users\KK\vibe-coding-repo\test")
         assert not ok, "Old controller repo path should still be blocked"
 
-    def test_d_drive_still_allowed(self):
-        """D drive paths must remain allowed after blocklist update."""
+    def test_d_drive_subtree_containment(self):
+        """V1.20.23: Arbitrary D drive path should be blocked (subtree containment)."""
         ok, _ = validate_path(r"D:\vibedev-test-new")
-        assert ok, "D drive should be allowed"
+        assert not ok, "Arbitrary D path should be blocked (subtree containment)"
 
-    def test_e_drive_still_allowed(self):
-        """E drive paths must remain allowed after blocklist update."""
+    def test_e_drive_subtree_containment(self):
+        """V1.20.23: Arbitrary E drive path should be blocked (subtree containment)."""
         ok, _ = validate_path(r"E:\vibedev-test-new")
-        assert ok, "E drive should be allowed"
+        assert not ok, "Arbitrary E path should be blocked (subtree containment)"
 
     def test_is_path_blocked_profile_scoped(self):
         """is_path_blocked must detect profile-scoped controller repo."""
@@ -284,6 +284,88 @@ class TestCanonicalizationFailClosed(unittest.TestCase):
         assert is_path_blocked(self.PROFILE_REPO)
         assert is_path_blocked(self.PROFILE_REPO.upper())
         assert is_path_blocked(self.PROFILE_REPO.lower())
+
+
+class TestSubtreeContainment(unittest.TestCase):
+    """V1.20.23: Test subtree containment hardening."""
+
+    def test_traversal_escape_from_worktree_blocked(self):
+        ok, _ = validate_path(r"E:\vibedev-worktrees\21bao\..\..\..\etc\passwd")
+        assert not ok, "Traversal escape from worktree subtree should be blocked"
+
+    def test_e_etc_passwd_blocked(self):
+        ok, _ = validate_path(r"E:\etc\passwd")
+        assert not ok, "E drive but not in allowed subtree should be blocked"
+
+    def test_sibling_directory_blocked(self):
+        ok, _ = validate_path(r"E:\vibedev-worktrees\21bao-other\test")
+        assert not ok, "Sibling directory should be blocked (prefix false-match)"
+
+    def test_allowed_worktree_child(self):
+        ok, _ = validate_path(r"E:\vibedev-worktrees\21bao\feat-test")
+        assert ok, "Worktree child should be allowed"
+
+    def test_allowed_evidence_child(self):
+        ok, _ = validate_path(r"D:\vibedev-evidence\21bao\job-x")
+        assert ok, "Evidence child should be allowed"
+
+    def test_allowed_log_child(self):
+        ok, _ = validate_path(r"D:\vibedev-logs\21bao\job-x")
+        assert ok, "Log child should be allowed"
+
+    def test_allowed_sandbox_child(self):
+        ok, _ = validate_path(r"E:\vibedev-sandbox\21bao\test")
+        assert ok, "Sandbox child should be allowed"
+
+    def test_allowed_artifacts_child(self):
+        ok, _ = validate_path(r"E:\vibedev-artifacts\21bao\test")
+        assert ok, "Artifacts child should be allowed"
+
+    def test_allowed_cache_child(self):
+        ok, _ = validate_path(r"D:\vibedev-cache\test")
+        assert ok, "Cache child should be allowed"
+
+    def test_tools_read_allowed(self):
+        ok, _ = validate_path(r"D:\vibedev-tools\bin\opencode-21bao.ps1")
+        assert ok, "Tools path should be read-allowed"
+
+    def test_tools_write_blocked(self):
+        ok, _ = validate_path(r"D:\vibedev-tools\bin\test.exe", mode="write")
+        assert not ok, "Tools path should be write-blocked"
+
+    def test_config_write_blocked(self):
+        ok, _ = validate_path(r"D:\vibedev-config\opencode\test.json", mode="write")
+        assert not ok, "Config path should be write-blocked"
+
+    def test_worktree_write_allowed(self):
+        ok, _ = validate_path(r"E:\vibedev-worktrees\21bao\feat-x", mode="write")
+        assert ok, "Worktree path should be write-allowed"
+
+    def test_evidence_write_allowed(self):
+        ok, _ = validate_path(r"D:\vibedev-evidence\21bao\job-x", mode="write")
+        assert ok, "Evidence path should be write-allowed"
+
+    def test_other_worker_evidence_blocked(self):
+        ok, _ = validate_path(r"D:\vibedev-evidence\other\test")
+        assert not ok, "Evidence path for other worker should be blocked"
+
+    def test_case_variation_allowed(self):
+        ok, _ = validate_path(r"e:\vibedev-worktrees\21bao\test")
+        assert ok, "Case variation should be allowed"
+
+    def test_exact_root_allowed(self):
+        ok, _ = validate_path(r"E:\vibedev-worktrees\21bao")
+        assert ok, "Exact root should be allowed"
+
+    def test_write_allowed_function(self):
+        assert is_path_write_allowed(r"E:\vibedev-worktrees\21bao\test")
+        assert not is_path_write_allowed(r"D:\vibedev-tools\bin\test.exe")
+        assert not is_path_write_allowed(r"D:\vibedev-config\opencode\test.json")
+
+    def test_read_allowed_function(self):
+        assert is_path_read_allowed(r"E:\vibedev-worktrees\21bao\test")
+        assert is_path_read_allowed(r"D:\vibedev-tools\bin\test.exe")
+        assert is_path_read_allowed(r"D:\vibedev-config\opencode\test.json")
 
 
 if __name__ == "__main__":

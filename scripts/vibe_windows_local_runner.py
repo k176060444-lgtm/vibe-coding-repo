@@ -37,8 +37,27 @@ EVIDENCE_ROOT = r"D:\vibedev-evidence\21bao"
 LOG_ROOT = r"D:\vibedev-logs\21bao"
 WRAPPER_PATH = r"D:\vibedev-tools\bin\opencode-21bao.ps1"
 
-# Path allowlist: only D:\ and E:\ are allowed for worktrees/evidence/logs
+# V1.20.23: Subtree containment — separate write roots from readonly/exec roots
+# Write roots: runner may create/modify files here
+WRITE_ROOTS = (
+    r"E:\vibedev-worktrees\21bao",
+    r"E:\vibedev-sandbox\21bao",
+    r"E:\vibedev-artifacts\21bao",
+    r"D:\vibedev-evidence\21bao",
+    r"D:\vibedev-logs\21bao",
+    r"D:\vibedev-cache",
+)
+# Readonly/exec roots: runner may read/execute but NOT write
+READONLY_ROOTS = (
+    r"D:\vibedev-tools",
+    r"D:\vibedev-config\opencode",
+)
+# Combined: any path must be within one of these subtrees
+ALL_ALLOWED_ROOTS = WRITE_ROOTS + READONLY_ROOTS
+
+# Legacy drive-level prefix (kept for backward compat, NOT used by subtree checks)
 ALLOWED_PREFIXES = (r"D:\\", r"E:\\")
+
 # Blocked paths: controller repo must never be written to
 # V1.20.18: Added profile-scoped path + canonical path resolution
 _CONTROLLER_REPO_PATHS = [
@@ -118,23 +137,52 @@ def _canonicalize(path: str) -> str:
     return resolved.lower()
 
 
-def is_path_allowed(path: str) -> bool:
-    """Check if a path is in the allowlist (D:\\ or E:\\ only).
+def _is_within_subtree(path: str, roots: tuple) -> bool:
+    """Check if canonical path is within any of the given subtree roots.
 
-    FAIL-CLOSED: returns False if path cannot be canonicalized.
+    Subtree containment: path must equal a root OR be a descendant (root + sep).
+    Prevents drive-level prefix matching that allows escape via traversal.
     """
     try:
         canonical = _canonicalize(path)
     except (OSError, ValueError):
         return False  # fail-closed
-    for prefix in ALLOWED_PREFIXES:
+    for root in roots:
         try:
-            canon_prefix = _canonicalize(prefix)
+            canon_root = _canonicalize(root)
         except (OSError, ValueError):
             continue
-        if canonical.startswith(canon_prefix):
+        if canonical == canon_root or canonical.startswith(canon_root + os.sep):
             return True
     return False
+
+
+def is_path_allowed(path: str) -> bool:
+    """Check if path is within any allowed 21bao subtree (write or readonly).
+
+    V1.20.23: Subtree containment replaces drive-level prefix check.
+    FAIL-CLOSED: returns False if path cannot be canonicalized.
+    """
+    return _is_within_subtree(path, ALL_ALLOWED_ROOTS)
+
+
+def is_path_write_allowed(path: str) -> bool:
+    """Check if path is within a writable 21bao subtree root.
+
+    Write roots: worktree, sandbox, artifacts, evidence, logs, cache.
+    Readonly roots (tools, config) are NOT included.
+    FAIL-CLOSED: returns False if path cannot be canonicalized.
+    """
+    return _is_within_subtree(path, WRITE_ROOTS)
+
+
+def is_path_read_allowed(path: str) -> bool:
+    """Check if path is within any allowed 21bao subtree (write or readonly).
+
+    Same as is_path_allowed — readonly roots are a superset for reads.
+    FAIL-CLOSED: returns False if path cannot be canonicalized.
+    """
+    return _is_within_subtree(path, ALL_ALLOWED_ROOTS)
 
 
 def is_path_blocked(path: str) -> bool:
@@ -163,10 +211,14 @@ def is_path_blocked(path: str) -> bool:
     return False
 
 
-def validate_path(path: str) -> tuple[bool, str]:
-    """Validate a path against allowlist and blocklist. Returns (ok, reason).
+def validate_path(path: str, mode: str = "read") -> tuple[bool, str]:
+    """Validate a path against subtree containment and blocklist.
 
-    Fail-closed: blocklist check first, then allowlist.
+    mode: "read" (default) — checks against all allowed roots (write + readonly)
+          "write" — checks against write roots only (excludes tools/config)
+          "exec"  — checks against all allowed roots (same as read)
+
+    Fail-closed: blocklist check first, then subtree containment.
     Any path that can't be safely canonicalized is rejected.
     """
     # Fail-closed: try canonicalization, reject on failure
@@ -179,9 +231,13 @@ def validate_path(path: str) -> tuple[bool, str]:
     if is_path_blocked(path):
         return False, f"blocked: path is in controller repo ({path})"
 
-    # Allowlist check
-    if not is_path_allowed(path):
-        return False, f"blocked: path not in allowlist D:\\ or E:\\ ({path})"
+    # Subtree containment check
+    if mode == "write":
+        if not is_path_write_allowed(path):
+            return False, f"blocked: path not in write subtree roots ({path})"
+    else:
+        if not is_path_allowed(path):
+            return False, f"blocked: path not in allowed subtree roots ({path})"
 
     return True, "ok"
 
@@ -549,15 +605,15 @@ def self_check() -> dict:
         checks.append({"name": "blocklist_old_path_still_blocked", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 17: D/E paths remain allowed after blocklist update
+    # Check 17: V1.20.23 — subtree containment blocks arbitrary D/E paths
     try:
         ok_d, _ = validate_path(r"D:\vibedev-test-new")
         ok_e, _ = validate_path(r"E:\vibedev-test-new")
-        assert ok_d, "D drive should still be allowed"
-        assert ok_e, "E drive should still be allowed"
-        checks.append({"name": "allowlist_de_unchanged", "passed": True})
+        assert not ok_d, "Arbitrary D drive path should be blocked (subtree containment)"
+        assert not ok_e, "Arbitrary E drive path should be blocked (subtree containment)"
+        checks.append({"name": "subtree_blocks_arbitrary_de", "passed": True})
     except Exception as e:
-        checks.append({"name": "allowlist_de_unchanged", "passed": False, "error": str(e)})
+        checks.append({"name": "subtree_blocks_arbitrary_de", "passed": False, "error": str(e)})
         passed = False
 
     # Check 18: Fail-closed contract — _canonicalize raises on bad input
@@ -580,6 +636,89 @@ def self_check() -> dict:
         checks.append({"name": "canonicalize_fail_closed", "passed": True})
     except Exception as e:
         checks.append({"name": "canonicalize_fail_closed", "passed": False, "error": str(e)})
+        passed = False
+
+    # V1.20.23: Subtree containment checks (20-28)
+
+    # Check 20: Traversal escape from worktree subtree → BLOCKED
+    try:
+        ok, _ = validate_path(r"E:\vibedev-worktrees\21bao\..\..\..\etc\passwd")
+        assert not ok, "Traversal escape from worktree subtree should be blocked"
+        checks.append({"name": "subtree_traversal_escape_blocked", "passed": True})
+    except Exception as e:
+        checks.append({"name": "subtree_traversal_escape_blocked", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 21: E:\etc\passwd (E: drive but not subtree) → BLOCKED
+    try:
+        ok, _ = validate_path(r"E:\etc\passwd")
+        assert not ok, "E:\\etc\\passwd should be blocked (not in subtree)"
+        checks.append({"name": "subtree_e_etc_blocked", "passed": True})
+    except Exception as e:
+        checks.append({"name": "subtree_e_etc_blocked", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 22: Sibling directory under E: → BLOCKED
+    try:
+        ok, _ = validate_path(r"E:\vibedev-worktrees\21bao-other\test")
+        assert not ok, "Sibling directory should be blocked (prefix false-match)"
+        checks.append({"name": "subtree_sibling_blocked", "passed": True})
+    except Exception as e:
+        checks.append({"name": "subtree_sibling_blocked", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 23: Allowed worktree child → ALLOWED
+    try:
+        ok, _ = validate_path(r"E:\vibedev-worktrees\21bao\feat-test")
+        assert ok, "Worktree child should be allowed"
+        checks.append({"name": "subtree_worktree_child_allowed", "passed": True})
+    except Exception as e:
+        checks.append({"name": "subtree_worktree_child_allowed", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 24: Allowed evidence child → ALLOWED
+    try:
+        ok, _ = validate_path(r"D:\vibedev-evidence\21bao\job-x")
+        assert ok, "Evidence child should be allowed"
+        checks.append({"name": "subtree_evidence_child_allowed", "passed": True})
+    except Exception as e:
+        checks.append({"name": "subtree_evidence_child_allowed", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 25: Tools root read allowed → ALLOWED
+    try:
+        ok, _ = validate_path(r"D:\vibedev-tools\bin\opencode-21bao.ps1")
+        assert ok, "Tools path should be read-allowed"
+        checks.append({"name": "subtree_tools_read_allowed", "passed": True})
+    except Exception as e:
+        checks.append({"name": "subtree_tools_read_allowed", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 26: Tools root write attempt → BLOCKED
+    try:
+        ok, _ = validate_path(r"D:\vibedev-tools\bin\test.exe", mode="write")
+        assert not ok, "Tools path should be write-blocked"
+        checks.append({"name": "subtree_tools_write_blocked", "passed": True})
+    except Exception as e:
+        checks.append({"name": "subtree_tools_write_blocked", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 27: Config root write attempt → BLOCKED
+    try:
+        ok, _ = validate_path(r"D:\vibedev-config\opencode\test.json", mode="write")
+        assert not ok, "Config path should be write-blocked"
+        checks.append({"name": "subtree_config_write_blocked", "passed": True})
+    except Exception as e:
+        checks.append({"name": "subtree_config_write_blocked", "passed": False, "error": str(e)})
+        passed = False
+
+    # Check 28: D:\vibedev-evidence\other (not 21bao) → BLOCKED
+    try:
+        ok, _ = validate_path(r"D:\vibedev-evidence\other\test")
+        assert not ok, "Evidence path for other worker should be blocked"
+        checks.append({"name": "subtree_other_evidence_blocked", "passed": True})
+    except Exception as e:
+        checks.append({"name": "subtree_other_evidence_blocked", "passed": False, "error": str(e)})
         passed = False
 
     return {"passed": passed, "version": __version__, "checks": checks}
