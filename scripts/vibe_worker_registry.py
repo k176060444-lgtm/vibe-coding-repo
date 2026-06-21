@@ -644,23 +644,27 @@ def self_check() -> dict:
         checks.append({"name": "worker_serialization_roundtrip", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 15: select_worker - canary admission enforcement
+    # Check 15: select_worker - controlled admission enforcement
     try:
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
-        # 21bao is canary, implementer is NOT in allowed_operations → rejected
+        # 21bao is controlled, implementer IS in allowed_operations → accepted
         selected_impl = reg.select_worker("implementer")
-        assert selected_impl is None, "21bao canary should NOT be auto-selected for implementer"
-        # 21bao is canary, smoke IS in allowed_operations → accepted
+        assert selected_impl is not None, "21bao controlled should be auto-selected for implementer"
+        assert selected_impl.worker_id == "21bao"
+        # 21bao is controlled, smoke IS in allowed_operations → accepted
         selected_smoke = reg.select_worker("smoke")
-        assert selected_smoke is not None, "21bao canary should be auto-selected for smoke"
+        assert selected_smoke is not None, "21bao controlled should be auto-selected for smoke"
         assert selected_smoke.worker_id == "21bao"
-        # 21bao is canary, implementer-small IS in allowed_operations → accepted
+        # 21bao is controlled, implementer-small IS in allowed_operations → accepted
         selected_small = reg.select_worker("implementer-small")
-        assert selected_small is not None, "21bao canary should be auto-selected for implementer-small"
+        assert selected_small is not None, "21bao controlled should be auto-selected for implementer-small"
         assert selected_small.worker_id == "21bao"
+        # 21bao is controlled, merge NOT in allowed_operations → rejected
+        selected_merge = reg.select_worker("merge")
+        assert selected_merge is None, "21bao controlled should NOT be auto-selected for merge"
         checks.append({"name": "select_excludes_manual_only", "passed": True})
     except Exception as e:
         checks.append({"name": "select_excludes_manual_only", "passed": False, "error": str(e)})
