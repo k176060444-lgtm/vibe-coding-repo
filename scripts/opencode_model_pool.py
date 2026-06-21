@@ -77,7 +77,8 @@ NODE_TRANSPORT = {
 # --- Model Entry ---
 
 def new_model_entry(exact_model_id: str, alias: str = "", cost_tag: str = "unknown",
-                    roles: list = None, capability_tags: list = None, priority: int = 10) -> dict:
+                    roles: list = None, capability_tags: list = None, priority: int = 10,
+                    source_flags: list = None) -> dict:
     """Create a new model pool entry."""
     if not alias:
         alias = exact_model_id.split("/")[-1] if "/" in exact_model_id else exact_model_id
@@ -90,13 +91,22 @@ def new_model_entry(exact_model_id: str, alias: str = "", cost_tag: str = "unkno
         "cost_tag": cost_tag,
         "enabled": True,
         "health_status": "unknown",
+        "lifecycle_status": "enabled",
         "last_seen": None,
         "roles": roles or ["implementer"],
         "priority": priority,
         "capability_tags": capability_tags or [],
+        "source_flags": source_flags or [],
         "fallback_allowed": False,
         "cooldown_state": {"active": False, "until": None},
         "rate_limit_events": [],
+        "live_validation": {
+            "validated": False,
+            "call_count": 0,
+            "roles_validated": [],
+            "last_verdict": None,
+            "last_verdict_timestamp": None,
+        },
     }
 
 
@@ -129,6 +139,91 @@ def auto_capability_tags(model_id: str) -> list:
     if not tags:
         tags.append("general")
     return tags
+
+
+def parse_configured_models(config_path: str) -> list[dict]:
+    """Parse user-configured models from an opencode.jsonc config file.
+
+    Returns list of model dicts with source_flags=['user_configured'].
+    Does NOT print or expose API keys/secrets.
+    """
+    import json as _json
+    if not os.path.exists(config_path):
+        return []
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        raw = f.read()
+
+    # Strip // comments for jsonc
+    lines = []
+    for line in raw.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("//"):
+            continue
+        # Remove inline // comments (but not inside strings)
+        if "//" in stripped:
+            in_str = False
+            for i, ch in enumerate(stripped):
+                if ch == '"':
+                    in_str = not in_str
+                elif not in_str and stripped[i:i+2] == "//":
+                    stripped = stripped[:i]
+                    break
+        lines.append(stripped)
+
+    cleaned = "\n".join(lines)
+
+    try:
+        data = _json.loads(cleaned)
+    except _json.JSONDecodeError:
+        return []
+
+    providers = data.get("provider", {})
+    configured = []
+
+    for provider_name, prov_config in providers.items():
+        models_dict = prov_config.get("models", {})
+        for model_key, model_meta in models_dict.items():
+            exact_model_id = f"{provider_name}/{model_key}"
+            name = model_meta.get("name", "") if isinstance(model_meta, dict) else ""
+            alias = model_key
+
+            cost_tag = "paid"
+            lower = model_key.lower()
+            if "free" in lower:
+                cost_tag = "free"
+
+            cap_tags = []
+            if "code" in lower or "coder" in lower:
+                cap_tags.append("code")
+            if "flash" in lower or "mini" in lower:
+                cap_tags.append("fast")
+            if "ultra" in lower or "pro" in lower:
+                cap_tags.append("strong")
+            if "deepseek" in lower:
+                cap_tags.append("code")
+            if "mimo" in lower:
+                cap_tags.append("code")
+            if "ark" in lower:
+                cap_tags.append("code")
+            if "minimax" in lower:
+                cap_tags.append("code")
+            if not cap_tags:
+                cap_tags.append("general")
+
+            entry = new_model_entry(
+                exact_model_id,
+                alias=alias,
+                cost_tag=cost_tag,
+                capability_tags=cap_tags,
+                source_flags=["user_configured"],
+            )
+            entry["provider"] = provider_name
+            entry["display_name"] = name or model_key
+            entry["lifecycle_status"] = "enabled"
+            configured.append(entry)
+
+    return configured
 
 
 # --- Pool Storage ---
@@ -180,6 +275,56 @@ class ModelPool:
         sanitized.pop('snapshot_timestamp', None)
         return json.dumps(sanitized, sort_keys=True, ensure_ascii=False)
 
+    def discover_configured(self, config_path: str, node_id: str = "all") -> dict:
+        """Load user-configured models from an opencode.jsonc config file.
+
+        Merges into existing pool. Does NOT expose secrets.
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.snapshot_timestamp = now
+
+        configured = parse_configured_models(config_path)
+        added = []
+        updated = []
+
+        for entry in configured:
+            mid = entry["exact_model_id"]
+            if mid not in self.models:
+                # Set node availability for specified node
+                if node_id == "all":
+                    for n in ["5bao", "9bao", "21bao"]:
+                        entry["node_availability"][n] = {"available": True, "last_seen": now}
+                else:
+                    entry["node_availability"][node_id] = {"available": True, "last_seen": now}
+                entry["last_seen"] = now
+                self.models[mid] = entry
+                added.append(mid)
+            else:
+                # Merge: update source_flags, keep existing data
+                existing = self.models[mid]
+                existing_flags = set(existing.get("source_flags", []))
+                new_flags = set(entry.get("source_flags", []))
+                merged_flags = sorted(existing_flags | new_flags)
+                existing["source_flags"] = merged_flags
+                existing["last_seen"] = now
+                # Update display_name if available
+                if entry.get("display_name"):
+                    existing["display_name"] = entry["display_name"]
+                # Mark as user_configured if not already
+                if "user_configured" not in existing_flags:
+                    existing["source_flags"] = merged_flags
+                updated.append(mid)
+
+        self.save()
+        return {
+            "config_path": config_path,
+            "timestamp": now,
+            "added": sorted(added),
+            "updated": sorted(updated),
+            "total_configured": len(configured),
+            "snapshot_sha256": self.snapshot_sha256,
+        }
+
     def discover_node(self, node_id: str, models_list: list[str]) -> dict:
         """Discover models from a node's `opencode models` output.
 
@@ -207,6 +352,7 @@ class ModelPool:
                     model_id,
                     cost_tag=auto_tag_cost(model_id),
                     capability_tags=auto_capability_tags(model_id),
+                    source_flags=["opencode_discovered"],
                 )
                 entry["node_availability"][node_id] = {"available": True, "last_seen": now}
                 entry["last_seen"] = now
@@ -214,10 +360,14 @@ class ModelPool:
                 self.models[model_id] = entry
                 added.append(model_id)
             else:
-                # Existing model, update node availability
-                self.models[model_id]["node_availability"][node_id] = {"available": True, "last_seen": now}
-                self.models[model_id]["last_seen"] = now
-                self.models[model_id]["health_status"] = "healthy"
+                # Existing model, update node availability and merge source_flags
+                existing = self.models[model_id]
+                existing["node_availability"][node_id] = {"available": True, "last_seen": now}
+                existing["last_seen"] = now
+                existing["health_status"] = "healthy"
+                flags = set(existing.get("source_flags", []))
+                flags.add("opencode_discovered")
+                existing["source_flags"] = sorted(flags)
                 updated.append(model_id)
 
         # Mark models not seen on this node
@@ -313,11 +463,15 @@ class ModelPool:
                     "cost_tag": e["cost_tag"],
                     "enabled": e["enabled"],
                     "health_status": e["health_status"],
+                    "lifecycle_status": e.get("lifecycle_status", "enabled"),
                     "last_seen": e["last_seen"],
                     "roles": e["roles"],
                     "priority": e["priority"],
                     "capability_tags": e["capability_tags"],
+                    "source_flags": e.get("source_flags", []),
                     "fallback_allowed": e["fallback_allowed"],
+                    "live_validation": e.get("live_validation", {}),
+                    "display_name": e.get("display_name", ""),
                 }
                 for mid, e in self.models.items()
             },
@@ -505,11 +659,91 @@ class ModelPool:
         free_models = pool.list_models(tag="free")
         check("sc-25-list-filter", all(m["cost_tag"] == "free" for m in free_models) if free_models else True)
 
-        # Cleanup test pool
-        try:
-            os.remove("/tmp/test_pool_sc.json")
-        except OSError:
-            pass
+        # sc-26: new_model_entry includes source_flags
+        entry_sf = new_model_entry("opencode/test-sf", source_flags=["user_configured"])
+        check("sc-26-source-flags", entry_sf["source_flags"] == ["user_configured"],
+              str(entry_sf["source_flags"]))
+
+        # sc-27: new_model_entry includes lifecycle_status
+        check("sc-27-lifecycle-default", entry_sf.get("lifecycle_status") == "enabled")
+
+        # sc-28: new_model_entry includes live_validation
+        check("sc-28-live-validation-field", "live_validation" in entry_sf)
+        check("sc-28-live-validation-default", entry_sf["live_validation"]["validated"] is False)
+
+        # sc-29: parse_configured_models with test config
+        import tempfile
+        test_config = json.dumps({
+            "$schema": "https://opencode.ai/config.json",
+            "provider": {
+                "test-prov": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "options": {"baseURL": "https://example.com", "apiKey": "SECRET_KEY_123"},
+                    "models": {
+                        "test-model-1": {"name": "Test Model 1"},
+                        "test-model-2": {}
+                    }
+                }
+            }
+        })
+        test_config_path = "/tmp/test_oc_config.json"
+        with open(test_config_path, "w") as f:
+            f.write(test_config)
+        configured = parse_configured_models(test_config_path)
+        check("sc-29-parse-count", len(configured) == 2, f"count={len(configured)}")
+        check("sc-29-parse-source", all("user_configured" in e["source_flags"] for e in configured))
+        check("sc-29-parse-id", configured[0]["exact_model_id"] == "test-prov/test-model-1")
+        check("sc-29-parse-cost-paid", configured[0]["cost_tag"] == "paid")
+
+        # sc-30: secrets redaction — parse_configured_models must not expose keys
+        config_str = json.dumps(configured)
+        check("sc-30-secrets-redacted", "SECRET_KEY_123" not in config_str)
+
+        # sc-31: discover_configured merge
+        pool2 = ModelPool("/tmp/test_pool_merge.json")
+        result_c = pool2.discover_configured(test_config_path, node_id="test-node")
+        check("sc-31-config-added", len(result_c["added"]) == 2, f"added={result_c['added']}")
+        check("sc-31-config-in-pool", "test-prov/test-model-1" in pool2.models)
+
+        # sc-32: discover_node merges with configured (dedup)
+        # Add same model via discover_node — should merge, not duplicate
+        pool2.discover_node("test-node", ["test-prov/test-model-1", "opencode/new-discovered"])
+        check("sc-32-dedup", list(pool2.models.keys()).count("test-prov/test-model-1") == 1)
+        check("sc-32-merge-source",
+              sorted(pool2.models["test-prov/test-model-1"].get("source_flags", [])) ==
+              sorted(["opencode_discovered", "user_configured"]),
+              str(pool2.models["test-prov/test-model-1"].get("source_flags")))
+
+        # sc-33: new discovered model gets opencode_discovered flag
+        check("sc-33-discovered-flag",
+              "opencode_discovered" in pool2.models["opencode/new-discovered"].get("source_flags", []))
+
+        # sc-34: retired/disabled model not recommended but auditable
+        pool2.models["test-prov/test-model-2"]["enabled"] = False
+        pool2.models["test-prov/test-model-2"]["lifecycle_status"] = "disabled"
+        rec_disabled = pool2.recommend("implementer", "test-node")
+        recommended_id = rec_disabled.get("recommended", "")
+        check("sc-34-disabled-not-recommended",
+              recommended_id != "test-prov/test-model-2",
+              f"recommended={recommended_id}")
+        check("sc-34-disabled-still-auditable",
+              "test-prov/test-model-2" in pool2.models)
+
+        # sc-35: unknown-cost model not default
+        pool2.models["opencode/new-discovered"]["cost_tag"] = "unknown"
+        rec_impl = pool2.recommend("implementer", "test-node")
+        check("sc-35-unknown-not-default",
+              rec_impl.get("recommended") != "opencode/new-discovered" or
+              all(m.get("cost_tag") != "free"
+                  for m in pool2.list_models(node_id="test-node", enabled_only=True)),
+              f"recommended={rec_impl.get('recommended')}")
+
+        # Cleanup test pools
+        for f in ["/tmp/test_pool_sc.json", "/tmp/test_pool_merge.json", test_config_path]:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
 
         return {
             "version": __version__,
@@ -535,6 +769,7 @@ def main():
     disc.add_argument("--node", help="Node to discover")
     disc.add_argument("--all", action="store_true", help="Discover all nodes")
     disc.add_argument("--models", nargs="+", help="Model list (for testing)")
+    disc.add_argument("--config", help="Path to opencode.jsonc for user-configured models")
 
     # list
     lst = sub.add_parser("list")
@@ -571,7 +806,9 @@ def main():
     pool = ModelPool()
 
     if args.command == "discover":
-        if args.models:
+        if args.config:
+            result = pool.discover_configured(args.config, node_id=args.node or "all")
+        elif args.models:
             result = pool.discover_node(args.node or "local", args.models)
         elif args.node:
             result = pool.discover_node(args.node, [])
