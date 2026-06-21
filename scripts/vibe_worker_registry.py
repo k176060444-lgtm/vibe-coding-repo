@@ -58,7 +58,7 @@ class WorkerNode:
     active_jobs: int = 0
     enabled: bool = True
     manual_only: bool = False
-    admission_mode: str = "normal"  # normal, canary
+    admission_mode: str = "normal"  # normal, canary, controlled
     maintenance_status: str = "active"  # active, maintenance
     health_status: str = "UNKNOWN"  # ONLINE, OFFLINE, UNKNOWN
     token_policy: str = "gh_cached_credentials"  # self-repo only
@@ -165,7 +165,7 @@ DEFAULT_WORKERS = {
         max_parallel_jobs=1,
         enabled=True,
         manual_only=False,
-        admission_mode="canary",
+        admission_mode="controlled",
         allowed_operations=["smoke", "implementer-small", "reviewer", "implementer"],
         tools_installed={"opencode": "1.17.8"},
     ),
@@ -210,10 +210,11 @@ class WorkerRegistry:
         ]
         if not include_manual_only:
             candidates = [w for w in candidates if not w.manual_only]
-        # Canary admission: canary workers only accept tasks in allowed_operations
+        # Admission filter: canary/controlled workers only accept tasks in allowed_operations
+        _restricted_modes = {"canary", "controlled"}
         candidates = [
             w for w in candidates
-            if w.admission_mode != "canary" or task_type in w.allowed_operations
+            if w.admission_mode not in _restricted_modes or task_type in w.allowed_operations
         ]
         if allowed_worker_ids is not None:
             allowed_set = set(allowed_worker_ids)
@@ -579,7 +580,7 @@ def self_check() -> dict:
         reg.set_health("5bao", NodeStatus.ONLINE)
         reg.set_health("9bao", NodeStatus.ONLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
-        # 21bao is canary with implementer-small only; implementer should exclude it
+        # 21bao is controlled with implementer-small only; implementer should exclude it
         avail_impl = reg.available_workers("implementer")
         impl_ids = [w.worker_id for w in avail_impl]
         assert "21bao" in impl_ids, "21bao canary should be included for implementer"
