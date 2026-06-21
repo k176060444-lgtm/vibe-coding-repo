@@ -823,11 +823,15 @@ class ModelPool:
 
     # --- V1.21.7: Fuzzy Alias Resolution ---
 
-    def seed_known_models(self, nodes: list = None) -> dict:
+    def seed_known_models(self, nodes: list = None, save: bool = True) -> dict:
         """Seed pool with KNOWN_MODELS_SEED when no snapshot exists.
 
         Does NOT overwrite existing models. Only adds missing entries.
         Node availability set to 'configured' (static, not live-verified).
+
+        Args:
+            nodes: Node list for availability (default: 5bao, 9bao, 21bao).
+            save: If True, persist to disk. If False, in-memory only (read-only).
         """
         if nodes is None:
             nodes = ["5bao", "9bao", "21bao"]
@@ -870,7 +874,8 @@ class ModelPool:
             added.append(mid)
         if added:
             self.snapshot_timestamp = now
-            self.save()
+            if save:
+                self.save()
         return {
             "action": "seeded",
             "added": sorted(added),
@@ -894,9 +899,9 @@ class ModelPool:
                 "message": str,
             }
         """
-        # Auto-seed if pool is empty
+        # Auto-seed if pool is empty (in-memory only, no disk write)
         if not self.models:
-            self.seed_known_models()
+            self.seed_known_models(save=False)
 
         normalized = alias.strip().lower()
 
@@ -959,10 +964,7 @@ class ModelPool:
                             ambiguous: bool, message: str) -> dict:
         """Build result for a single matched alias."""
         entry = self.models.get(model_id, {})
-        is_quarantined = (
-            entry.get("quarantine_status") == "quarantined" or
-            model_id in KNOWN_QUARANTINE
-        )
+        is_quarantined = entry.get("quarantine_status") == "quarantined"
         selectable = (
             entry.get("enabled", True) and
             entry.get("lifecycle_status", "enabled") == "enabled" and
@@ -976,8 +978,7 @@ class ModelPool:
             if entry.get("lifecycle_status") in ("disabled", "retired"):
                 reasons.append(f"lifecycle={entry['lifecycle_status']}")
             if is_quarantined:
-                q_reason = (entry.get("quarantine_reason") or
-                            KNOWN_QUARANTINE.get(model_id, "unknown"))
+                q_reason = entry.get("quarantine_reason") or "unknown"
                 reasons.append(f"quarantined: {q_reason}")
             non_selectable_reason = "; ".join(reasons) if reasons else "unknown"
 
@@ -1010,10 +1011,7 @@ class ModelPool:
 
     def _model_candidate_entry(self, model_id: str, entry: dict) -> dict:
         """Build a single candidate entry for alias resolution output."""
-        is_quarantined = (
-            entry.get("quarantine_status") == "quarantined" or
-            model_id in KNOWN_QUARANTINE
-        )
+        is_quarantined = entry.get("quarantine_status") == "quarantined"
         selectable = (
             entry.get("enabled", True) and
             entry.get("lifecycle_status", "enabled") == "enabled" and
@@ -1027,8 +1025,7 @@ class ModelPool:
             if entry.get("lifecycle_status") in ("disabled", "retired"):
                 reasons.append(f"lifecycle={entry['lifecycle_status']}")
             if is_quarantined:
-                q_reason = (entry.get("quarantine_reason") or
-                            KNOWN_QUARANTINE.get(model_id, "unknown"))
+                q_reason = entry.get("quarantine_reason") or "unknown"
                 reasons.append(f"quarantined: {q_reason}")
             non_selectable_reason = "; ".join(reasons) if reasons else "unknown"
 
@@ -1041,8 +1038,7 @@ class ModelPool:
             "non_selectable_reason": non_selectable_reason,
             "quarantine_status": entry.get("quarantine_status",
                                            "quarantined" if is_quarantined else "none"),
-            "quarantine_reason": (entry.get("quarantine_reason") or
-                                  KNOWN_QUARANTINE.get(model_id)),
+            "quarantine_reason": entry.get("quarantine_reason"),
             "recommended_roles": entry.get("recommended_roles", []),
         }
 
@@ -1055,22 +1051,18 @@ class ModelPool:
         if nodes is None:
             nodes = ["5bao", "9bao", "21bao"]
 
-        # Auto-seed if pool is empty
+        # Auto-seed if pool is empty (in-memory only, no disk write)
         if not self.models:
-            self.seed_known_models(nodes=nodes)
+            self.seed_known_models(nodes=nodes, save=False)
 
         table = []
         for mid in sorted(self.models.keys()):
             entry = self.models[mid]
 
             # Quarantine status
-            is_quarantined = (
-                entry.get("quarantine_status") == "quarantined" or
-                mid in KNOWN_QUARANTINE
-            )
+            is_quarantined = entry.get("quarantine_status") == "quarantined"
             quarantine_status = "quarantined" if is_quarantined else "none"
-            quarantine_reason = (entry.get("quarantine_reason") or
-                                 KNOWN_QUARANTINE.get(mid))
+            quarantine_reason = entry.get("quarantine_reason") if is_quarantined else None
 
             # Selectability
             selectable = (
@@ -1572,6 +1564,69 @@ class ModelPool:
         # Pool is empty, operator_table should auto-seed
         cli_tbl = pool_cli.operator_table()
         check("sc-62-auto-seed", cli_tbl["model_count"] == 11)
+
+        # --- Issue #1 fix: KNOWN_QUARANTINE no longer permanently overrides ---
+
+        # sc-63: seed quarantine then clear — selectable should recover
+        pool_q = ModelPool("/tmp/test_pool_quarantine.json")
+        pool_q.seed_known_models(save=False)
+        # Verify initial quarantine
+        ark_entry = pool_q.models.get("volcengine-plan/ark-code-latest", {})
+        check("sc-63-initial-quarantine",
+              ark_entry.get("quarantine_status") == "quarantined")
+        # Clear quarantine (simulating discover/enable recovery)
+        ark_entry["quarantine_status"] = "none"
+        ark_entry["quarantine_reason"] = None
+        # operator_table should now show selectable=true
+        q_tbl = pool_q.operator_table()
+        ark_row = [r for r in q_tbl["table"] if r["exact_model_id"] == "volcengine-plan/ark-code-latest"]
+        if ark_row:
+            check("sc-63-cleared-selectable", ark_row[0]["selectable"] is True)
+            check("sc-63-cleared-quarantine-status", ark_row[0]["quarantine_status"] == "none")
+            check("sc-63-cleared-quarantine-reason", ark_row[0]["quarantine_reason"] is None)
+        else:
+            check("sc-63-cleared-selectable", False, "ark-code-latest not in table")
+
+        # sc-64: resolve-alias doubao after quarantine cleared
+        r_doubao_cleared = pool_q.resolve_fuzzy_alias("doubao")
+        check("sc-64-doubao-cleared-selectable",
+              r_doubao_cleared["candidates"][0]["selectable"] is True)
+        check("sc-64-doubao-cleared-confirm",
+              r_doubao_cleared["requires_operator_confirmation"] is False)
+
+        # sc-65: KNOWN_QUARANTINE constant still exists for seed (backward compat)
+        check("sc-65-known-quarantine-exists",
+              "volcengine-plan/ark-code-latest" in KNOWN_QUARANTINE)
+
+        # --- Issue #2 fix: read-only commands don't write files ---
+
+        # sc-66: operator-table on empty pool does NOT create file
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        pool_path_ro = os.path.join(tmpdir, "test_no_write.json")
+        pool_ro = ModelPool(pool_path_ro)
+        check("sc-66-pool-file-not-exist-before", not os.path.exists(pool_path_ro))
+        _ = pool_ro.operator_table()
+        check("sc-66-pool-file-not-exist-after", not os.path.exists(pool_path_ro),
+              "operator-table should not write file")
+
+        # sc-67: resolve-alias on empty pool does NOT create file
+        pool_path_ro2 = os.path.join(tmpdir, "test_no_write2.json")
+        pool_ro2 = ModelPool(pool_path_ro2)
+        check("sc-67-pool-file-not-exist-before", not os.path.exists(pool_path_ro2))
+        _ = pool_ro2.resolve_fuzzy_alias("doubao")
+        check("sc-67-pool-file-not-exist-after", not os.path.exists(pool_path_ro2),
+              "resolve-alias should not write file")
+
+        # sc-68: explicit seed with save=True DOES create file
+        pool_path_w = os.path.join(tmpdir, "test_write.json")
+        pool_w = ModelPool(pool_path_w)
+        pool_w.seed_known_models(save=True)
+        check("sc-68-seed-save-creates-file", os.path.exists(pool_path_w))
+
+        # Cleanup temp dir
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
         # Cleanup test pools
         for f in ["/tmp/test_pool_sc.json", "/tmp/test_pool_merge.json",
