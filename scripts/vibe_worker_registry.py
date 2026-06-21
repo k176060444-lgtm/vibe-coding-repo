@@ -165,7 +165,7 @@ DEFAULT_WORKERS = {
         max_parallel_jobs=1,
         enabled=True,
         manual_only=False,
-        admission_mode="controlled",
+        admission_mode="normal",
         allowed_operations=["smoke", "implementer-small", "reviewer", "implementer"],
         tools_installed={"opencode": "1.17.8"},
     ),
@@ -644,27 +644,38 @@ def self_check() -> dict:
         checks.append({"name": "worker_serialization_roundtrip", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 15: select_worker - controlled admission enforcement
+    # Check 15: select_worker - normal admission semantics
     try:
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
-        # 21bao is controlled, implementer IS in allowed_operations → accepted
+        # 21bao is normal: no admission filter, selected if capability matches
+        # implementer in capabilities → accepted
         selected_impl = reg.select_worker("implementer")
-        assert selected_impl is not None, "21bao controlled should be auto-selected for implementer"
+        assert selected_impl is not None, "21bao normal should be auto-selected for implementer"
         assert selected_impl.worker_id == "21bao"
-        # 21bao is controlled, smoke IS in allowed_operations → accepted
+        # smoke in capabilities → accepted
         selected_smoke = reg.select_worker("smoke")
-        assert selected_smoke is not None, "21bao controlled should be auto-selected for smoke"
+        assert selected_smoke is not None, "21bao normal should be auto-selected for smoke"
         assert selected_smoke.worker_id == "21bao"
-        # 21bao is controlled, implementer-small IS in allowed_operations → accepted
+        # implementer-small in capabilities → accepted
         selected_small = reg.select_worker("implementer-small")
-        assert selected_small is not None, "21bao controlled should be auto-selected for implementer-small"
+        assert selected_small is not None, "21bao normal should be auto-selected for implementer-small"
         assert selected_small.worker_id == "21bao"
-        # 21bao is controlled, merge NOT in allowed_operations → rejected
+        # windows-worker in capabilities, no admission filter → accepted
+        selected_ww = reg.select_worker("windows-worker")
+        assert selected_ww is not None, "21bao normal should be auto-selected for windows-worker"
+        assert selected_ww.worker_id == "21bao"
+        # merge NOT in capabilities → rejected regardless of admission mode
         selected_merge = reg.select_worker("merge")
-        assert selected_merge is None, "21bao controlled should NOT be auto-selected for merge"
+        assert selected_merge is None, "21bao normal should NOT be selected for merge (no capability)"
+        # release NOT in capabilities → rejected
+        selected_rel = reg.select_worker("release")
+        assert selected_rel is None, "21bao normal should NOT be selected for release (no capability)"
+        # production NOT in capabilities → rejected
+        selected_prod = reg.select_worker("production")
+        assert selected_prod is None, "21bao normal should NOT be selected for production (no capability)"
         checks.append({"name": "select_excludes_manual_only", "passed": True})
     except Exception as e:
         checks.append({"name": "select_excludes_manual_only", "passed": False, "error": str(e)})

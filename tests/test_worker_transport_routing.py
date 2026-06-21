@@ -83,7 +83,7 @@ class TestWorkerNodeSerialization(unittest.TestCase):
         assert w2.worker_id == "21bao"
         assert w2.transport == "local-exec"
         assert w2.manual_only is False
-        assert w2.admission_mode == "controlled"
+        assert w2.admission_mode == "normal"
         assert w2.enabled is True
 
 
@@ -108,19 +108,19 @@ class TestTransportRouting(unittest.TestCase):
 
     def test_localexec_workers_for_windows_worker(self):
         reg = self._make_registry()
-        # 21bao is controlled, windows-worker NOT in allowed_operations -> rejected
+        # 21bao is normal, windows-worker IS in capabilities -> accepted
         avail = reg.available_workers("windows-worker")
         ids = {w.worker_id for w in avail}
-        assert "21bao" not in ids, "21bao controlled should be rejected for windows-worker"
+        assert "21bao" in ids, "21bao normal should accept windows-worker"
         assert "5bao" not in ids
         assert "9bao" not in ids
 
-    def test_windows_worker_canary_rejected(self):
+    def test_windows_worker_normal_accepted(self):
         reg = self._make_registry()
-        # 21bao is controlled, windows-worker NOT in allowed_operations -> rejected
+        # 21bao is normal, windows-worker IS in capabilities -> accepted
         avail = reg.available_workers("windows-worker")
         ids = {w.worker_id for w in avail}
-        assert "21bao" not in ids
+        assert "21bao" in ids, "21bao normal should accept windows-worker"
 
     def test_implementer_routes_to_ssh_workers(self):
         reg = self._make_registry()
@@ -128,12 +128,12 @@ class TestTransportRouting(unittest.TestCase):
         ids = {w.worker_id for w in avail}
         assert "5bao" in ids
         assert "9bao" in ids
-        # 21bao is controlled, implementer NOW in allowed_operations -> included
+        # 21bao is normal, implementer NOW in allowed_operations -> included
         assert "21bao" in ids
 
     def test_implementer_with_manual_only_included(self):
         reg = self._make_registry()
-        # 21bao is controlled, implementer NOW in allowed_operations
+        # 21bao is normal, implementer NOW in allowed_operations
         avail = reg.available_workers("implementer")
         ids = {w.worker_id for w in avail}
         assert "5bao" in ids
@@ -146,7 +146,7 @@ class TestTransportRouting(unittest.TestCase):
         ids = {w.worker_id for w in avail}
         assert "5bao" in ids
         assert "9bao" in ids
-        # 21bao is controlled with reviewer in allowed_operations -> included
+        # 21bao is normal with reviewer in allowed_operations -> included
         assert "21bao" in ids
 
 
@@ -157,7 +157,7 @@ class TestManualOnlyFiltering(unittest.TestCase):
         reg = WorkerRegistry()
         for wid in reg.workers:
             reg.set_health(wid, NodeStatus.ONLINE)
-        # 21bao is controlled, implementer NOW in allowed_operations -> included
+        # 21bao is normal, implementer NOW in allowed_operations -> included
         avail = reg.available_workers("implementer")
         ids = {w.worker_id for w in avail}
         assert "21bao" in ids
@@ -170,8 +170,8 @@ class TestManualOnlyFiltering(unittest.TestCase):
         reg = WorkerRegistry()
         for wid in reg.workers:
             reg.set_health(wid, NodeStatus.ONLINE)
-        # 21bao is controlled, implementer NOW in capabilities/allowed_operations
-        # include_manual_only bypasses manual_only filter but not controlled admission
+        # 21bao is normal, implementer NOW in capabilities/allowed_operations
+        # include_manual_only bypasses manual_only filter but not normal admission
         # implementer NOW in allowed_operations, so 21bao is included
         avail = reg.available_workers("implementer", include_manual_only=True)
         ids = {w.worker_id for w in avail}
@@ -185,7 +185,7 @@ class TestManualOnlyFiltering(unittest.TestCase):
         reg = WorkerRegistry()
         for wid in reg.workers:
             reg.set_health(wid, NodeStatus.ONLINE)
-        # 21bao is controlled, implementer NOW in allowed_operations -> may be selected
+        # 21bao is normal, implementer NOW in allowed_operations -> may be selected
         selected = reg.select_worker("implementer")
         assert selected is not None
 
@@ -195,23 +195,23 @@ class TestManualOnlyFiltering(unittest.TestCase):
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
-        # 21bao is controlled, implementer allowed (in allowed_operations)
+        # 21bao is normal, implementer allowed (in allowed_operations)
         selected = reg.select_worker("implementer", include_manual_only=True)
-        assert selected is not None, "21bao controlled now allows implementer"
+        assert selected is not None, "21bao normal now allows implementer"
         assert selected.worker_id == "21bao"
         # smoke should work
         selected_smoke = reg.select_worker("smoke", include_manual_only=True)
         assert selected_smoke is not None
         assert selected_smoke.worker_id == "21bao"
 
-    def test_21bao_controlled_enforced_when_only_worker(self):
+    def test_21bao_normal_enforced_when_only_worker(self):
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
         # implementer NOW in canary allowed_operations -> can be selected
         selected_impl = reg.select_worker("implementer")
-        assert selected_impl is not None, "21bao controlled should be available for implementer"
+        assert selected_impl is not None, "21bao normal should be available for implementer"
         # smoke IS in canary allowed_operations -> accepted
         selected_smoke = reg.select_worker("smoke")
         assert selected_smoke is not None
@@ -242,7 +242,7 @@ class TestDisabledWorkerFiltering(unittest.TestCase):
             reg.set_health(wid, NodeStatus.ONLINE)
         reg.workers["21bao"].enabled = True
         reg.workers["21bao"].manual_only = False
-        # 21bao is controlled, implementer NOW in allowed_operations
+        # 21bao is normal, implementer NOW in allowed_operations
         avail = reg.available_workers("implementer")
         ids = {w.worker_id for w in avail}
         assert "21bao" in ids
@@ -298,7 +298,7 @@ class TestUnknownTransportFailClosed(unittest.TestCase):
         # Should not match linux-worker
         avail = reg.available_workers("linux-worker")
         assert len(avail) == 0
-        # Should match implementer (admission_mode=normal, no controlled filter)
+        # Should match implementer (admission_mode=normal, no admission filter)
         avail2 = reg.available_workers("implementer")
         assert len(avail2) == 1
 
@@ -318,7 +318,7 @@ class TestDefaultWorkers(unittest.TestCase):
         assert w.repo_root == ""
         assert w.enabled is True
         assert w.manual_only is False
-        assert w.admission_mode == "controlled"
+        assert w.admission_mode == "normal"
         assert "windows-worker" in w.capabilities
         assert "opencode" in w.capabilities
 
@@ -341,7 +341,7 @@ class TestDefaultWorkers(unittest.TestCase):
 
 
 class TestCanaryAdmissionEnforcement(unittest.TestCase):
-    """Test controlled admission enforcement V120H3."""
+    """Test normal admission enforcement V120H3."""
 
     def test_canary_smoke_allowed(self):
         reg = WorkerRegistry()
@@ -352,7 +352,7 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         assert selected is not None
         assert selected.worker_id == "21bao"
 
-    def test_controlled_implementer_small_allowed(self):
+    def test_normal_implementer_small_allowed(self):
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
@@ -361,7 +361,7 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         assert selected is not None
         assert selected.worker_id == "21bao"
 
-    def test_controlled_implementer_allowed(self):
+    def test_normal_implementer_allowed(self):
         """Only 21bao online: implementer selects 21bao (now in allowed_operations)."""
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
@@ -371,7 +371,7 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         assert selected is not None
         assert selected.worker_id == "21bao"
 
-    def test_controlled_reviewer_allowed(self):
+    def test_normal_reviewer_allowed(self):
         """Only 21bao online: reviewer selects 21bao (now in allowed_operations)."""
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
@@ -390,13 +390,14 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
             selected = reg.select_worker(task)
             assert selected is None, f"21bao should not be selected for {task}"
 
-    def test_canary_windows_worker_rejected(self):
+    def test_normal_windows_worker_accepted(self):
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
         selected = reg.select_worker("windows-worker")
-        assert selected is None
+        assert selected is not None, "21bao normal accepts windows-worker"
+        assert selected.worker_id == "21bao"
 
     def test_all_online_implementer_prefers_non_canary(self):
         reg = WorkerRegistry()
@@ -452,15 +453,15 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         assert "implementer-small" in w.capabilities
         assert "smoke" in w.capabilities
 
-    def test_21bao_controlled_policy_exact(self):
+    def test_21bao_normal_policy_exact(self):
         w = DEFAULT_WORKERS["21bao"]
         assert w.enabled is True
         assert w.manual_only is False
-        assert w.admission_mode == "controlled"
+        assert w.admission_mode == "normal"
         assert w.max_parallel_jobs == 1
         assert set(w.allowed_operations) == {"smoke", "implementer-small", "reviewer", "implementer"}
 
-    def test_controlled_reviewer_allowed_only_21bao(self):
+    def test_normal_reviewer_allowed_only_21bao(self):
         """Only 21bao online: reviewer selects 21bao."""
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
@@ -480,7 +481,7 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         assert selected.worker_id in ("5bao", "9bao")
         assert selected.worker_id != "21bao"
 
-    def test_controlled_still_allows_smoke_and_implementer_small(self):
+    def test_normal_still_allows_smoke_and_implementer_small(self):
         """21bao still allows smoke and implementer-small."""
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
@@ -491,7 +492,7 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         small = reg.select_worker("implementer-small")
         assert small is not None and small.worker_id == "21bao"
 
-    def test_controlled_now_allows_implementer(self):
+    def test_normal_now_allows_implementer(self):
         """21bao now allows implementer (added to allowed_operations)."""
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
@@ -501,7 +502,7 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         assert selected is not None
         assert selected.worker_id == "21bao"
 
-    def test_controlled_still_rejects_merge_release_production(self):
+    def test_normal_still_rejects_merge_release_production(self):
         """21bao still rejects merge/release/production."""
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
@@ -511,14 +512,15 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
             selected = reg.select_worker(task)
             assert selected is None, f"21bao should reject {task}"
 
-    def test_controlled_still_rejects_windows_worker(self):
-        """21bao still rejects windows-worker."""
+    def test_normal_now_accepts_windows_worker(self):
+        """21bao normal mode accepts windows-worker (has capability, no admission filter)."""
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
         selected = reg.select_worker("windows-worker")
-        assert selected is None
+        assert selected is not None, "21bao normal should accept windows-worker"
+        assert selected.worker_id == "21bao"
 
     def test_max_parallel_jobs_still_1(self):
         """21bao max_parallel_jobs remains 1."""

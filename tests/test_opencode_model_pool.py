@@ -388,7 +388,7 @@ class TestRecommendationGateNative(unittest.TestCase):
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
         selected = reg.select_worker("implementer")
-        assert selected is not None, "21bao controlled should now allow implementer"
+        assert selected is not None, "21bao normal should allow implementer"
         assert selected.worker_id == "21bao"
 
     def test_21bao_canary_admission_now_allows_reviewer(self):
@@ -410,11 +410,12 @@ class TestRecommendationGateNative(unittest.TestCase):
         selected = reg.select_worker("merge")
         assert selected is None
 
-    def test_21bao_canary_admission_still_rejects_windows_worker(self):
+    def test_21bao_normal_admission_accepts_windows_worker(self):
         from vibe_worker_registry import WorkerRegistry, NodeStatus
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
         selected = reg.select_worker("windows-worker")
-        assert selected is None
+        assert selected is not None, "21bao normal should accept windows-worker"
+        assert selected.worker_id == "21bao"
