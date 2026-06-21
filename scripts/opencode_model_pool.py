@@ -32,6 +32,202 @@ STALE_HOURS = 24
 FREE_KEYWORDS = ["free", "free-tier"]
 COST_KEYWORDS = ["pro", "plus", "paid", "enterprise"]
 
+# --- V1.21.7: Fuzzy Alias Resolution ---
+
+# Canonical alias → exact_model_id mappings (exact match, no ambiguity)
+EXACT_ALIAS_MAP = {
+    "deepseek pro": "deepseek-plan/deepseek-v4-pro",
+    "deepseek flash": "deepseek-plan/deepseek-v4-flash",
+    "ds-v4-pro": "deepseek-plan/deepseek-v4-pro",
+    "ds-v4-flash": "deepseek-plan/deepseek-v4-flash",
+    "mimo pro": "xiaomi-plan/mimo-v2.5-pro",
+    "mimo-v2.5-pro": "xiaomi-plan/mimo-v2.5-pro",
+    "mimo-v2.5": "xiaomi-plan/mimo-v2.5",
+    "doubao": "volcengine-plan/ark-code-latest",
+    "volcengine": "volcengine-plan/ark-code-latest",
+    "ark-code": "volcengine-plan/ark-code-latest",
+    "ark-code-latest": "volcengine-plan/ark-code-latest",
+    "minimax": "minimax-plan/MiniMax-M3",
+    "m3": "minimax-plan/MiniMax-M3",
+    "minimax-m3": "minimax-plan/MiniMax-M3",
+    "MiniMax-M3": "minimax-plan/MiniMax-M3",
+    "deepseek-v4-flash-free": "opencode/deepseek-v4-flash-free",
+    "mimo-v2.5-free": "opencode/mimo-v2.5-free",
+    "nemotron-3-ultra-free": "opencode/nemotron-3-ultra-free",
+    "north-mini-code-free": "opencode/north-mini-code-free",
+    "big-pickle": "opencode/big-pickle",
+}
+
+# Ambiguous aliases → list of candidate exact_model_ids
+AMBIGUOUS_ALIAS_MAP = {
+    "mimo": [
+        "xiaomi-plan/mimo-v2.5",
+        "xiaomi-plan/mimo-v2.5-pro",
+        "opencode/mimo-v2.5-free",
+    ],
+    "deepseek": [
+        "deepseek-plan/deepseek-v4-flash",
+        "deepseek-plan/deepseek-v4-pro",
+        "opencode/deepseek-v4-flash-free",
+    ],
+    "deepseek v4": [
+        "deepseek-plan/deepseek-v4-flash",
+        "deepseek-plan/deepseek-v4-pro",
+        "opencode/deepseek-v4-flash-free",
+    ],
+    "ds": [
+        "deepseek-plan/deepseek-v4-flash",
+        "deepseek-plan/deepseek-v4-pro",
+        "opencode/deepseek-v4-flash-free",
+    ],
+}
+
+# Known quarantine reasons (from model-routing-fixture.json)
+KNOWN_QUARANTINE = {
+    "volcengine-plan/ark-code-latest": "key_format_incorrect",
+}
+
+# --- V1.21.7: Static Known Models Seed ---
+# Used when no .opencode_model_pool.json snapshot exists.
+# Source: opencode.jsonc (user_configured) + model-routing-fixture.json (opencode_discovered)
+
+KNOWN_MODELS_SEED = [
+    # --- user_configured (from opencode.jsonc) ---
+    {
+        "exact_model_id": "deepseek-plan/deepseek-v4-flash",
+        "alias": "deepseek-v4-flash",
+        "provider": "deepseek-plan",
+        "cost_tag": "paid",
+        "source_flags": ["user_configured"],
+        "capability_tags": ["code", "fast"],
+        "roles": ["implementer", "reviewer", "explorer"],
+        "priority": 5,
+        "display_name": "DeepSeek V4 Flash",
+        "recommended_roles": ["Explorer", "Tester"],
+    },
+    {
+        "exact_model_id": "deepseek-plan/deepseek-v4-pro",
+        "alias": "deepseek-v4-pro",
+        "provider": "deepseek-plan",
+        "cost_tag": "paid",
+        "source_flags": ["user_configured"],
+        "capability_tags": ["code", "strong"],
+        "roles": ["implementer", "reviewer"],
+        "priority": 3,
+        "display_name": "DeepSeek V4 Pro",
+        "recommended_roles": ["Reviewer", "Implementer"],
+    },
+    {
+        "exact_model_id": "volcengine-plan/ark-code-latest",
+        "alias": "ark-code-latest",
+        "provider": "volcengine-plan",
+        "cost_tag": "paid",
+        "source_flags": ["user_configured"],
+        "capability_tags": ["code"],
+        "roles": ["implementer", "explorer"],
+        "priority": 8,
+        "display_name": "Ark Code Latest",
+        "recommended_roles": ["Explorer"],
+    },
+    {
+        "exact_model_id": "xiaomi-plan/mimo-v2.5",
+        "alias": "mimo-v2.5",
+        "provider": "xiaomi-plan",
+        "cost_tag": "paid",
+        "source_flags": ["user_configured"],
+        "capability_tags": ["code"],
+        "roles": ["implementer", "explorer"],
+        "priority": 6,
+        "display_name": "MiMo V2.5",
+        "recommended_roles": ["Explorer", "Tester"],
+    },
+    {
+        "exact_model_id": "xiaomi-plan/mimo-v2.5-pro",
+        "alias": "mimo-v2.5-pro",
+        "provider": "xiaomi-plan",
+        "cost_tag": "paid",
+        "source_flags": ["user_configured"],
+        "capability_tags": ["code", "strong"],
+        "roles": ["implementer", "reviewer"],
+        "priority": 4,
+        "display_name": "MiMo V2.5 Pro",
+        "recommended_roles": ["Implementer", "Reviewer"],
+    },
+    {
+        "exact_model_id": "minimax-plan/MiniMax-M3",
+        "alias": "MiniMax-M3",
+        "provider": "minimax-plan",
+        "cost_tag": "paid",
+        "source_flags": ["user_configured"],
+        "capability_tags": ["code"],
+        "roles": ["implementer", "reviewer"],
+        "priority": 5,
+        "display_name": "MiniMax M3",
+        "recommended_roles": ["Implementer"],
+    },
+    # --- opencode_discovered (from model-routing-fixture.json) ---
+    {
+        "exact_model_id": "opencode/deepseek-v4-flash-free",
+        "alias": "deepseek-v4-flash-free",
+        "provider": "opencode",
+        "cost_tag": "free",
+        "source_flags": ["opencode_discovered"],
+        "capability_tags": ["code", "fast", "free"],
+        "roles": ["smoke", "implementer", "implementer-small"],
+        "priority": 2,
+        "display_name": "DeepSeek V4 Flash Free",
+        "recommended_roles": ["smoke", "implementer-small"],
+    },
+    {
+        "exact_model_id": "opencode/mimo-v2.5-free",
+        "alias": "mimo-v2.5-free",
+        "provider": "opencode",
+        "cost_tag": "free",
+        "source_flags": ["opencode_discovered"],
+        "capability_tags": ["code", "free"],
+        "roles": ["smoke", "implementer", "implementer-small"],
+        "priority": 3,
+        "display_name": "MiMo V2.5 Free",
+        "recommended_roles": ["smoke", "implementer-small"],
+    },
+    {
+        "exact_model_id": "opencode/nemotron-3-ultra-free",
+        "alias": "nemotron-3-ultra-free",
+        "provider": "opencode",
+        "cost_tag": "free",
+        "source_flags": ["opencode_discovered"],
+        "capability_tags": ["code", "strong", "free"],
+        "roles": ["implementer", "reviewer"],
+        "priority": 4,
+        "display_name": "Nemotron 3 Ultra Free",
+        "recommended_roles": ["reviewer", "implementer"],
+    },
+    {
+        "exact_model_id": "opencode/north-mini-code-free",
+        "alias": "north-mini-code-free",
+        "provider": "opencode",
+        "cost_tag": "free",
+        "source_flags": ["opencode_discovered"],
+        "capability_tags": ["code", "fast", "free"],
+        "roles": ["implementer-small", "smoke"],
+        "priority": 5,
+        "display_name": "North Mini Code Free",
+        "recommended_roles": ["implementer-small", "smoke"],
+    },
+    {
+        "exact_model_id": "opencode/big-pickle",
+        "alias": "big-pickle",
+        "provider": "opencode",
+        "cost_tag": "free",
+        "source_flags": ["opencode_discovered"],
+        "capability_tags": ["general", "free"],
+        "roles": ["orchestrator", "implementer"],
+        "priority": 6,
+        "display_name": "Big Pickle",
+        "recommended_roles": ["orchestrator", "general"],
+    },
+]
+
 TASK_TYPE_RECOMMENDATIONS = {
     "first_live_smoke": {
         "strategy": "free + fastest + simplest",
@@ -625,6 +821,355 @@ class ModelPool:
             "model_pool_snapshot_sha256": self.snapshot_sha256,
         }
 
+    # --- V1.21.7: Fuzzy Alias Resolution ---
+
+    def seed_known_models(self, nodes: list = None) -> dict:
+        """Seed pool with KNOWN_MODELS_SEED when no snapshot exists.
+
+        Does NOT overwrite existing models. Only adds missing entries.
+        Node availability set to 'configured' (static, not live-verified).
+        """
+        if nodes is None:
+            nodes = ["5bao", "9bao", "21bao"]
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        added = []
+        for seed in KNOWN_MODELS_SEED:
+            mid = seed["exact_model_id"]
+            if mid in self.models:
+                continue
+            entry = new_model_entry(
+                mid,
+                alias=seed.get("alias", ""),
+                cost_tag=seed.get("cost_tag", "unknown"),
+                roles=seed.get("roles", []),
+                capability_tags=seed.get("capability_tags", []),
+                source_flags=seed.get("source_flags", []),
+            )
+            entry["display_name"] = seed.get("display_name", "")
+            entry["priority"] = seed.get("priority", 10)
+            entry["lifecycle_status"] = "enabled"
+            entry["last_seen"] = now
+            entry["health_status"] = "configured"
+            # Set quarantine if known
+            if mid in KNOWN_QUARANTINE:
+                entry["quarantine_status"] = "quarantined"
+                entry["quarantine_reason"] = KNOWN_QUARANTINE[mid]
+            else:
+                entry["quarantine_status"] = "none"
+                entry["quarantine_reason"] = None
+            # Node availability: mark as 'configured' (not live-verified)
+            for node in nodes:
+                entry["node_availability"][node] = {
+                    "available": True,
+                    "last_seen": now,
+                    "status": "configured",
+                }
+            entry["recommended_roles"] = seed.get("recommended_roles", [])
+            entry["data_source"] = "static_seed"
+            self.models[mid] = entry
+            added.append(mid)
+        if added:
+            self.snapshot_timestamp = now
+            self.save()
+        return {
+            "action": "seeded",
+            "added": sorted(added),
+            "total": len(self.models),
+            "snapshot_sha256": self.snapshot_sha256,
+            "note": "static/configured — run discover --all for live node availability",
+        }
+
+    def resolve_fuzzy_alias(self, alias: str, node_id: str = None) -> dict:
+        """Resolve a potentially fuzzy/ambiguous alias to model candidates.
+
+        Returns:
+            {
+                "alias": str,
+                "matched": bool,
+                "ambiguous": bool,
+                "candidates": [{exact_model_id, display_name, cost_tag,
+                                quarantine_status, selectable, provider}],
+                "exact_match": str or None,  # set only when unambiguous
+                "requires_operator_confirmation": bool,
+                "message": str,
+            }
+        """
+        # Auto-seed if pool is empty
+        if not self.models:
+            self.seed_known_models()
+
+        normalized = alias.strip().lower()
+
+        # Step 1: Check exact alias map (case-insensitive)
+        for known_alias, model_id in EXACT_ALIAS_MAP.items():
+            if known_alias.lower() == normalized:
+                return self._build_alias_result(
+                    alias, model_id, ambiguous=False,
+                    message=f"Exact match: {model_id}",
+                )
+
+        # Step 2: Check exact_model_id direct match
+        for mid in self.models:
+            if mid.lower() == normalized:
+                return self._build_alias_result(
+                    alias, mid, ambiguous=False,
+                    message=f"Direct model ID match: {mid}",
+                )
+
+        # Step 3: Check ambiguous alias map
+        for known_alias, candidates in AMBIGUOUS_ALIAS_MAP.items():
+            if known_alias.lower() == normalized:
+                return self._build_ambiguous_result(alias, candidates,
+                    message=f"Ambiguous alias '{alias}' — operator must choose")
+
+        # Step 4: Fuzzy substring match against all model IDs and aliases
+        fuzzy_candidates = []
+        for mid, entry in self.models.items():
+            mid_lower = mid.lower()
+            entry_alias = entry.get("alias", "").lower()
+            display = entry.get("display_name", "").lower()
+            if (normalized in mid_lower or
+                normalized in entry_alias or
+                normalized in display):
+                fuzzy_candidates.append(mid)
+
+        if len(fuzzy_candidates) == 1:
+            return self._build_alias_result(
+                alias, fuzzy_candidates[0], ambiguous=False,
+                message=f"Fuzzy match: {fuzzy_candidates[0]}",
+            )
+        elif len(fuzzy_candidates) > 1:
+            return self._build_ambiguous_result(alias, fuzzy_candidates,
+                message=f"Fuzzy match returned {len(fuzzy_candidates)} candidates — operator must choose")
+
+        # Step 5: No match at all
+        all_ids = sorted(self.models.keys())
+        return {
+            "alias": alias,
+            "matched": False,
+            "ambiguous": False,
+            "candidates": [],
+            "exact_match": None,
+            "requires_operator_confirmation": True,
+            "message": f"No match for '{alias}'. Available models: {', '.join(all_ids)}",
+            "available_models": all_ids,
+        }
+
+    def _build_alias_result(self, alias: str, model_id: str,
+                            ambiguous: bool, message: str) -> dict:
+        """Build result for a single matched alias."""
+        entry = self.models.get(model_id, {})
+        is_quarantined = (
+            entry.get("quarantine_status") == "quarantined" or
+            model_id in KNOWN_QUARANTINE
+        )
+        selectable = (
+            entry.get("enabled", True) and
+            entry.get("lifecycle_status", "enabled") == "enabled" and
+            not is_quarantined
+        )
+        non_selectable_reason = None
+        if not selectable:
+            reasons = []
+            if not entry.get("enabled", True):
+                reasons.append("disabled")
+            if entry.get("lifecycle_status") in ("disabled", "retired"):
+                reasons.append(f"lifecycle={entry['lifecycle_status']}")
+            if is_quarantined:
+                q_reason = (entry.get("quarantine_reason") or
+                            KNOWN_QUARANTINE.get(model_id, "unknown"))
+                reasons.append(f"quarantined: {q_reason}")
+            non_selectable_reason = "; ".join(reasons) if reasons else "unknown"
+
+        return {
+            "alias": alias,
+            "matched": True,
+            "ambiguous": ambiguous,
+            "candidates": [self._model_candidate_entry(model_id, entry)],
+            "exact_match": model_id if not ambiguous else None,
+            "requires_operator_confirmation": ambiguous or not selectable,
+            "message": message,
+        }
+
+    def _build_ambiguous_result(self, alias: str, candidate_ids: list,
+                                message: str) -> dict:
+        """Build result for ambiguous alias."""
+        candidates = []
+        for mid in candidate_ids:
+            entry = self.models.get(mid, {})
+            candidates.append(self._model_candidate_entry(mid, entry))
+        return {
+            "alias": alias,
+            "matched": True,
+            "ambiguous": True,
+            "candidates": candidates,
+            "exact_match": None,
+            "requires_operator_confirmation": True,
+            "message": message,
+        }
+
+    def _model_candidate_entry(self, model_id: str, entry: dict) -> dict:
+        """Build a single candidate entry for alias resolution output."""
+        is_quarantined = (
+            entry.get("quarantine_status") == "quarantined" or
+            model_id in KNOWN_QUARANTINE
+        )
+        selectable = (
+            entry.get("enabled", True) and
+            entry.get("lifecycle_status", "enabled") == "enabled" and
+            not is_quarantined
+        )
+        non_selectable_reason = None
+        if not selectable:
+            reasons = []
+            if not entry.get("enabled", True):
+                reasons.append("disabled")
+            if entry.get("lifecycle_status") in ("disabled", "retired"):
+                reasons.append(f"lifecycle={entry['lifecycle_status']}")
+            if is_quarantined:
+                q_reason = (entry.get("quarantine_reason") or
+                            KNOWN_QUARANTINE.get(model_id, "unknown"))
+                reasons.append(f"quarantined: {q_reason}")
+            non_selectable_reason = "; ".join(reasons) if reasons else "unknown"
+
+        return {
+            "exact_model_id": model_id,
+            "display_name": entry.get("display_name", model_id),
+            "provider": entry.get("provider", "unknown"),
+            "cost_tag": entry.get("cost_tag", "unknown"),
+            "selectable": selectable,
+            "non_selectable_reason": non_selectable_reason,
+            "quarantine_status": entry.get("quarantine_status",
+                                           "quarantined" if is_quarantined else "none"),
+            "quarantine_reason": (entry.get("quarantine_reason") or
+                                  KNOWN_QUARANTINE.get(model_id)),
+            "recommended_roles": entry.get("recommended_roles", []),
+        }
+
+    def operator_table(self, nodes: list = None) -> dict:
+        """Generate operator-facing model pool table.
+
+        Returns complete model pool with all required fields for
+        operator decision-making.
+        """
+        if nodes is None:
+            nodes = ["5bao", "9bao", "21bao"]
+
+        # Auto-seed if pool is empty
+        if not self.models:
+            self.seed_known_models(nodes=nodes)
+
+        table = []
+        for mid in sorted(self.models.keys()):
+            entry = self.models[mid]
+
+            # Quarantine status
+            is_quarantined = (
+                entry.get("quarantine_status") == "quarantined" or
+                mid in KNOWN_QUARANTINE
+            )
+            quarantine_status = "quarantined" if is_quarantined else "none"
+            quarantine_reason = (entry.get("quarantine_reason") or
+                                 KNOWN_QUARANTINE.get(mid))
+
+            # Selectability
+            selectable = (
+                entry.get("enabled", True) and
+                entry.get("lifecycle_status", "enabled") == "enabled" and
+                not is_quarantined
+            )
+            non_selectable_reason = None
+            if not selectable:
+                reasons = []
+                if not entry.get("enabled", True):
+                    reasons.append("disabled")
+                if entry.get("lifecycle_status") in ("disabled", "retired"):
+                    reasons.append(f"lifecycle={entry['lifecycle_status']}")
+                if is_quarantined:
+                    reasons.append(f"quarantined: {quarantine_reason}")
+                non_selectable_reason = "; ".join(reasons) if reasons else "unknown"
+
+            # Node availability
+            node_avail = {}
+            for node in nodes:
+                avail_info = entry.get("node_availability", {}).get(node, {})
+                node_avail[node] = {
+                    "available": avail_info.get("available", False),
+                    "status": avail_info.get("status", "unknown"),
+                    "last_seen": avail_info.get("last_seen"),
+                }
+
+            # Source
+            source_flags = entry.get("source_flags", [])
+            if "user_configured" in source_flags and "opencode_discovered" in source_flags:
+                source = "user_configured+opencode_discovered"
+            elif "user_configured" in source_flags:
+                source = "user_configured"
+            elif "opencode_discovered" in source_flags:
+                source = "opencode_discovered"
+            else:
+                source = "unknown"
+
+            # Ambiguity notes
+            ambiguity_notes = []
+            # Check if alias conflicts with other models
+            alias = entry.get("alias", "")
+            for other_mid, other_entry in self.models.items():
+                if other_mid == mid:
+                    continue
+                other_alias = other_entry.get("alias", "")
+                # Same prefix ambiguity
+                if (alias and other_alias and
+                    alias.split("-")[0] == other_alias.split("-")[0] and
+                    alias.split("-")[0] in ("mimo", "deepseek")):
+                    note = f"alias '{alias}' may be confused with '{other_alias}' ({other_mid})"
+                    if note not in ambiguity_notes:
+                        ambiguity_notes.append(note)
+
+            # Live validation status
+            live_val = entry.get("live_validation", {})
+            live_validation_status = "unknown"
+            if live_val.get("validated"):
+                live_validation_status = f"validated (verdict={live_val.get('last_verdict', '?')})"
+            elif entry.get("data_source") == "static_seed":
+                live_validation_status = "static/configured"
+            elif entry.get("health_status") == "configured":
+                live_validation_status = "static/configured"
+
+            table.append({
+                "exact_model_id": mid,
+                "aliases": [alias] if alias else [],
+                "display_name": entry.get("display_name", ""),
+                "provider": entry.get("provider", "unknown"),
+                "cost_tag": entry.get("cost_tag", "unknown"),
+                "source": source,
+                "node_availability": node_avail,
+                "live_validation_status": live_validation_status,
+                "quarantine_status": quarantine_status,
+                "quarantine_reason": quarantine_reason,
+                "recommended_roles": entry.get("recommended_roles", []),
+                "ambiguity_notes": ambiguity_notes,
+                "selectable": selectable,
+                "non_selectable_reason": non_selectable_reason,
+                "lifecycle_status": entry.get("lifecycle_status", "enabled"),
+                "priority": entry.get("priority", 10),
+            })
+
+        return {
+            "version": __version__,
+            "table_version": "1.21.7",
+            "generated_at": self.snapshot_timestamp,
+            "snapshot_sha256": self.snapshot_sha256,
+            "model_count": len(table),
+            "selectable_count": sum(1 for r in table if r["selectable"]),
+            "quarantined_count": sum(1 for r in table if r["quarantine_status"] == "quarantined"),
+            "data_source": "static_seed" if not self.models else "pool",
+            "note": ("node availability is static/configured — "
+                     "run 'discover --all' for live 33/33 verification"),
+            "nodes": nodes,
+            "table": table,
+        }
+
     # --- Self-check ---
 
     def self_check(self) -> dict:
@@ -894,9 +1439,144 @@ class ModelPool:
         check("sc-45-drift-node-a-missing",
               "opencode/model-y" in drift["drift_report"]["test-node-a"]["missing_from_node"])
 
+        # --- V1.21.7: Fuzzy Alias Resolution self-checks ---
+
+        # sc-46: seed_known_models on empty pool
+        pool_seed = ModelPool("/tmp/test_pool_seed.json")
+        seed_result = pool_seed.seed_known_models(nodes=["5bao", "9bao", "21bao"])
+        check("sc-46-seed-count", seed_result["total"] == 11,
+              f"total={seed_result['total']}")
+        check("sc-46-seed-11-added", len(seed_result["added"]) == 11,
+              f"added={len(seed_result['added'])}")
+
+        # sc-47: seeded models have quarantine_status field
+        ark = pool_seed.models.get("volcengine-plan/ark-code-latest", {})
+        check("sc-47-ark-quarantined", ark.get("quarantine_status") == "quarantined",
+              f"status={ark.get('quarantine_status')}")
+        check("sc-47-ark-quarantine-reason",
+              ark.get("quarantine_reason") == "key_format_incorrect",
+              f"reason={ark.get('quarantine_reason')}")
+
+        # sc-48: non-quarantined model has quarantine_status=none
+        ds_flash = pool_seed.models.get("deepseek-plan/deepseek-v4-flash", {})
+        check("sc-48-non-quarantine", ds_flash.get("quarantine_status") == "none")
+
+        # sc-49: seeded models have node_availability with status=configured
+        check("sc-49-node-avail-configured",
+              ds_flash.get("node_availability", {}).get("5bao", {}).get("status") == "configured")
+
+        # sc-50: resolve exact alias "doubao"
+        r_doubao = pool_seed.resolve_fuzzy_alias("doubao")
+        check("sc-50-doubao-matched", r_doubao["matched"])
+        check("sc-50-doubao-exact", r_doubao["exact_match"] == "volcengine-plan/ark-code-latest")
+        check("sc-50-doubao-not-ambiguous", not r_doubao["ambiguous"])
+        check("sc-50-doubao-not-selectable",
+              not r_doubao["candidates"][0]["selectable"])
+        check("sc-50-doubao-quarantine",
+              "quarantined" in (r_doubao["candidates"][0]["non_selectable_reason"] or ""),
+              f"reason={r_doubao['candidates'][0]['non_selectable_reason']}")
+        check("sc-50-doubao-requires-confirmation",
+              r_doubao["requires_operator_confirmation"])
+
+        # sc-51: resolve "deepseek pro" → unique
+        r_ds_pro = pool_seed.resolve_fuzzy_alias("deepseek pro")
+        check("sc-51-ds-pro-matched", r_ds_pro["matched"])
+        check("sc-51-ds-pro-exact", r_ds_pro["exact_match"] == "deepseek-plan/deepseek-v4-pro")
+        check("sc-51-ds-pro-not-ambiguous", not r_ds_pro["ambiguous"])
+        check("sc-51-ds-pro-selectable", r_ds_pro["candidates"][0]["selectable"])
+
+        # sc-52: resolve "deepseek flash" → unique
+        r_ds_flash = pool_seed.resolve_fuzzy_alias("deepseek flash")
+        check("sc-52-ds-flash-matched", r_ds_flash["matched"])
+        check("sc-52-ds-flash-exact", r_ds_flash["exact_match"] == "deepseek-plan/deepseek-v4-flash")
+        check("sc-52-ds-flash-not-ambiguous", not r_ds_flash["ambiguous"])
+
+        # sc-53: resolve "mimo pro" → unique
+        r_mimo_pro = pool_seed.resolve_fuzzy_alias("mimo pro")
+        check("sc-53-mimo-pro-matched", r_mimo_pro["matched"])
+        check("sc-53-mimo-pro-exact", r_mimo_pro["exact_match"] == "xiaomi-plan/mimo-v2.5-pro")
+        check("sc-53-mimo-pro-not-ambiguous", not r_mimo_pro["ambiguous"])
+
+        # sc-54: resolve "mimo" → ambiguous
+        r_mimo = pool_seed.resolve_fuzzy_alias("mimo")
+        check("sc-54-mimo-matched", r_mimo["matched"])
+        check("sc-54-mimo-ambiguous", r_mimo["ambiguous"])
+        check("sc-54-mimo-3-candidates", len(r_mimo["candidates"]) >= 3,
+              f"count={len(r_mimo['candidates'])}")
+        check("sc-54-mimo-requires-confirmation", r_mimo["requires_operator_confirmation"])
+        candidate_ids = [c["exact_model_id"] for c in r_mimo["candidates"]]
+        check("sc-54-mimo-has-v25", "xiaomi-plan/mimo-v2.5" in candidate_ids)
+        check("sc-54-mimo-has-v25-pro", "xiaomi-plan/mimo-v2.5-pro" in candidate_ids)
+        check("sc-54-mimo-has-free", "opencode/mimo-v2.5-free" in candidate_ids)
+
+        # sc-55: resolve "deepseek" → ambiguous
+        r_ds = pool_seed.resolve_fuzzy_alias("deepseek")
+        check("sc-55-ds-matched", r_ds["matched"])
+        check("sc-55-ds-ambiguous", r_ds["ambiguous"])
+        check("sc-55-ds-3-candidates", len(r_ds["candidates"]) >= 3,
+              f"count={len(r_ds['candidates'])}")
+        ds_ids = [c["exact_model_id"] for c in r_ds["candidates"]]
+        check("sc-55-ds-has-flash", "deepseek-plan/deepseek-v4-flash" in ds_ids)
+        check("sc-55-ds-has-pro", "deepseek-plan/deepseek-v4-pro" in ds_ids)
+        check("sc-55-ds-has-free", "opencode/deepseek-v4-flash-free" in ds_ids)
+
+        # sc-56: resolve unknown alias
+        r_unknown = pool_seed.resolve_fuzzy_alias("gpt-4-turbo")
+        check("sc-56-unknown-not-matched", not r_unknown["matched"])
+        check("sc-56-unknown-requires-confirmation", r_unknown["requires_operator_confirmation"])
+        check("sc-56-unknown-has-available-list", len(r_unknown.get("available_models", [])) > 0)
+
+        # sc-57: resolve case-insensitive
+        r_upper = pool_seed.resolve_fuzzy_alias("DOUBAO")
+        check("sc-57-case-insensitive", r_upper["matched"])
+        check("sc-57-case-exact", r_upper["exact_match"] == "volcengine-plan/ark-code-latest")
+
+        # sc-58: operator_table
+        tbl = pool_seed.operator_table()
+        check("sc-58-table-count", tbl["model_count"] == 11,
+              f"count={tbl['model_count']}")
+        check("sc-58-table-version", tbl.get("table_version") == "1.21.7")
+        check("sc-58-selectable-count", tbl["selectable_count"] == 10,
+              f"selectable={tbl['selectable_count']}")
+        check("sc-58-quarantined-count", tbl["quarantined_count"] == 1,
+              f"quarantined={tbl['quarantined_count']}")
+
+        # sc-59: operator_table fields completeness
+        first_row = tbl["table"][0]
+        required_fields = ["exact_model_id", "aliases", "provider", "cost_tag",
+                           "source", "node_availability", "live_validation_status",
+                           "quarantine_status", "quarantine_reason",
+                           "recommended_roles", "ambiguity_notes",
+                           "selectable", "non_selectable_reason"]
+        missing_fields = [f for f in required_fields if f not in first_row]
+        check("sc-59-table-fields", len(missing_fields) == 0,
+              f"missing={missing_fields}")
+
+        # sc-60: operator_table ark-code quarantined row
+        ark_row = [r for r in tbl["table"] if r["exact_model_id"] == "volcengine-plan/ark-code-latest"]
+        check("sc-60-ark-in-table", len(ark_row) == 1)
+        if ark_row:
+            check("sc-60-ark-not-selectable", not ark_row[0]["selectable"])
+            check("sc-60-ark-quarantine-status", ark_row[0]["quarantine_status"] == "quarantined")
+            check("sc-60-ark-quarantine-reason", ark_row[0]["quarantine_reason"] == "key_format_incorrect")
+
+        # sc-61: operator_table ambiguity_notes populated for mimo/deepseek
+        mimo_rows = [r for r in tbl["table"] if "mimo" in r["exact_model_id"].lower()
+                     and r["exact_model_id"].startswith("xiaomi")]
+        check("sc-61-mimo-ambiguity-notes",
+              any(len(r["ambiguity_notes"]) > 0 for r in mimo_rows),
+              f"notes={[r['ambiguity_notes'] for r in mimo_rows]}")
+
+        # sc-62: resolve_alias CLI via operator_table auto-seeds
+        pool_cli = ModelPool("/tmp/test_pool_cli.json")
+        # Pool is empty, operator_table should auto-seed
+        cli_tbl = pool_cli.operator_table()
+        check("sc-62-auto-seed", cli_tbl["model_count"] == 11)
+
         # Cleanup test pools
         for f in ["/tmp/test_pool_sc.json", "/tmp/test_pool_merge.json",
-                   "/tmp/test_pool_mgmt.json", test_config_path]:
+                   "/tmp/test_pool_mgmt.json", test_config_path,
+                   "/tmp/test_pool_seed.json", "/tmp/test_pool_cli.json"]:
             try:
                 os.remove(f)
             except OSError:
@@ -951,6 +1631,14 @@ def main():
     res = sub.add_parser("resolve")
     res.add_argument("--alias", required=True)
     res.add_argument("--node")
+
+    # V1.21.7: resolve-alias (fuzzy)
+    res_alias = sub.add_parser("resolve-alias")
+    res_alias.add_argument("alias", help="Alias to resolve (fuzzy supported)")
+
+    # V1.21.7: operator-table
+    op_tbl = sub.add_parser("operator-table")
+    op_tbl.add_argument("--nodes", nargs="+", default=["5bao", "9bao", "21bao"])
 
     # add
     add = sub.add_parser("add")
@@ -1018,6 +1706,14 @@ def main():
     elif args.command == "resolve":
         resolved = pool.resolve_alias(args.alias, args.node)
         print(json.dumps({"alias": args.alias, "resolved": resolved}, indent=2))
+
+    elif args.command == "resolve-alias":
+        result = pool.resolve_fuzzy_alias(args.alias)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+    elif args.command == "operator-table":
+        result = pool.operator_table(nodes=args.nodes)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
 
     elif args.command == "add":
         result = pool.add_model(
