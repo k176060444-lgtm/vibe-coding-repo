@@ -83,7 +83,7 @@ class TestWorkerNodeSerialization(unittest.TestCase):
         assert w2.worker_id == "21bao"
         assert w2.transport == "local-exec"
         assert w2.manual_only is False
-        assert w2.admission_mode == "controlled"
+        assert w2.admission_mode == "normal"
         assert w2.enabled is True
 
 
@@ -111,7 +111,7 @@ class TestTransportRouting(unittest.TestCase):
         # 21bao is controlled, windows-worker NOT in allowed_operations -> rejected
         avail = reg.available_workers("windows-worker")
         ids = {w.worker_id for w in avail}
-        assert "21bao" not in ids, "21bao controlled should be rejected for windows-worker"
+        assert "21bao" not in ids, "21bao normal should be rejected for windows-worker"
         assert "5bao" not in ids
         assert "9bao" not in ids
 
@@ -171,7 +171,7 @@ class TestManualOnlyFiltering(unittest.TestCase):
         for wid in reg.workers:
             reg.set_health(wid, NodeStatus.ONLINE)
         # 21bao is controlled, implementer NOW in capabilities/allowed_operations
-        # include_manual_only bypasses manual_only filter but not controlled admission
+        # include_manual_only bypasses manual_only filter but not normal admission
         # implementer NOW in allowed_operations, so 21bao is included
         avail = reg.available_workers("implementer", include_manual_only=True)
         ids = {w.worker_id for w in avail}
@@ -197,7 +197,7 @@ class TestManualOnlyFiltering(unittest.TestCase):
         reg.set_health("21bao", NodeStatus.ONLINE)
         # 21bao is controlled, implementer allowed (in allowed_operations)
         selected = reg.select_worker("implementer", include_manual_only=True)
-        assert selected is not None, "21bao controlled now allows implementer"
+        assert selected is not None, "21bao normal now allows implementer"
         assert selected.worker_id == "21bao"
         # smoke should work
         selected_smoke = reg.select_worker("smoke", include_manual_only=True)
@@ -211,7 +211,7 @@ class TestManualOnlyFiltering(unittest.TestCase):
         reg.set_health("21bao", NodeStatus.ONLINE)
         # implementer NOW in canary allowed_operations -> can be selected
         selected_impl = reg.select_worker("implementer")
-        assert selected_impl is not None, "21bao controlled should be available for implementer"
+        assert selected_impl is not None, "21bao normal should be available for implementer"
         # smoke IS in canary allowed_operations -> accepted
         selected_smoke = reg.select_worker("smoke")
         assert selected_smoke is not None
@@ -318,7 +318,7 @@ class TestDefaultWorkers(unittest.TestCase):
         assert w.repo_root == ""
         assert w.enabled is True
         assert w.manual_only is False
-        assert w.admission_mode == "controlled"
+        assert w.admission_mode == "normal"
         assert "windows-worker" in w.capabilities
         assert "opencode" in w.capabilities
 
@@ -341,7 +341,7 @@ class TestDefaultWorkers(unittest.TestCase):
 
 
 class TestCanaryAdmissionEnforcement(unittest.TestCase):
-    """Test controlled admission enforcement V120H3."""
+    """Test normal admission enforcement V120H3."""
 
     def test_canary_smoke_allowed(self):
         reg = WorkerRegistry()
@@ -456,7 +456,7 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         w = DEFAULT_WORKERS["21bao"]
         assert w.enabled is True
         assert w.manual_only is False
-        assert w.admission_mode == "controlled"
+        assert w.admission_mode == "normal"
         assert w.max_parallel_jobs == 1
         assert set(w.allowed_operations) == {"smoke", "implementer-small", "reviewer", "implementer"}
 
