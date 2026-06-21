@@ -388,7 +388,7 @@ class TestRecommendationGateNative(unittest.TestCase):
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
         selected = reg.select_worker("implementer")
-        assert selected is not None, "21bao canary should now allow implementer"
+        assert selected is not None, "21bao controlled should now allow implementer"
         assert selected.worker_id == "21bao"
 
     def test_21bao_canary_admission_now_allows_reviewer(self):
