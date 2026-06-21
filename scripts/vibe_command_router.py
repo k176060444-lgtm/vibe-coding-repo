@@ -80,6 +80,7 @@ COMMAND_SCRIPTS = {
     "quality-gate": "vibe_quality_gate.py",
     "run-report": "vibe_run_report.py",
     "v1-freeze": "vibe_v1_freeze_check.py",
+    "role-gate": "vibe_role_assignment_gate.py",
     "priv-approval": "vibe_privileged_approval.py",
     "priv-push": "vibe_privileged_push.py",
     "trusted-loop": "vibe_trusted_self_loop.py",
@@ -162,6 +163,8 @@ ALIASES = {
     "wr": "worker-resilience",
     "worker": "worker-resilience",
     "resilience": "worker-resilience",
+    "rg": "role-gate",
+    "rag": "role-gate",
     "?": "help",
     "v": "version",
 }
@@ -196,6 +199,7 @@ COMMAND_DESCRIPTIONS = {
     "quality-gate": "Workflow Quality Gate - aggregated pre/post-execution health check",
     "run-report": "Run Report / Session Handoff - execution summary for QQ/mobile",
     "v1-freeze": "V1 Freeze Check - verify operational freeze is healthy",
+    "role-gate": "Role Assignment Gate - enforce role plans before coding execution",
     "priv-approval": "Privileged Approval - controlled approval for high-privilege actions",
     "priv-push": "Privileged Push Wrapper - dry-run controlled push for approved actions",
     "help": "Show this help message",
@@ -233,6 +237,7 @@ COMMAND_FLAGS = {
     "batch-pause": ["--json", "--compact", "--checkpoint"],
     "batch-resume": ["--json", "--compact", "--checkpoint"],
     "worker-resilience": ["--json", "--compact", "--check", "--checkpoint", "--resume", "--status-report"],
+    "role-gate": ["--json", "--self-check"],
 }
 
 

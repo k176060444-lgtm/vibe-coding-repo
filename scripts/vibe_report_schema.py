@@ -11,7 +11,7 @@ import json
 import sys
 from datetime import datetime, timezone
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 REQUIRED_SECTIONS = [
     "pr_merge_info",
@@ -46,6 +46,8 @@ OPTIONAL_SECTIONS = [
     "failures_retries",
     "evidence",
     "quality_metrics",
+    "role_assignment_matrix",
+    "planned_vs_actual_role_ledger",
 ]
 
 

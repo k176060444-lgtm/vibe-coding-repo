@@ -21,7 +21,14 @@ import os
 import sys
 from pathlib import Path
 
-VERSION = "1.1.0"
+try:
+    from vibe_role_assignment_gate import validate_assignment_matrix
+    _ROLE_ASSIGNMENT_GATE_AVAILABLE = True
+except ImportError:
+    validate_assignment_matrix = None
+    _ROLE_ASSIGNMENT_GATE_AVAILABLE = False
+
+VERSION = "1.2.0"
 
 try:
     from vibe_toolchain_lifecycle import gate_check_for_dispatch
@@ -219,6 +226,35 @@ def cmd_check(args):
         errors.append("Entry is audit_tainted - must not execute")
     else:
         checks.append({"name": "audit_lock", "result": "PASS", "detail": f"Audit status: {audit_status}"})
+
+    # Check 9: Role assignment matrix (V1.21.3)
+    # For coding tasks (wo_type == "code" or operation_type involves coding),
+    # a validated role assignment matrix is required.
+    wo_type = entry.get("wo_type", entry.get("type", ""))
+    operation_type = entry.get("operation_type", "")
+    is_coding_task = wo_type in ("code", "fix") or operation_type in ("write-local", "push", "coding")
+    role_matrix = entry.get("role_assignment_matrix")
+    if is_coding_task:
+        if not role_matrix:
+            checks.append({"name": "role_assignment_matrix", "result": "BLOCK",
+                           "detail": "Coding task missing role_assignment_matrix"})
+            errors.append("Coding task requires role_assignment_matrix in registry entry")
+        elif _ROLE_ASSIGNMENT_GATE_AVAILABLE:
+            ra_result = validate_assignment_matrix(role_matrix)
+            if not ra_result["valid"]:
+                checks.append({"name": "role_assignment_matrix", "result": "BLOCK",
+                               "detail": f"Invalid: {len(ra_result['errors'])} errors"})
+                errors.extend([f"role_assignment: {e}" for e in ra_result["errors"]])
+            else:
+                checks.append({"name": "role_assignment_matrix", "result": "PASS",
+                               "detail": f"Valid matrix with {len(role_matrix.get('assignments', []))} roles"})
+        else:
+            checks.append({"name": "role_assignment_matrix", "result": "BLOCK",
+                           "detail": "role assignment gate import failed"})
+            errors.append("Cannot validate role_assignment_matrix: gate module unavailable")
+    else:
+        checks.append({"name": "role_assignment_matrix", "result": "PASS",
+                       "detail": f"Not a coding task (wo_type={wo_type}), gate not applicable"})
 
     # Determine verdict
     has_block = any(c["result"] == "BLOCK" for c in checks)
