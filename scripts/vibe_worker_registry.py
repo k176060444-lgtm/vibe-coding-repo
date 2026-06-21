@@ -160,13 +160,13 @@ DEFAULT_WORKERS = {
         ssh_key_path="",
         repo_root="",
         workspace_root="E:\\vibedev-worktrees\\21bao",
-        capabilities=["windows-worker", "implementer-small", "reviewer", "smoke", "powershell", "local-job", "opencode"],
+        capabilities=["windows-worker", "implementer", "implementer-small", "reviewer", "smoke", "powershell", "local-job", "opencode"],
         weight=100,
         max_parallel_jobs=1,
         enabled=True,
         manual_only=False,
         admission_mode="canary",
-        allowed_operations=["smoke", "implementer-small", "reviewer"],
+        allowed_operations=["smoke", "implementer-small", "reviewer", "implementer"],
         tools_installed={"opencode": "1.17.8"},
     ),
 }
@@ -582,7 +582,7 @@ def self_check() -> dict:
         # 21bao is canary with implementer-small only; implementer should exclude it
         avail_impl = reg.available_workers("implementer")
         impl_ids = [w.worker_id for w in avail_impl]
-        assert "21bao" not in impl_ids, "21bao canary should be excluded from implementer"
+        assert "21bao" in impl_ids, "21bao canary should be included for implementer"
         assert "5bao" in impl_ids
         assert "9bao" in impl_ids
         # implementer-small should include 21bao
