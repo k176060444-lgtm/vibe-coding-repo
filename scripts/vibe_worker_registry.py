@@ -162,7 +162,7 @@ DEFAULT_WORKERS = {
         workspace_root="E:\\vibedev-worktrees\\21bao",
         capabilities=["windows-worker", "implementer", "implementer-small", "reviewer", "smoke", "powershell", "local-job", "opencode"],
         weight=100,
-        max_parallel_jobs=1,
+        max_parallel_jobs=2,
         enabled=True,
         manual_only=False,
         admission_mode="normal",
@@ -680,6 +680,18 @@ def self_check() -> dict:
         assert selected_rel is None, "21bao normal should be blocked from release by safety gate"
         selected_prod = reg.select_worker("production")
         assert selected_prod is None, "21bao normal should be blocked from production by safety gate"
+        # Verify max_parallel_jobs=2 allows concurrent scheduling
+        w21 = reg.workers["21bao"]
+        assert w21.max_parallel_jobs == 2, f"Expected max_parallel_jobs=2, got {w21.max_parallel_jobs}"
+        # Simulate 1 active job - should still be schedulable
+        reg.record_job_start("21bao")
+        selected_after_1 = reg.select_worker("smoke")
+        assert selected_after_1 is not None, "21bao should accept 2nd job with max_parallel_jobs=2"
+        assert selected_after_1.worker_id == "21bao"
+        # Simulate 2 active jobs - should be at capacity
+        reg.record_job_start("21bao")
+        selected_after_2 = reg.select_worker("smoke")
+        assert selected_after_2 is None, "21bao should reject 3rd job when at capacity"
         checks.append({"name": "select_excludes_manual_only", "passed": True})
     except Exception as e:
         checks.append({"name": "select_excludes_manual_only", "passed": False, "error": str(e)})

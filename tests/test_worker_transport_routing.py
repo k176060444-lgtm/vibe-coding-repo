@@ -457,7 +457,7 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         assert w.enabled is True
         assert w.manual_only is False
         assert w.admission_mode == "normal"
-        assert w.max_parallel_jobs == 1
+        assert w.max_parallel_jobs == 2
         assert set(w.allowed_operations) == {"smoke", "implementer-small", "reviewer", "implementer"}
 
     def test_controlled_reviewer_allowed_only_21bao(self):
@@ -520,10 +520,101 @@ class TestCanaryAdmissionEnforcement(unittest.TestCase):
         selected = reg.select_worker("windows-worker")
         assert selected is None
 
-    def test_max_parallel_jobs_still_1(self):
-        """21bao max_parallel_jobs remains 1."""
+    def test_max_parallel_jobs_is_2(self):
+        """21bao max_parallel_jobs is 2."""
         w = DEFAULT_WORKERS["21bao"]
-        assert w.max_parallel_jobs == 1
+        assert w.max_parallel_jobs == 2
+
+
+class TestMaxParallelJobs2(unittest.TestCase):
+    """Test max_parallel_jobs=2 concurrent scheduling for 21bao."""
+
+    def test_max_parallel_jobs_is_2(self):
+        """21bao max_parallel_jobs should be 2."""
+        w = DEFAULT_WORKERS["21bao"]
+        assert w.max_parallel_jobs == 2
+
+    def test_two_concurrent_smoke_jobs(self):
+        """21bao can accept 2 concurrent smoke jobs."""
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        # First job
+        sel1 = reg.select_worker("smoke")
+        assert sel1 is not None and sel1.worker_id == "21bao"
+        reg.record_job_start("21bao")
+        # Second job - should still be schedulable
+        sel2 = reg.select_worker("smoke")
+        assert sel2 is not None and sel2.worker_id == "21bao"
+        reg.record_job_start("21bao")
+        # Third job - should be rejected (at capacity)
+        sel3 = reg.select_worker("smoke")
+        assert sel3 is None, "21bao at capacity with 2 active jobs"
+
+    def test_two_concurrent_mixed_non_sensitive(self):
+        """21bao can accept 2 concurrent different non-sensitive tasks."""
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        sel1 = reg.select_worker("smoke")
+        assert sel1 is not None
+        reg.record_job_start("21bao")
+        sel2 = reg.select_worker("implementer")
+        assert sel2 is not None and sel2.worker_id == "21bao"
+        reg.record_job_start("21bao")
+        sel3 = reg.select_worker("reviewer")
+        assert sel3 is None, "At capacity"
+
+    def test_sensitive_still_blocked_at_capacity_1(self):
+        """Sensitive tasks blocked even when 21bao has capacity."""
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        for task in ["windows-worker", "merge", "release", "production"]:
+            sel = reg.select_worker(task)
+            assert sel is None, f"{task} blocked by safety gate"
+
+    def test_sensitive_still_blocked_at_capacity_0(self):
+        """Sensitive tasks blocked even with 0 active jobs."""
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        for task in ["windows-worker", "merge", "release", "production"]:
+            sel = reg.select_worker(task)
+            assert sel is None, f"{task} blocked by safety gate"
+
+    def test_all_nodes_concurrent_scheduling(self):
+        """All nodes online: 21bao gets implementer-small, 5bao/9bao get others."""
+        reg = WorkerRegistry()
+        for wid in reg.workers:
+            reg.set_health(wid, NodeStatus.ONLINE)
+        # implementer-small only on 21bao
+        sel = reg.select_worker("implementer-small")
+        assert sel is not None and sel.worker_id == "21bao"
+        # smoke/implementer/reviewer on 5bao/9bao
+        for t in ["smoke", "implementer", "reviewer"]:
+            sel = reg.select_worker(t)
+            assert sel is not None and sel.worker_id in ("5bao", "9bao")
+
+    def test_rollback_to_max_parallel_1(self):
+        """Rollback max_parallel_jobs to 1 is trivial."""
+        w = DEFAULT_WORKERS["21bao"]
+        original = w.max_parallel_jobs
+        w.max_parallel_jobs = 1
+        reg = WorkerRegistry()
+        reg.set_health("5bao", NodeStatus.OFFLINE)
+        reg.set_health("9bao", NodeStatus.OFFLINE)
+        reg.set_health("21bao", NodeStatus.ONLINE)
+        sel1 = reg.select_worker("smoke")
+        assert sel1 is not None
+        reg.record_job_start("21bao")
+        sel2 = reg.select_worker("smoke")
+        assert sel2 is None, "At capacity with max_parallel_jobs=1"
+        w.max_parallel_jobs = original  # restore
 
 
 if __name__ == "__main__":
