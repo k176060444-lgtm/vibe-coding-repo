@@ -165,7 +165,7 @@ DEFAULT_WORKERS = {
         max_parallel_jobs=1,
         enabled=True,
         manual_only=False,
-        admission_mode="controlled",
+        admission_mode="normal",
         allowed_operations=["smoke", "implementer-small", "reviewer", "implementer"],
         tools_installed={"opencode": "1.17.8"},
     ),
@@ -215,6 +215,14 @@ class WorkerRegistry:
         candidates = [
             w for w in candidates
             if w.admission_mode not in _restricted_modes or task_type in w.allowed_operations
+        ]
+        # Safety gate: normal-mode workers are blocked from sensitive tasks
+        # unless explicitly approved. This prevents implicit enablement of
+        # untested operations (e.g., windows-worker on 21bao).
+        _sensitive_tasks = {"windows-worker", "merge", "release", "production"}
+        candidates = [
+            w for w in candidates
+            if w.admission_mode != "normal" or task_type not in _sensitive_tasks
         ]
         if allowed_worker_ids is not None:
             allowed_set = set(allowed_worker_ids)
@@ -644,27 +652,34 @@ def self_check() -> dict:
         checks.append({"name": "worker_serialization_roundtrip", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 15: select_worker - controlled admission enforcement
+    # Check 15: select_worker - normal admission with safety gate
     try:
         reg = WorkerRegistry()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
-        # 21bao is controlled, implementer IS in allowed_operations → accepted
+        # 21bao is normal: broad participation for non-sensitive tasks
         selected_impl = reg.select_worker("implementer")
-        assert selected_impl is not None, "21bao controlled should be auto-selected for implementer"
+        assert selected_impl is not None, "21bao normal should be auto-selected for implementer"
         assert selected_impl.worker_id == "21bao"
-        # 21bao is controlled, smoke IS in allowed_operations → accepted
         selected_smoke = reg.select_worker("smoke")
-        assert selected_smoke is not None, "21bao controlled should be auto-selected for smoke"
+        assert selected_smoke is not None, "21bao normal should be auto-selected for smoke"
         assert selected_smoke.worker_id == "21bao"
-        # 21bao is controlled, implementer-small IS in allowed_operations → accepted
         selected_small = reg.select_worker("implementer-small")
-        assert selected_small is not None, "21bao controlled should be auto-selected for implementer-small"
+        assert selected_small is not None, "21bao normal should be auto-selected for implementer-small"
         assert selected_small.worker_id == "21bao"
-        # 21bao is controlled, merge NOT in allowed_operations → rejected
+        selected_reviewer = reg.select_worker("reviewer")
+        assert selected_reviewer is not None, "21bao normal should be auto-selected for reviewer"
+        assert selected_reviewer.worker_id == "21bao"
+        # Safety gate: sensitive tasks blocked even for normal mode
+        selected_ww = reg.select_worker("windows-worker")
+        assert selected_ww is None, "21bao normal should be blocked from windows-worker by safety gate"
         selected_merge = reg.select_worker("merge")
-        assert selected_merge is None, "21bao controlled should NOT be auto-selected for merge"
+        assert selected_merge is None, "21bao normal should be blocked from merge by safety gate"
+        selected_rel = reg.select_worker("release")
+        assert selected_rel is None, "21bao normal should be blocked from release by safety gate"
+        selected_prod = reg.select_worker("production")
+        assert selected_prod is None, "21bao normal should be blocked from production by safety gate"
         checks.append({"name": "select_excludes_manual_only", "passed": True})
     except Exception as e:
         checks.append({"name": "select_excludes_manual_only", "passed": False, "error": str(e)})
