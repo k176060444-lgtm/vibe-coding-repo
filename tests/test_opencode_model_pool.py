@@ -693,3 +693,146 @@ class TestUnknownCostNotDefault:
         tmp_pool.models["opencode/unknown-model"]["cost_tag"] = "unknown"
         rec = tmp_pool.recommend("implementer", "test-node")
         assert rec.get("recommended") == "opencode/free-model"
+
+
+# --- Central Model Management Tests (V1.20.60.5) ---
+
+
+class TestAddModel:
+    """Tests for ModelPool.add_model()."""
+
+    def test_add_new_model(self, tmp_pool):
+        result = tmp_pool.add_model("test/model-1", cost_tag="paid")
+        assert result["action"] == "added"
+        assert "test/model-1" in tmp_pool.models
+
+    def test_add_duplicate_returns_error(self, tmp_pool):
+        tmp_pool.add_model("test/model-1")
+        result = tmp_pool.add_model("test/model-1")
+        assert "error" in result
+
+    def test_add_sets_source_flags(self, tmp_pool):
+        tmp_pool.add_model("test/model-1", source_flags=["manual_candidate"])
+        assert "manual_candidate" in tmp_pool.models["test/model-1"]["source_flags"]
+
+    def test_add_sets_cost_tag(self, tmp_pool):
+        tmp_pool.add_model("test/model-1", cost_tag="paid")
+        assert tmp_pool.models["test/model-1"]["cost_tag"] == "paid"
+
+    def test_add_default_lifecycle(self, tmp_pool):
+        tmp_pool.add_model("test/model-1")
+        assert tmp_pool.models["test/model-1"]["lifecycle_status"] == "enabled"
+
+
+class TestDisableModel:
+    """Tests for ModelPool.disable_model()."""
+
+    def test_disable_existing(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a"])
+        result = tmp_pool.disable_model("opencode/model-a")
+        assert result["action"] == "disabled"
+        assert tmp_pool.models["opencode/model-a"]["enabled"] is False
+        assert tmp_pool.models["opencode/model-a"]["lifecycle_status"] == "disabled"
+
+    def test_disable_nonexistent(self, tmp_pool):
+        result = tmp_pool.disable_model("nonexistent/model")
+        assert "error" in result
+
+    def test_disabled_not_recommended(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a", "opencode/model-b"])
+        tmp_pool.disable_model("opencode/model-a")
+        rec = tmp_pool.recommend("implementer", "n")
+        assert rec.get("recommended") != "opencode/model-a"
+
+    def test_disabled_still_in_pool(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a"])
+        tmp_pool.disable_model("opencode/model-a")
+        assert "opencode/model-a" in tmp_pool.models
+
+
+class TestEnableModel:
+    """Tests for ModelPool.enable_model()."""
+
+    def test_enable_disabled(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a"])
+        tmp_pool.disable_model("opencode/model-a")
+        result = tmp_pool.enable_model("opencode/model-a")
+        assert result["action"] == "enabled"
+        assert tmp_pool.models["opencode/model-a"]["enabled"] is True
+
+    def test_enable_nonexistent(self, tmp_pool):
+        result = tmp_pool.enable_model("nonexistent/model")
+        assert "error" in result
+
+
+class TestRetireModel:
+    """Tests for ModelPool.retire_model()."""
+
+    def test_retire_existing(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a"])
+        result = tmp_pool.retire_model("opencode/model-a")
+        assert result["action"] == "retired"
+        assert tmp_pool.models["opencode/model-a"]["lifecycle_status"] == "retired"
+        assert tmp_pool.models["opencode/model-a"]["enabled"] is False
+
+    def test_retired_still_auditable(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a"])
+        tmp_pool.retire_model("opencode/model-a")
+        assert "opencode/model-a" in tmp_pool.models
+
+    def test_retired_not_recommended(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a", "opencode/model-b"])
+        tmp_pool.retire_model("opencode/model-a")
+        rec = tmp_pool.recommend("implementer", "n")
+        assert rec.get("recommended") != "opencode/model-a"
+
+    def test_retire_nonexistent(self, tmp_pool):
+        result = tmp_pool.retire_model("nonexistent/model")
+        assert "error" in result
+
+
+class TestSyncPlan:
+    """Tests for ModelPool.sync_plan()."""
+
+    def test_sync_plan_has_plan(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        plan = tmp_pool.sync_plan(nodes=["node-a"])
+        assert "plan" in plan
+        assert "node-a" in plan["plan"]
+
+    def test_sync_plan_dry_run(self, tmp_pool):
+        plan = tmp_pool.sync_plan()
+        assert plan["dry_run"] is True
+
+    def test_sync_plan_detects_missing(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        tmp_pool.discover_node("node-b", ["opencode/model-x", "opencode/model-y"])
+        plan = tmp_pool.sync_plan(nodes=["node-a", "node-b"])
+        assert "opencode/model-y" in plan["plan"]["node-a"]["add"]
+
+    def test_sync_plan_retired_remove(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        tmp_pool.retire_model("opencode/model-x")
+        plan = tmp_pool.sync_plan(nodes=["node-a"])
+        assert "opencode/model-x" in plan["plan"]["node-a"]["remove"]
+
+
+class TestDriftReport:
+    """Tests for ModelPool.node_drift_report()."""
+
+    def test_drift_report_structure(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        drift = tmp_pool.node_drift_report(nodes=["node-a"])
+        assert "drift_report" in drift
+        assert "node-a" in drift["drift_report"]
+
+    def test_drift_detects_missing(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        tmp_pool.discover_node("node-b", ["opencode/model-x", "opencode/model-y"])
+        drift = tmp_pool.node_drift_report(nodes=["node-a", "node-b"])
+        assert "opencode/model-y" in drift["drift_report"]["node-a"]["missing_from_node"]
+
+    def test_drift_no_extra(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        drift = tmp_pool.node_drift_report(nodes=["node-a"])
+        assert drift["drift_report"]["node-a"]["extra_on_node"] == []

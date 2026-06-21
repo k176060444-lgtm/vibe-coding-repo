@@ -488,6 +488,102 @@ class ModelPool:
             "stale": self.is_snapshot_stale(),
         }
 
+    # --- Central Management ---
+
+    def add_model(self, exact_model_id: str, alias: str = "", cost_tag: str = "unknown",
+                  roles: list = None, capability_tags: list = None,
+                  source_flags: list = None) -> dict:
+        """Add a model entry to the pool. Returns the new entry."""
+        if exact_model_id in self.models:
+            return {"error": f"model already exists: {exact_model_id}",
+                    "action": "use update or disable instead"}
+        entry = new_model_entry(
+            exact_model_id, alias=alias, cost_tag=cost_tag,
+            roles=roles, capability_tags=capability_tags,
+            source_flags=source_flags or ["manual_candidate"],
+        )
+        self.models[exact_model_id] = entry
+        self.save()
+        return {"action": "added", "exact_model_id": exact_model_id,
+                "snapshot_sha256": self.snapshot_sha256}
+
+    def disable_model(self, exact_model_id: str) -> dict:
+        """Disable a model (not recommended, still auditable)."""
+        if exact_model_id not in self.models:
+            return {"error": f"model not found: {exact_model_id}"}
+        entry = self.models[exact_model_id]
+        entry["enabled"] = False
+        entry["lifecycle_status"] = "disabled"
+        self.save()
+        return {"action": "disabled", "exact_model_id": exact_model_id,
+                "snapshot_sha256": self.snapshot_sha256}
+
+    def enable_model(self, exact_model_id: str) -> dict:
+        """Re-enable a disabled model."""
+        if exact_model_id not in self.models:
+            return {"error": f"model not found: {exact_model_id}"}
+        entry = self.models[exact_model_id]
+        entry["enabled"] = True
+        entry["lifecycle_status"] = "enabled"
+        self.save()
+        return {"action": "enabled", "exact_model_id": exact_model_id,
+                "snapshot_sha256": self.snapshot_sha256}
+
+    def retire_model(self, exact_model_id: str) -> dict:
+        """Retire a model (inactive, auditable, not in recommendations)."""
+        if exact_model_id not in self.models:
+            return {"error": f"model not found: {exact_model_id}"}
+        entry = self.models[exact_model_id]
+        entry["enabled"] = False
+        entry["lifecycle_status"] = "retired"
+        self.save()
+        return {"action": "retired", "exact_model_id": exact_model_id,
+                "snapshot_sha256": self.snapshot_sha256}
+
+    def sync_plan(self, nodes: list = None) -> dict:
+        """Generate per-node sync plan (dry-run). Shows what would change."""
+        if nodes is None:
+            nodes = ["5bao", "9bao", "21bao"]
+        plan = {}
+        for node in nodes:
+            node_plan = {"add": [], "remove": [], "update": []}
+            for mid, entry in self.models.items():
+                avail = entry.get("node_availability", {}).get(node, {})
+                lifecycle = entry.get("lifecycle_status", "enabled")
+                if lifecycle == "retired":
+                    if avail.get("available", False):
+                        node_plan["remove"].append(mid)
+                elif lifecycle == "disabled":
+                    node_plan["update"].append({"model": mid, "action": "disable"})
+                elif not avail.get("available", False):
+                    node_plan["add"].append(mid)
+                else:
+                    pass  # already in sync
+            plan[node] = node_plan
+        return {"plan": plan, "nodes": nodes, "dry_run": True,
+                "snapshot_sha256": self.snapshot_sha256}
+
+    def node_drift_report(self, nodes: list = None) -> dict:
+        """Detect per-node model availability drift."""
+        if nodes is None:
+            nodes = ["5bao", "9bao", "21bao"]
+        report = {}
+        for node in nodes:
+            node_models = set()
+            pool_models = set()
+            for mid, entry in self.models.items():
+                avail = entry.get("node_availability", {}).get(node, {})
+                if avail.get("available", False):
+                    node_models.add(mid)
+                pool_models.add(mid)
+            report[node] = {
+                "available_count": len(node_models),
+                "pool_count": len(pool_models),
+                "missing_from_node": sorted(pool_models - node_models),
+                "extra_on_node": sorted(node_models - pool_models),
+            }
+        return {"drift_report": report, "snapshot_sha256": self.snapshot_sha256}
+
     def recommend(self, task_type: str, node_id: str) -> dict:
         """Recommend a model for a task type on a given node."""
         config = TASK_TYPE_RECOMMENDATIONS.get(task_type)
@@ -738,8 +834,69 @@ class ModelPool:
                   for m in pool2.list_models(node_id="test-node", enabled_only=True)),
               f"recommended={rec_impl.get('recommended')}")
 
+        # sc-36: add_model
+        pool3 = ModelPool("/tmp/test_pool_mgmt.json")
+        add_result = pool3.add_model("test-provider/new-model", alias="new",
+                                      cost_tag="paid", source_flags=["manual_candidate"])
+        check("sc-36-add-model", add_result.get("action") == "added",
+              str(add_result))
+        check("sc-36-add-in-pool", "test-provider/new-model" in pool3.models)
+
+        # sc-37: add duplicate
+        dup_result = pool3.add_model("test-provider/new-model")
+        check("sc-37-add-duplicate", "error" in dup_result)
+
+        # sc-38: disable_model
+        dis_result = pool3.disable_model("test-provider/new-model")
+        check("sc-38-disable", dis_result.get("action") == "disabled")
+        check("sc-38-disabled-lifecycle",
+              pool3.models["test-provider/new-model"]["lifecycle_status"] == "disabled")
+        check("sc-38-disabled-not-enabled",
+              not pool3.models["test-provider/new-model"]["enabled"])
+
+        # sc-39: disabled not recommended
+        rec_dis = pool3.recommend("implementer", "test-node")
+        check("sc-39-disabled-not-rec",
+              rec_dis.get("recommended") != "test-provider/new-model")
+
+        # sc-40: enable_model
+        en_result = pool3.enable_model("test-provider/new-model")
+        check("sc-40-enable", en_result.get("action") == "enabled")
+        check("sc-40-enabled-lifecycle",
+              pool3.models["test-provider/new-model"]["lifecycle_status"] == "enabled")
+
+        # sc-41: retire_model
+        ret_result = pool3.retire_model("test-provider/new-model")
+        check("sc-41-retire", ret_result.get("action") == "retired")
+        check("sc-41-retired-lifecycle",
+              pool3.models["test-provider/new-model"]["lifecycle_status"] == "retired")
+        check("sc-41-retired-not-enabled",
+              not pool3.models["test-provider/new-model"]["enabled"])
+
+        # sc-42: retired still in pool (auditable)
+        check("sc-42-retired-auditable",
+              "test-provider/new-model" in pool3.models)
+
+        # sc-43: disable nonexistent
+        miss_result = pool3.disable_model("nonexistent/model")
+        check("sc-43-disable-miss", "error" in miss_result)
+
+        # sc-44: sync_plan
+        pool3.discover_node("test-node-a", ["opencode/model-x"])
+        pool3.discover_node("test-node-b", ["opencode/model-x", "opencode/model-y"])
+        plan = pool3.sync_plan(nodes=["test-node-a", "test-node-b"])
+        check("sc-44-sync-plan-has-plan", "plan" in plan)
+        check("sc-44-sync-plan-dry-run", plan.get("dry_run") is True)
+
+        # sc-45: drift report
+        drift = pool3.node_drift_report(nodes=["test-node-a", "test-node-b"])
+        check("sc-45-drift-has-report", "drift_report" in drift)
+        check("sc-45-drift-node-a-missing",
+              "opencode/model-y" in drift["drift_report"]["test-node-a"]["missing_from_node"])
+
         # Cleanup test pools
-        for f in ["/tmp/test_pool_sc.json", "/tmp/test_pool_merge.json", test_config_path]:
+        for f in ["/tmp/test_pool_sc.json", "/tmp/test_pool_merge.json",
+                   "/tmp/test_pool_mgmt.json", test_config_path]:
             try:
                 os.remove(f)
             except OSError:
@@ -795,6 +952,34 @@ def main():
     res.add_argument("--alias", required=True)
     res.add_argument("--node")
 
+    # add
+    add = sub.add_parser("add")
+    add.add_argument("--model-id", required=True, help="exact_model_id")
+    add.add_argument("--alias", default="")
+    add.add_argument("--cost-tag", default="unknown", choices=["free", "paid", "unknown"])
+    add.add_argument("--source", default="manual_candidate")
+    add.add_argument("--roles", nargs="+", default=["implementer"])
+
+    # disable
+    dis = sub.add_parser("disable")
+    dis.add_argument("--model-id", required=True)
+
+    # enable
+    en = sub.add_parser("enable")
+    en.add_argument("--model-id", required=True)
+
+    # retire
+    ret = sub.add_parser("retire")
+    ret.add_argument("--model-id", required=True)
+
+    # sync-plan
+    sp = sub.add_parser("sync-plan")
+    sp.add_argument("--nodes", nargs="+", default=["5bao", "9bao", "21bao"])
+
+    # drift
+    dr = sub.add_parser("drift")
+    dr.add_argument("--nodes", nargs="+", default=["5bao", "9bao", "21bao"])
+
     args = parser.parse_args()
 
     if args.self_check:
@@ -833,6 +1018,32 @@ def main():
     elif args.command == "resolve":
         resolved = pool.resolve_alias(args.alias, args.node)
         print(json.dumps({"alias": args.alias, "resolved": resolved}, indent=2))
+
+    elif args.command == "add":
+        result = pool.add_model(
+            args.model_id, alias=args.alias, cost_tag=args.cost_tag,
+            source_flags=[args.source], roles=args.roles)
+        print(json.dumps(result, indent=2))
+
+    elif args.command == "disable":
+        result = pool.disable_model(args.model_id)
+        print(json.dumps(result, indent=2))
+
+    elif args.command == "enable":
+        result = pool.enable_model(args.model_id)
+        print(json.dumps(result, indent=2))
+
+    elif args.command == "retire":
+        result = pool.retire_model(args.model_id)
+        print(json.dumps(result, indent=2))
+
+    elif args.command == "sync-plan":
+        result = pool.sync_plan(nodes=args.nodes)
+        print(json.dumps(result, indent=2))
+
+    elif args.command == "drift":
+        result = pool.node_drift_report(nodes=args.nodes)
+        print(json.dumps(result, indent=2))
 
     else:
         parser.print_help()
