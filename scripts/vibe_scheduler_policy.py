@@ -490,25 +490,30 @@ def self_check() -> dict:
         checks.append({"name": "transport_routing_implementer", "passed": False, "error": str(e)})
         passed = False
 
-    # Check 9: 21bao canary admission enforcement (V1.20.29H3)
+    # Check 9: 21bao normal admission + safety gate (updated V1.20.57)
     try:
         reg = Reg()
         reg.set_health("5bao", NodeStatus.OFFLINE)
         reg.set_health("9bao", NodeStatus.OFFLINE)
         reg.set_health("21bao", NodeStatus.ONLINE)
         policy = SchedulerPolicy(reg)
-        # implementer is NOT in 21bao canary allowed_operations → rejected
+        # Non-sensitive tasks SHOULD be scheduled in normal mode
         result_impl = policy.schedule(task_type="implementer")
-        assert result_impl["worker_id"] is None, "21bao canary should NOT be scheduled for implementer"
-        # smoke IS in 21bao canary allowed_operations → accepted
+        assert result_impl["worker_id"] == "21bao", "21bao normal should be scheduled for implementer"
         result_smoke = policy.schedule(task_type="smoke")
-        assert result_smoke["worker_id"] == "21bao", "21bao canary should be scheduled for smoke"
-        # implementer-small IS in 21bao canary allowed_operations → accepted
+        assert result_smoke["worker_id"] == "21bao", "21bao normal should be scheduled for smoke"
         result_small = policy.schedule(task_type="implementer-small")
-        assert result_small["worker_id"] == "21bao", "21bao canary should be scheduled for implementer-small"
-        checks.append({"name": "21bao_not_auto_scheduled", "passed": True})
+        assert result_small["worker_id"] == "21bao", "21bao normal should be scheduled for implementer-small"
+        result_reviewer = policy.schedule(task_type="reviewer")
+        assert result_reviewer["worker_id"] == "21bao", "21bao normal should be scheduled for reviewer"
+        # Sensitive tasks should be BLOCKED by safety gate
+        result_win = policy.schedule(task_type="windows-worker")
+        assert result_win["worker_id"] is None, "21bao normal+safety-gate should BLOCK windows-worker"
+        result_merge = policy.schedule(task_type="merge")
+        assert result_merge["worker_id"] is None, "21bao normal+safety-gate should BLOCK merge"
+        checks.append({"name": "21bao_normal_safety_gate", "passed": True})
     except Exception as e:
-        checks.append({"name": "21bao_not_auto_scheduled", "passed": False, "error": str(e)})
+        checks.append({"name": "21bao_normal_safety_gate", "passed": False, "error": str(e)})
         passed = False
 
     # Check 10: Transport filter helper

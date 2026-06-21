@@ -343,7 +343,103 @@ class TestOperatorModelApprovalGate:
 
 
 class TestRecommendationGateNative(unittest.TestCase):
-    """Test native recommendation for implementer-small and smoke (V1.20.29J)."""
+    """Test native recommendation for implementer-small and smoke (V1.20.29J).
+
+    Uses a temporary fixture pool to avoid dependency on live discover state.
+    """
+
+    FIXTURE_MODELS = {
+        "opencode/deepseek-v4-flash-free": {
+            "model_id": "opencode/deepseek-v4-flash-free",
+            "alias": "deepseek-v4-flash-free",
+            "provider": "opencode",
+            "exact_model_id": "opencode/deepseek-v4-flash-free",
+            "cost_tag": "free",
+            "capability_tags": ["code", "free", "fast"],
+            "roles": ["implementer"],
+            "priority": 1,
+            "enabled": True,
+            "health_status": "healthy",
+            "last_seen": "2026-06-21T00:00:00Z",
+            "fallback_allowed": False,
+            "cooldown_state": {"active": False, "until": None},
+            "rate_limit_events": [],
+            "node_availability": {"21bao": {"available": True, "last_seen": "2026-06-21T00:00:00Z"}},
+        },
+        "opencode/nemotron-3-ultra-free": {
+            "model_id": "opencode/nemotron-3-ultra-free",
+            "alias": "nemotron-3-ultra-free",
+            "provider": "opencode",
+            "exact_model_id": "opencode/nemotron-3-ultra-free",
+            "cost_tag": "free",
+            "capability_tags": ["code", "free", "strong"],
+            "roles": ["implementer"],
+            "priority": 2,
+            "enabled": True,
+            "health_status": "healthy",
+            "last_seen": "2026-06-21T00:00:00Z",
+            "fallback_allowed": False,
+            "cooldown_state": {"active": False, "until": None},
+            "rate_limit_events": [],
+            "node_availability": {"21bao": {"available": True, "last_seen": "2026-06-21T00:00:00Z"}},
+        },
+        "opencode/mimo-v2.5-free": {
+            "model_id": "opencode/mimo-v2.5-free",
+            "alias": "mimo-v2.5-free",
+            "provider": "opencode",
+            "exact_model_id": "opencode/mimo-v2.5-free",
+            "cost_tag": "free",
+            "capability_tags": ["code", "free"],
+            "roles": ["implementer"],
+            "priority": 3,
+            "enabled": True,
+            "health_status": "healthy",
+            "last_seen": "2026-06-21T00:00:00Z",
+            "fallback_allowed": False,
+            "cooldown_state": {"active": False, "until": None},
+            "rate_limit_events": [],
+            "node_availability": {"21bao": {"available": True, "last_seen": "2026-06-21T00:00:00Z"}},
+        },
+    }
+
+    def setUp(self):
+        """Ensure a minimal fixture pool exists for 21bao recommendation tests."""
+        import tempfile, os
+        from opencode_model_pool import ModelPool
+        # Check if real pool already has 21bao models
+        pool = ModelPool()
+        has_21bao = any(
+            "21bao" in m.get("node_availability", {})
+            for m in pool.models.values()
+        )
+        if not has_21bao:
+            # Create temporary fixture pool
+            self._fixture_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)),
+                "scripts", ".opencode_model_pool.json"
+            )
+            self._had_fixture = os.path.exists(self._fixture_path)
+            fixture_data = {
+                "models": dict(self.FIXTURE_MODELS),
+                "snapshot_timestamp": "2026-06-21T00:00:00Z",
+                "version": "test-fixture",
+            }
+            import json
+            with open(self._fixture_path, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(fixture_data, f, indent=2)
+            # Re-compute snapshot SHA
+            pool2 = ModelPool()
+            pool2.save()
+            self._created_fixture = True
+        else:
+            self._created_fixture = False
+
+    def tearDown(self):
+        """Remove fixture if we created it."""
+        if getattr(self, "_created_fixture", False) and not getattr(self, "_had_fixture", True):
+            import os
+            if os.path.exists(self._fixture_path):
+                os.remove(self._fixture_path)
 
     def test_recommend_implementer_small_native(self):
         from opencode_model_pool import ModelPool
