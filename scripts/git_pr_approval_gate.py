@@ -33,13 +33,26 @@ try:
         check_execution_approval as _eag_check,
         APPROVAL_BOUND as _EAG_APPROVAL_BOUND,
         PASS_READ_ONLY as _EAG_PASS_READ_ONLY,
+        BLOCKED_EXECUTION_WITHOUT_APPROVAL as _EAG_BLOCKED_NO_APPROVAL,
+        BLOCKED_APPROVAL_NOT_BOUND_TO_PROPOSAL as _EAG_BLOCKED_NO_PROPOSAL,
+        BLOCKED_ACTION_NOT_APPROVED as _EAG_BLOCKED_ACTION,
+        BLOCKED_CLARIFICATION_NOT_APPROVAL as _EAG_BLOCKED_CLARIFICATION,
+        BLOCKED_STALE_APPROVAL as _EAG_BLOCKED_STALE,
     )
     _EXECUTION_APPROVAL_GATE_AVAILABLE = True
+    _EAG_KNOWN_BLOCK_VERDICTS = {
+        _EAG_BLOCKED_NO_APPROVAL,
+        _EAG_BLOCKED_NO_PROPOSAL,
+        _EAG_BLOCKED_ACTION,
+        _EAG_BLOCKED_CLARIFICATION,
+        _EAG_BLOCKED_STALE,
+    }
 except ImportError:
     _eag_check = None
     _EAG_APPROVAL_BOUND = "APPROVAL_BOUND"
     _EAG_PASS_READ_ONLY = "PASS_READ_ONLY"
     _EXECUTION_APPROVAL_GATE_AVAILABLE = False
+    _EAG_KNOWN_BLOCK_VERDICTS = set()
 
 # ---------------------------------------------------------------------------
 # Git/PR actions
@@ -254,7 +267,10 @@ def check_git_pr_action(
                 result["forbidden_actions"] = [action]
                 return result
             eag_verdict = eag_result.get("verdict", "")
-            if eag_verdict not in (_EAG_APPROVAL_BOUND, _EAG_PASS_READ_ONLY):
+            if eag_verdict in (_EAG_APPROVAL_BOUND, _EAG_PASS_READ_ONLY):
+                pass  # Valid — continue to Gate 1+
+            elif eag_verdict in _EAG_KNOWN_BLOCK_VERDICTS:
+                # Known EAG block verdict (legitimate block, not an error)
                 result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
                 result["allowed"] = False
                 result["blocked_reason"] = (
@@ -262,6 +278,18 @@ def check_git_pr_action(
                     "AUTO_ALLOWED actions require execution approval binding (V1.21.12)."
                 )
                 result["required_next_step"] = "Obtain execution approval before git actions"
+                result["forbidden_actions"] = [action]
+                return result
+            else:
+                # Unknown/invalid verdict → EAG error (fail-closed)
+                result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
+                result["allowed"] = False
+                result["blocked_reason"] = (
+                    f"Execution approval gate returned unknown/invalid verdict "
+                    f"'{eag_verdict}' for action '{action}'. "
+                    f"AUTO_ALLOWED actions blocked (fail-closed)."
+                )
+                result["required_next_step"] = "Fix execution approval gate before proceeding"
                 result["forbidden_actions"] = [action]
                 return result
         else:

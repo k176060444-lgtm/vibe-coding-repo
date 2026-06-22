@@ -766,8 +766,9 @@ class TestExceptionCleanBlock:
                 proposal_hash="testhash",
             )
             assert r["allowed"] is False
-            # UNKNOWN is not APPROVAL_BOUND or PASS_READ_ONLY → blocked
-            assert "BLOCKED" in r["verdict"]
+            # Unknown/invalid verdict → BLOCKED_EXECUTION_APPROVAL_GATE_ERROR
+            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
+            assert "fail-closed" in r["blocked_reason"].lower()
 
     def test_normal_path_unaffected(self):
         """T-13: Normal path + valid approval → AUTO_ALLOWED."""
