@@ -49,6 +49,8 @@ OPTIONAL_SECTIONS = [
     "role_assignment_matrix",
     "planned_vs_actual_role_ledger",
     "remote_verification",
+    "capability_declaration",
+    "planned_actual_model_ledger",
 ]
 
 

@@ -93,6 +93,8 @@ COMMAND_SCRIPTS = {
     "batch-abort": "vibe_batch_runner.py",
     "worker-resilience": "vibe_worker_resilience.py",
     "remote-verify": "remote_verification_gate.py",
+    "model-ledger-check": "delegate_capability_gate.py",
+    "delegate-capability-check": "delegate_capability_gate.py",
 }
 
 # Short aliases
@@ -168,6 +170,8 @@ ALIASES = {
     "rag": "role-gate",
     "rv": "remote-verify",
     "pr-verify": "remote-verify",
+    "mlc": "model-ledger-check",
+    "dcc": "delegate-capability-check",
     "?": "help",
     "v": "version",
 }
@@ -204,6 +208,8 @@ COMMAND_DESCRIPTIONS = {
     "v1-freeze": "V1 Freeze Check - verify operational freeze is healthy",
     "role-gate": "Role Assignment Gate - enforce role plans before coding execution",
     "remote-verify": "Remote Verification Gate - verify GitHub PR source-of-truth",
+    "model-ledger-check": "Planned/Actual Model Ledger + Capability Declaration Gate",
+    "delegate-capability-check": "Delegate Capability Declaration - executor capability audit",
     "priv-approval": "Privileged Approval - controlled approval for high-privilege actions",
     "priv-push": "Privileged Push Wrapper - dry-run controlled push for approved actions",
     "help": "Show this help message",
@@ -237,6 +243,10 @@ COMMAND_FLAGS = {
                       "--expected-files", "--expected-body-contains", "--expected-is-draft",
                       "--current-main-oid", "--local-diff-files",
                       "--report-claims-merged", "--pr-data-file"],
+    "model-ledger-check": ["--json", "--entry", "--entries", "--executor"],
+    "delegate-capability-check": ["--json", "--executor", "--model-override",
+                                   "--node-override", "--model-receipt",
+                                   "--node-receipt", "--token-receipt", "--notes"],
     "priv-push": ["--json", "--compact", "--approval-dir", "--action-id", "--list-approved"],
     "trusted-loop": ["--json", "--compact", "--check", "--contract"],
     "batch-runner": ["--json", "--compact", "--batch", "--status", "--dry-run"],
