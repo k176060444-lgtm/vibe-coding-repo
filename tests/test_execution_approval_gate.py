@@ -17,9 +17,13 @@ from execution_approval_gate import (
     APPROVAL_BOUND,
     APPROVAL_REQUIRED,
     BLOCKED_ACTION_NOT_APPROVED,
+    BLOCKED_ACTION_SPECIFIC_FIELD_INVALID,
+    BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING,
     BLOCKED_APPROVAL_NOT_BOUND_TO_PROPOSAL,
     BLOCKED_CLARIFICATION_NOT_APPROVAL,
+    BLOCKED_EXECUTION_APPROVAL_GATE_ERROR,
     BLOCKED_EXECUTION_WITHOUT_APPROVAL,
+    BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL,
     BLOCKED_STALE_APPROVAL,
     EXECUTION_ACTIONS,
     PASS_READ_ONLY,
@@ -746,6 +750,322 @@ class TestNewVerdict:
         assert BLOCKED_EXECUTION_APPROVAL_GATE_ERROR == 'BLOCKED_EXECUTION_APPROVAL_GATE_ERROR'
 
     def test_verdict_count(self):
-        """ALL_VERDICTS has 9 verdicts (8 original + 1 new)."""
+        """ALL_VERDICTS has 12 verdicts (V1.21.14A: 9 → 12)."""
         from execution_approval_gate import ALL_VERDICTS
-        assert len(ALL_VERDICTS) == 9
+        assert len(ALL_VERDICTS) == 12
+
+
+# ── V1.21.14A: Action-specific approval schema tests ───────────────
+
+
+class TestActionSpecificDelegateTaskDispatch:
+    """delegate_task_dispatch action-specific approval schema tests."""
+
+    def test_no_approval_blocked(self):
+        """T-04: delegate_task_dispatch without approval -> BLOCKED."""
+        r = check_execution_approval(action="delegate_task_dispatch")
+        assert r["verdict"] == BLOCKED_EXECUTION_WITHOUT_APPROVAL
+
+    def test_generic_approval_blocked(self):
+        """T-18: generic impl approval cannot approve delegate_task_dispatch."""
+        approval = _make_approval(
+            approved_actions=["delegate_task_dispatch", "code_modify"]
+        )
+        r = check_execution_approval(
+            action="delegate_task_dispatch",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING
+
+    def test_valid_action_specific_approval(self):
+        """T-01: delegate_task_dispatch + valid action-specific approval -> APPROVAL_BOUND."""
+        approval = _make_approval(
+            approved_actions=["delegate_task_dispatch"]
+        )
+        approval["target_node"] = "windows"
+        approval["target_role"] = "leaf"
+        approval["task_goal_summary"] = "implement feature X"
+        approval["allowed_repo_scope"] = ["scripts/", "tests/"]
+        approval["model_plan"] = {"provider": "xiaomi", "model": "mimo", "max_calls": 10}
+        approval["max_parallel"] = 2
+        approval["fallback_policy"] = "disabled"
+        approval["timeout_seconds"] = 300
+        r = check_execution_approval(
+            action="delegate_task_dispatch",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == APPROVAL_BOUND
+
+    def test_missing_target_node_blocked(self):
+        """T-02: missing target_node -> BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING."""
+        approval = _make_approval(
+            approved_actions=["delegate_task_dispatch"]
+        )
+        # Intentionally omit target_node
+        approval["target_role"] = "leaf"
+        approval["task_goal_summary"] = "test"
+        approval["allowed_repo_scope"] = ["scripts/"]
+        approval["model_plan"] = {"provider": "x", "model": "y", "max_calls": 1}
+        approval["max_parallel"] = 1
+        approval["fallback_policy"] = "disabled"
+        approval["timeout_seconds"] = 100
+        r = check_execution_approval(
+            action="delegate_task_dispatch",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING
+
+    def test_invalid_target_node_blocked(self):
+        """T-03: invalid target_node -> BLOCKED_ACTION_SPECIFIC_FIELD_INVALID."""
+        approval = _make_approval(
+            approved_actions=["delegate_task_dispatch"]
+        )
+        approval["target_node"] = "invalid_node"
+        approval["target_role"] = "leaf"
+        approval["task_goal_summary"] = "test"
+        approval["allowed_repo_scope"] = ["scripts/"]
+        approval["model_plan"] = {"provider": "x", "model": "y", "max_calls": 1}
+        approval["max_parallel"] = 1
+        approval["fallback_policy"] = "disabled"
+        approval["timeout_seconds"] = 100
+        r = check_execution_approval(
+            action="delegate_task_dispatch",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELD_INVALID
+
+    def test_restricted_repo_scope_blocked(self):
+        """T-21: allowed_repo_scope with secrets -> BLOCKED."""
+        approval = _make_approval(
+            approved_actions=["delegate_task_dispatch"]
+        )
+        approval["target_node"] = "windows"
+        approval["target_role"] = "leaf"
+        approval["task_goal_summary"] = "test"
+        approval["allowed_repo_scope"] = ["scripts/", "secrets/credentials"]
+        approval["model_plan"] = {"provider": "x", "model": "y", "max_calls": 1}
+        approval["max_parallel"] = 1
+        approval["fallback_policy"] = "disabled"
+        approval["timeout_seconds"] = 100
+        r = check_execution_approval(
+            action="delegate_task_dispatch",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELD_INVALID
+
+
+class TestActionSpecificLiveModelCall:
+    """live_model_call action-specific approval schema tests."""
+
+    def test_no_approval_blocked(self):
+        """T-04: live_model_call without approval -> BLOCKED."""
+        r = check_execution_approval(action="live_model_call")
+        assert r["verdict"] == BLOCKED_EXECUTION_WITHOUT_APPROVAL
+
+    def test_generic_approval_blocked(self):
+        """T-19: generic impl approval cannot approve live_model_call."""
+        approval = _make_approval(
+            approved_actions=["live_model_call", "code_modify"]
+        )
+        r = check_execution_approval(
+            action="live_model_call",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING
+
+    def test_valid_approval(self):
+        """T-05: live_model_call + valid approval -> APPROVAL_BOUND."""
+        approval = _make_approval(
+            approved_actions=["live_model_call"]
+        )
+        approval["provider"] = "xiaomi"
+        approval["model"] = "mimo-v2.5-pro"
+        approval["role"] = "implementer"
+        approval["max_calls"] = 10
+        approval["budget_policy"] = "within_budget"
+        approval["fallback_policy"] = "disabled"
+        approval["data_classification"] = "no_secrets"
+        r = check_execution_approval(
+            action="live_model_call",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == APPROVAL_BOUND
+
+    def test_sensitive_non_critical_blocked(self):
+        """T-08: sensitive + non-CRITICAL -> BLOCKED_ACTION_SPECIFIC_FIELD_INVALID."""
+        approval = _make_approval(
+            approved_actions=["live_model_call"]
+        )
+        approval["provider"] = "xiaomi"
+        approval["model"] = "mimo"
+        approval["role"] = "implementer"
+        approval["max_calls"] = 5
+        approval["budget_policy"] = "within_budget"
+        approval["fallback_policy"] = "disabled"
+        approval["data_classification"] = "sensitive"
+        approval["risk_level"] = "high"
+        r = check_execution_approval(
+            action="live_model_call",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELD_INVALID
+
+
+class TestActionSpecificServiceAdminUac:
+    """service_admin_uac action-specific approval schema tests."""
+
+    def test_no_approval_blocked(self):
+        """service_admin_uac without approval -> BLOCKED."""
+        r = check_execution_approval(action="service_admin_uac")
+        assert r["verdict"] == BLOCKED_EXECUTION_WITHOUT_APPROVAL
+
+    def test_generic_approval_blocked(self):
+        """T-11: generic implementation approval cannot approve service_admin_uac."""
+        approval = _make_approval(
+            approved_actions=["service_admin_uac", "code_modify"]
+        )
+        approval["risk_level"] = "medium"
+        r = check_execution_approval(
+            action="service_admin_uac",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        # Missing action-specific fields → FIELDS_MISSING (checked before risk_level)
+        assert r["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING
+
+    def test_valid_critical_approval(self):
+        """T-09: service_admin_uac + valid CRITICAL approval -> APPROVAL_BOUND."""
+        approval = _make_approval(
+            approved_actions=["service_admin_uac"]
+        )
+        approval["risk_level"] = "critical"
+        approval["target_service"] = "gateway"
+        approval["change_type"] = "config"
+        approval["affected_scope"] = "test"
+        approval["rollback_plan"] = "revert"
+        approval["requires_outage"] = False
+        approval["operator_confirmation_phrase"] = "I approve gateway change"
+        r = check_execution_approval(
+            action="service_admin_uac",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == APPROVAL_BOUND
+
+    def test_medium_risk_blocked(self):
+        """T-10: service_admin_uac + medium risk -> BLOCKED."""
+        approval = _make_approval(
+            approved_actions=["service_admin_uac"]
+        )
+        approval["risk_level"] = "medium"
+        approval["target_service"] = "gateway"
+        approval["change_type"] = "config"
+        approval["affected_scope"] = "test"
+        approval["rollback_plan"] = "revert"
+        approval["requires_outage"] = False
+        approval["operator_confirmation_phrase"] = "I approve gateway change"
+        r = check_execution_approval(
+            action="service_admin_uac",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL
+
+    def test_missing_phrase_blocked(self):
+        """T-20: operator phrase missing target_service -> BLOCKED."""
+        approval = _make_approval(
+            approved_actions=["service_admin_uac"]
+        )
+        approval["risk_level"] = "critical"
+        approval["target_service"] = "gateway"
+        approval["change_type"] = "config"
+        approval["affected_scope"] = "test"
+        approval["rollback_plan"] = "revert"
+        approval["requires_outage"] = False
+        approval["operator_confirmation_phrase"] = "I approve this change"
+        r = check_execution_approval(
+            action="service_admin_uac",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL
+
+    def test_permission_requires_dedicated(self):
+        """permission change_type with bundled approval -> BLOCKED."""
+        approval = _make_approval(
+            approved_actions=["service_admin_uac", "code_modify"]  # bundled
+        )
+        approval["risk_level"] = "critical"
+        approval["target_service"] = "admin"
+        approval["change_type"] = "permission"
+        approval["affected_scope"] = "test"
+        approval["rollback_plan"] = "revert"
+        approval["requires_outage"] = False
+        approval["operator_confirmation_phrase"] = "I approve admin change"
+        r = check_execution_approval(
+            action="service_admin_uac",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL
+
+    def test_permission_dedicated_passes(self):
+        """permission change_type with dedicated approval -> APPROVAL_BOUND."""
+        approval = _make_approval(
+            approved_actions=["service_admin_uac"]  # dedicated
+        )
+        approval["risk_level"] = "critical"
+        approval["target_service"] = "admin"
+        approval["change_type"] = "permission"
+        approval["affected_scope"] = "test"
+        approval["rollback_plan"] = "revert"
+        approval["requires_outage"] = False
+        approval["operator_confirmation_phrase"] = "I approve admin change"
+        r = check_execution_approval(
+            action="service_admin_uac",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == APPROVAL_BOUND
+
+
+class TestExistingBehaviorUnaffected:
+    """V1.21.14A must not break existing behavior."""
+
+    def test_read_only_unaffected(self):
+        """T-13: read-only action -> PASS_READ_ONLY."""
+        r = check_execution_approval(action="research")
+        assert r["verdict"] == PASS_READ_ONLY
+
+    def test_code_modify_with_approval_unaffected(self):
+        """T-14: code_modify + existing approval -> APPROVAL_BOUND."""
+        approval = _make_approval()
+        r = check_execution_approval(
+            action="code_modify",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == APPROVAL_BOUND
+
+    def test_50719_regression_unaffected(self):
+        """T-15: #50719 regression -> BLOCKED_CLARIFICATION_NOT_APPROVAL."""
+        r = check_execution_approval(
+            action="pr_create",
+            operator_message=(
+                "1.A 2.A 3.A 4.A 5.A 6.A。另外，这个功能的实现是需要给 "
+                "Hermes 官方提 PR 的。关于如何提出 PR，你应该是知道的吧？"
+            ),
+        )
+        assert r["verdict"] == BLOCKED_CLARIFICATION_NOT_APPROVAL
+
+    def test_eag_error_verdict_exists(self):
+        """T-22: BLOCKED_EXECUTION_APPROVAL_GATE_ERROR still in ALL_VERDICTS."""
+        assert BLOCKED_EXECUTION_APPROVAL_GATE_ERROR in ALL_VERDICTS
