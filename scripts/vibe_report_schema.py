@@ -55,6 +55,7 @@ OPTIONAL_SECTIONS = [
     "intake_proposal",
     "intake_approval",
     "git_pr_approval",
+    "execution_approval",
 ]
 
 

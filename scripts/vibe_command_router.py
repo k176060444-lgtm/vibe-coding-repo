@@ -48,7 +48,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.16.0"
+VERSION = "2.17.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -100,6 +100,8 @@ COMMAND_SCRIPTS = {
     "intake-approve-check": "conversational_intake_gate.py",
     "git-pr-approval-check": "git_pr_approval_gate.py",
     "pr-state-check": "git_pr_approval_gate.py",
+    "execution-approval-check": "execution_approval_gate.py",
+    "approval-bind-check": "execution_approval_gate.py",
 }
 
 # Short aliases
@@ -182,6 +184,8 @@ ALIASES = {
     "iac": "intake-approve-check",
     "gpac": "git-pr-approval-check",
     "psc": "pr-state-check",
+    "eac": "execution-approval-check",
+    "abc": "approval-bind-check",
     "?": "help",
     "v": "version",
 }
@@ -225,6 +229,8 @@ COMMAND_DESCRIPTIONS = {
     "intake-approve-check": "Intake Approval Check - verify approval before execution",
     "git-pr-approval-check": "Git/PR State Approval Gate - enforce PR state transition policy",
     "pr-state-check": "PR State Check - verify Git/PR action is allowed",
+    "execution-approval-check": "Execution Approval Binding Gate - enforce approval binding for execution actions",
+    "approval-bind-check": "Approval Bind Check - alias for execution-approval-check",
     "priv-approval": "Privileged Approval - controlled approval for high-privilege actions",
     "priv-push": "Privileged Push Wrapper - dry-run controlled push for approved actions",
     "help": "Show this help message",
@@ -271,6 +277,12 @@ COMMAND_FLAGS = {
                               "--changed-files", "--risk-level", "--checks-passed", "--intake-approved",
                               "--remote-verified", "--merge-check-passed"],
     "pr-state-check": ["--json", "--action", "--target-branch", "--operator-approval-id"],
+    "execution-approval-check": ["--json", "--self-check", "--action", "--approval-json",
+                                 "--proposal-hash", "--proposal-exists", "--operator-message",
+                                 "--changed-files", "--max-age"],
+    "approval-bind-check": ["--json", "--self-check", "--action", "--approval-json",
+                            "--proposal-hash", "--proposal-exists", "--operator-message",
+                            "--changed-files", "--max-age"],
     "priv-push": ["--json", "--compact", "--approval-dir", "--action-id", "--list-approved"],
     "trusted-loop": ["--json", "--compact", "--check", "--contract"],
     "batch-runner": ["--json", "--compact", "--batch", "--status", "--dry-run"],
