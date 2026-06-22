@@ -33,7 +33,7 @@ Exit codes:
     2 = usage error
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import argparse
 import hashlib
@@ -553,20 +553,42 @@ def check_execution_approval(
 
     # ── Rule 6: Role/model matrix hash check ──
     rm_hash = approval.get("role_model_matrix_hash")
+    risk_level = approval.get("risk_level", "medium")
     if rm_hash:
         checks.append({
             "name": "role_model_matrix",
             "result": "PASS",
             "detail": f"role_model_matrix_hash present: {rm_hash[:16]}...",
         })
+    elif risk_level in ("high", "critical"):
+        # F-01: high/critical without role_model_matrix_hash → BLOCK
+        checks.append({
+            "name": "role_model_matrix",
+            "result": "BLOCK",
+            "detail": (
+                f"role_model_matrix_hash missing for risk_level={risk_level}. "
+                f"High/critical tasks require role_model_matrix_hash."
+            ),
+        })
+        return {
+            "verdict": BLOCKED_ACTION_NOT_APPROVED,
+            "action": action,
+            "action_class": action_class,
+            "detail": (
+                f"Approval '{approval_id}' missing role_model_matrix_hash "
+                f"for risk_level={risk_level}. "
+                f"High/critical tasks must declare role/model matrix."
+            ),
+            "approval_id": approval_id,
+            "checks": checks,
+        }
     else:
-        # Not having it is a warning, not a block
-        # (explicit same-model downgrade approval is acceptable)
+        # low/medium: WARN, not block (same-model downgrade acceptable)
         checks.append({
             "name": "role_model_matrix",
             "result": "WARN",
             "detail": (
-                "role_model_matrix_hash not set — "
+                f"role_model_matrix_hash not set (risk_level={risk_level}) — "
                 "assuming same-model downgrade approval"
             ),
         })
@@ -854,6 +876,66 @@ def self_check(output_json=False):
     checks.append({
         "name": "incident_50719_regression",
         "passed": r["verdict"] == BLOCKED_CLARIFICATION_NOT_APPROVAL,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 19: F-01 — high risk + missing role_model_matrix_hash -> BLOCKED
+    approval_high_no_hash = _make_valid_approval()
+    del approval_high_no_hash["role_model_matrix_hash"]
+    approval_high_no_hash["risk_level"] = "high"
+    r = check_execution_approval(
+        action="code_modify",
+        approval=approval_high_no_hash,
+        proposal_hash="abc123def456",
+    )
+    checks.append({
+        "name": "f01_high_no_hash_blocked",
+        "passed": r["verdict"] == BLOCKED_ACTION_NOT_APPROVED,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 20: F-01 — critical risk + missing role_model_matrix_hash -> BLOCKED
+    approval_crit_no_hash = _make_valid_approval()
+    del approval_crit_no_hash["role_model_matrix_hash"]
+    approval_crit_no_hash["risk_level"] = "critical"
+    r = check_execution_approval(
+        action="code_modify",
+        approval=approval_crit_no_hash,
+        proposal_hash="abc123def456",
+    )
+    checks.append({
+        "name": "f01_critical_no_hash_blocked",
+        "passed": r["verdict"] == BLOCKED_ACTION_NOT_APPROVED,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 21: F-01 — medium risk + missing role_model_matrix_hash -> WARN (not blocked)
+    approval_med_no_hash = _make_valid_approval()
+    del approval_med_no_hash["role_model_matrix_hash"]
+    approval_med_no_hash["risk_level"] = "medium"
+    r = check_execution_approval(
+        action="code_modify",
+        approval=approval_med_no_hash,
+        proposal_hash="abc123def456",
+    )
+    checks.append({
+        "name": "f01_medium_no_hash_warn",
+        "passed": r["verdict"] == APPROVAL_BOUND,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 22: F-01 — low risk + missing role_model_matrix_hash -> WARN (not blocked)
+    approval_low_no_hash = _make_valid_approval()
+    del approval_low_no_hash["role_model_matrix_hash"]
+    approval_low_no_hash["risk_level"] = "low"
+    r = check_execution_approval(
+        action="code_modify",
+        approval=approval_low_no_hash,
+        proposal_hash="abc123def456",
+    )
+    checks.append({
+        "name": "f01_low_no_hash_warn",
+        "passed": r["verdict"] == APPROVAL_BOUND,
         "message": f"verdict={r['verdict']}",
     })
 

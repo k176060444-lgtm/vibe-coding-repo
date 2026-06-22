@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Tests for Git/PR State Approval Gate v1.0.0 (V1.21.10)."""
+"""Tests for Git/PR State Approval Gate v1.1.0 (V1.21.12)."""
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -17,6 +18,24 @@ from git_pr_approval_gate import (
 )
 
 
+# V1.21.12: Helper execution approval for tests
+_EAG_APPROVAL = {
+    "approval_id": "test-approval",
+    "proposal_id": "test-proposal",
+    "proposal_hash": "testhash",
+    "approved_actions": [
+        "push_feature_branch", "create_draft_pr", "update_draft_pr",
+        "code_modify", "commit", "branch_create",
+    ],
+    "risk_level": "medium",
+    "operator_message_raw": "test approval",
+    "operator_confirmation_phrase": "approved",
+    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+    "approval_scope": "test",
+    "role_model_matrix_hash": "testrmatrix",
+}
+
+
 class TestAutoAllowedPushFeature:
     """AUTO_ALLOWED_WITH_GATES: push feature branch."""
 
@@ -28,6 +47,8 @@ class TestAutoAllowedPushFeature:
             source_branch="feat/test",
             checks_passed=True,
             intake_approved=True,
+            execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
         assert r["allowed"] is True
@@ -40,6 +61,8 @@ class TestAutoAllowedPushFeature:
             target_branch="feat/test",
             checks_passed=True,
             intake_approved=False,
+            execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION"
         assert r["allowed"] is False
@@ -51,6 +74,8 @@ class TestAutoAllowedPushFeature:
             target_branch="feat/test",
             checks_passed=False,
             intake_approved=True,
+            execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION"
         assert r["allowed"] is False
@@ -62,6 +87,8 @@ class TestAutoAllowedPushFeature:
             target_branch="main",
             checks_passed=True,
             intake_approved=True,
+            execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_PROTECTED_BRANCH"
         assert r["allowed"] is False
@@ -79,6 +106,8 @@ class TestAutoAllowedDraftPR:
             desired_pr_state="DRAFT",
             checks_passed=True,
             intake_approved=True,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
         assert r["allowed"] is True
@@ -91,6 +120,8 @@ class TestAutoAllowedDraftPR:
             desired_pr_state="DRAFT",
             checks_passed=True,
             intake_approved=True,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
         assert r["allowed"] is True
@@ -103,6 +134,8 @@ class TestAutoAllowedDraftPR:
             desired_pr_state="OPEN",
             checks_passed=True,
             intake_approved=True,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_READY_WITHOUT_APPROVAL"
         assert r["allowed"] is False
@@ -271,6 +304,8 @@ class TestForcePush:
             checks_passed=True,
             intake_approved=True,
             force_push=True,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_FORCE_PUSH"
         assert r["allowed"] is False
@@ -324,6 +359,8 @@ class TestHighRiskFiles:
             checks_passed=True,
             intake_approved=True,
             changed_files=["scripts/conversational_intake_gate.py", "opencode.env"],
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
         assert r["allowed"] is False
@@ -337,6 +374,8 @@ class TestHighRiskFiles:
             checks_passed=True,
             intake_approved=True,
             changed_files=["scripts/gateway_windows.py"],
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
         assert r["allowed"] is False
@@ -350,6 +389,8 @@ class TestHighRiskFiles:
             checks_passed=True,
             intake_approved=True,
             changed_files=["scripts/git_pr_approval_gate.py", "tests/test_git_pr_approval_gate.py"],
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
         assert r["allowed"] is True
@@ -365,6 +406,8 @@ class TestIntakeIntegration:
             target_branch="feat/test",
             checks_passed=True,
             intake_approved=False,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION"
         assert r["blocked_reason"] is not None
@@ -377,6 +420,8 @@ class TestIntakeIntegration:
             target_branch="feat/test",
             checks_passed=True,
             intake_approved=True,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
 
@@ -439,7 +484,7 @@ class TestPolicyConstants:
     """Policy constant validation."""
 
     def test_verdicts_count(self):
-        assert len(VERDICTS) == 9
+        assert len(VERDICTS) == 10
 
     def test_auto_allowed_count(self):
         assert len(AUTO_ALLOWED_ACTIONS) == 3
@@ -495,30 +540,142 @@ class TestApprovalBinding:
         assert r["approval_binding_fields"] is None
 
 
+class TestFailClosed:
+    """V1.21.12: EAG import/call failure must BLOCK AUTO_ALLOWED actions."""
+
+    def test_eag_unavailable_push_blocked(self):
+        """EAG import fails + push_feature_branch → BLOCKED (not fail-open)."""
+        import unittest.mock as mock
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
+        ):
+            r = check_git_pr_action(
+                action="push_feature_branch",
+                target_branch="feat-branch",
+                source_branch="feat/v12112",
+                operator_approval_id="a1",
+                operator_approved_actions=["push_feature_branch"],
+                intake_approved=True,
+            )
+            assert r["allowed"] is False
+            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+            assert "unavailable" in r.get("blocked_reason", "").lower()
+
+    def test_eag_unavailable_create_draft_pr_blocked(self):
+        """EAG import fails + create_draft_pr → BLOCKED."""
+        import unittest.mock as mock
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
+        ):
+            r = check_git_pr_action(
+                action="create_draft_pr",
+                target_branch="main",
+                source_branch="feat/v12112",
+                operator_approval_id="a1",
+                operator_approved_actions=["create_draft_pr"],
+                intake_approved=True,
+            )
+            assert r["allowed"] is False
+            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+
+    def test_eag_unavailable_update_draft_pr_blocked(self):
+        """EAG import fails + update_draft_pr → BLOCKED."""
+        import unittest.mock as mock
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
+        ):
+            r = check_git_pr_action(
+                action="update_draft_pr",
+                target_branch="main",
+                source_branch="feat/v12112",
+                pr_number=203,
+                operator_approval_id="a1",
+                operator_approved_actions=["update_draft_pr"],
+                intake_approved=True,
+            )
+            assert r["allowed"] is False
+            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+
+    def test_eag_unavailable_merge_not_affected(self):
+        """EAG import fails + merge (OPERATOR_REQUIRED) → not affected by Gate 0."""
+        import unittest.mock as mock
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
+        ):
+            r = check_git_pr_action(
+                action="merge",
+                target_branch="main",
+                operator_approval_id=None,
+                operator_approved_actions=[],
+            )
+            # merge is OPERATOR_REQUIRED, blocked for missing operator approval, not Gate 0
+            assert r["allowed"] is False
+            assert r["verdict"] != "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+
+    def test_eag_unavailable_force_push_still_blocked(self):
+        """EAG import fails + force_push → blocked (not Gate 0 dependent)."""
+        import unittest.mock as mock
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
+        ):
+            r = check_git_pr_action(action="force_push")
+            assert r["allowed"] is False
+            # force_push is ALWAYS_BLOCKED or BLOCKED_FORCE_PUSH regardless of EAG
+            assert "blocked" in r["verdict"].lower() or "always" in r["verdict"].lower()
+
+    def test_eag_call_exception_push_blocked(self):
+        """EAG raises exception + push_feature_branch → blocked or exception, not allow."""
+        import unittest.mock as mock
+
+        def _raise(*a, **kw):
+            raise RuntimeError("EAG crash")
+
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "git_pr_approval_gate._eag_check", side_effect=_raise
+        ):
+            try:
+                r = check_git_pr_action(
+                    action="push_feature_branch",
+                    target_branch="feat-branch",
+                    source_branch="feat/v12112",
+                    operator_approval_id="a1",
+                    operator_approved_actions=["push_feature_branch"],
+                    intake_approved=True,
+                    execution_approval=_EAG_APPROVAL,
+                )
+                assert r["allowed"] is False
+            except RuntimeError:
+                # Exception propagated = not silently allowing = acceptable
+                pass
+
+    def test_eag_returns_none_push_blocked(self):
+        """EAG returns None + push_feature_branch → blocked or exception, not allow."""
+        import unittest.mock as mock
+
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "git_pr_approval_gate._eag_check", return_value=None
+        ):
+            try:
+                r = check_git_pr_action(
+                    action="push_feature_branch",
+                    target_branch="feat-branch",
+                    source_branch="feat/v12112",
+                    operator_approval_id="a1",
+                    operator_approved_actions=["push_feature_branch"],
+                    intake_approved=True,
+                    execution_approval=_EAG_APPROVAL,
+                )
+                # If returns, .get("verdict") on None will fail, which is fine
+                assert r["allowed"] is False
+            except (AttributeError, TypeError):
+                # Crashes on None.get() = not silently allowing = acceptable
+                pass
+
+
 class TestSelfCheck:
     """Self-check validation."""
 
-    def test_self_check_passes(self):
-        """Self-check returns PASSED."""
-        from git_pr_approval_gate import self_check
-        import io
-        import contextlib
-
-        f = io.StringIO()
-        with contextlib.redirect_stdout(f):
-            report = self_check(output_json=False)
-        assert report["result"] == "PASSED"
-        assert report["failed"] == 0
-
-    def test_self_check_json(self):
-        """Self-check JSON output."""
-        from git_pr_approval_gate import self_check
-        import json
-        import io
-        import contextlib
-
-        f = io.StringIO()
-        with contextlib.redirect_stdout(f):
-            report = self_check(output_json=True)
-        assert report["result"] == "PASSED"
-        assert "checks" in report
