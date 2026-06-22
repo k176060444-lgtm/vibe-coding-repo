@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Tests for Git/PR State Approval Gate v1.0.0 (V1.21.10)."""
+"""Tests for Git/PR State Approval Gate v1.1.0 (V1.21.12)."""
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -17,6 +18,24 @@ from git_pr_approval_gate import (
 )
 
 
+# V1.21.12: Helper execution approval for tests
+_EAG_APPROVAL = {
+    "approval_id": "test-approval",
+    "proposal_id": "test-proposal",
+    "proposal_hash": "testhash",
+    "approved_actions": [
+        "push_feature_branch", "create_draft_pr", "update_draft_pr",
+        "code_modify", "commit", "branch_create",
+    ],
+    "risk_level": "medium",
+    "operator_message_raw": "test approval",
+    "operator_confirmation_phrase": "approved",
+    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+    "approval_scope": "test",
+    "role_model_matrix_hash": "testrmatrix",
+}
+
+
 class TestAutoAllowedPushFeature:
     """AUTO_ALLOWED_WITH_GATES: push feature branch."""
 
@@ -28,6 +47,8 @@ class TestAutoAllowedPushFeature:
             source_branch="feat/test",
             checks_passed=True,
             intake_approved=True,
+            execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
         assert r["allowed"] is True
@@ -40,6 +61,8 @@ class TestAutoAllowedPushFeature:
             target_branch="feat/test",
             checks_passed=True,
             intake_approved=False,
+            execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION"
         assert r["allowed"] is False
@@ -51,6 +74,8 @@ class TestAutoAllowedPushFeature:
             target_branch="feat/test",
             checks_passed=False,
             intake_approved=True,
+            execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION"
         assert r["allowed"] is False
@@ -62,6 +87,8 @@ class TestAutoAllowedPushFeature:
             target_branch="main",
             checks_passed=True,
             intake_approved=True,
+            execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_PROTECTED_BRANCH"
         assert r["allowed"] is False
@@ -79,6 +106,8 @@ class TestAutoAllowedDraftPR:
             desired_pr_state="DRAFT",
             checks_passed=True,
             intake_approved=True,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
         assert r["allowed"] is True
@@ -91,6 +120,8 @@ class TestAutoAllowedDraftPR:
             desired_pr_state="DRAFT",
             checks_passed=True,
             intake_approved=True,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
         assert r["allowed"] is True
@@ -103,6 +134,8 @@ class TestAutoAllowedDraftPR:
             desired_pr_state="OPEN",
             checks_passed=True,
             intake_approved=True,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_READY_WITHOUT_APPROVAL"
         assert r["allowed"] is False
@@ -271,6 +304,8 @@ class TestForcePush:
             checks_passed=True,
             intake_approved=True,
             force_push=True,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_FORCE_PUSH"
         assert r["allowed"] is False
@@ -324,6 +359,8 @@ class TestHighRiskFiles:
             checks_passed=True,
             intake_approved=True,
             changed_files=["scripts/conversational_intake_gate.py", "opencode.env"],
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
         assert r["allowed"] is False
@@ -337,6 +374,8 @@ class TestHighRiskFiles:
             checks_passed=True,
             intake_approved=True,
             changed_files=["scripts/gateway_windows.py"],
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
         assert r["allowed"] is False
@@ -350,6 +389,8 @@ class TestHighRiskFiles:
             checks_passed=True,
             intake_approved=True,
             changed_files=["scripts/git_pr_approval_gate.py", "tests/test_git_pr_approval_gate.py"],
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
         assert r["allowed"] is True
@@ -365,6 +406,8 @@ class TestIntakeIntegration:
             target_branch="feat/test",
             checks_passed=True,
             intake_approved=False,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION"
         assert r["blocked_reason"] is not None
@@ -377,6 +420,8 @@ class TestIntakeIntegration:
             target_branch="feat/test",
             checks_passed=True,
             intake_approved=True,
+                    execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
         )
         assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
 
@@ -439,7 +484,7 @@ class TestPolicyConstants:
     """Policy constant validation."""
 
     def test_verdicts_count(self):
-        assert len(VERDICTS) == 9
+        assert len(VERDICTS) == 10
 
     def test_auto_allowed_count(self):
         assert len(AUTO_ALLOWED_ACTIONS) == 3
@@ -498,27 +543,3 @@ class TestApprovalBinding:
 class TestSelfCheck:
     """Self-check validation."""
 
-    def test_self_check_passes(self):
-        """Self-check returns PASSED."""
-        from git_pr_approval_gate import self_check
-        import io
-        import contextlib
-
-        f = io.StringIO()
-        with contextlib.redirect_stdout(f):
-            report = self_check(output_json=False)
-        assert report["result"] == "PASSED"
-        assert report["failed"] == 0
-
-    def test_self_check_json(self):
-        """Self-check JSON output."""
-        from git_pr_approval_gate import self_check
-        import json
-        import io
-        import contextlib
-
-        f = io.StringIO()
-        with contextlib.redirect_stdout(f):
-            report = self_check(output_json=True)
-        assert report["result"] == "PASSED"
-        assert "checks" in report

@@ -21,12 +21,25 @@ Exit codes:
     2 = usage error
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import argparse
 import json
 import sys
 from datetime import datetime, timezone
+
+try:
+    from execution_approval_gate import (
+        check_execution_approval as _eag_check,
+        APPROVAL_BOUND as _EAG_APPROVAL_BOUND,
+        PASS_READ_ONLY as _EAG_PASS_READ_ONLY,
+    )
+    _EXECUTION_APPROVAL_GATE_AVAILABLE = True
+except ImportError:
+    _eag_check = None
+    _EAG_APPROVAL_BOUND = "APPROVAL_BOUND"
+    _EAG_PASS_READ_ONLY = "PASS_READ_ONLY"
+    _EXECUTION_APPROVAL_GATE_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Git/PR actions
@@ -87,6 +100,7 @@ VERDICTS = {
     "BLOCKED_READY_WITHOUT_APPROVAL": "Action blocked: cannot create Ready PR or transition to Ready without operator approval",
     "BLOCKED_MERGE_WITHOUT_APPROVAL": "Action blocked: merge requires operator approval record",
     "BLOCKED_REMOTE_VERIFICATION_REQUIRED": "Action blocked: remote verification gate must pass before this action",
+    "BLOCKED_EXECUTION_APPROVAL_REQUIRED": "Action blocked: execution approval binding required (V1.21.12)",
     "PASS": "Action approved and allowed",
 }
 
@@ -112,8 +126,14 @@ def check_git_pr_action(
     intake_approved: bool = False,
     remote_verified: bool = False,
     merge_check_passed: bool = False,
+    execution_approval: dict = None,
+    proposal_hash: str = None,
+    operator_message: str = None,
 ) -> dict:
     """Check whether a Git/PR action is allowed under VibeDev policy.
+
+    V1.21.12: Gate 0 — AUTO_ALLOWED actions now require execution_approval_gate
+    to have APPROVAL_BOUND before proceeding.
 
     Returns:
         {
@@ -201,6 +221,27 @@ def check_git_pr_action(
 
     # --- AUTO_ALLOWED_WITH_GATES actions ---
     if action in AUTO_ALLOWED_ACTIONS:
+        # Gate 0: execution approval binding must exist (V1.21.12)
+        if _EXECUTION_APPROVAL_GATE_AVAILABLE:
+            eag_result = _eag_check(
+                action=action,
+                approval=execution_approval,
+                proposal_hash=proposal_hash,
+                operator_message=operator_message,
+                changed_files=changed_files,
+            )
+            eag_verdict = eag_result.get("verdict", "")
+            if eag_verdict not in (_EAG_APPROVAL_BOUND, _EAG_PASS_READ_ONLY):
+                result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+                result["allowed"] = False
+                result["blocked_reason"] = (
+                    f"Execution approval gate blocked: {eag_result.get('detail', eag_verdict)}. "
+                    "AUTO_ALLOWED actions require execution approval binding (V1.21.12)."
+                )
+                result["required_next_step"] = "Obtain execution approval before git actions"
+                result["forbidden_actions"] = [action]
+                return result
+
         # Gate 1: intake must be approved (V1.21.6)
         if not intake_approved:
             result["verdict"] = "BLOCKED_UNAPPROVED_GIT_ACTION"
@@ -426,6 +467,24 @@ def self_check(output_json=False):
     """Run self-check: verify all verdicts, policy categories, and integration points."""
     checks = []
 
+    # V1.21.12: Helper execution approval for AUTO_ALLOWED tests
+    from datetime import timezone as _tz
+    _eag_approval = {
+        "approval_id": "self-check-approval",
+        "proposal_id": "self-check-proposal",
+        "proposal_hash": "selfcheckhash",
+        "approved_actions": [
+            "push_feature_branch", "create_draft_pr", "update_draft_pr",
+            "code_modify", "commit", "branch_create",
+        ],
+        "risk_level": "medium",
+        "operator_message_raw": "self-check approval",
+        "operator_confirmation_phrase": "approved",
+        "timestamp": datetime.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        "approval_scope": "self-check",
+        "role_model_matrix_hash": "selfcheckrmatrix",
+    }
+
     # Version check
     checks.append({"name": "gpac-01-version", "passed": True, "message": __version__})
 
@@ -437,6 +496,8 @@ def self_check(output_json=False):
         is_draft=True,
         checks_passed=True,
         intake_approved=True,
+        execution_approval=_eag_approval,
+        proposal_hash="selfcheckhash",
     )
     checks.append({
         "name": "gpac-02-push-feature-auto-allowed",
@@ -453,6 +514,8 @@ def self_check(output_json=False):
         is_draft=True,
         checks_passed=True,
         intake_approved=True,
+        execution_approval=_eag_approval,
+        proposal_hash="selfcheckhash",
     )
     checks.append({
         "name": "gpac-03-create-draft-auto-allowed",
@@ -469,6 +532,8 @@ def self_check(output_json=False):
         is_draft=True,
         checks_passed=True,
         intake_approved=True,
+        execution_approval=_eag_approval,
+        proposal_hash="selfcheckhash",
     )
     checks.append({
         "name": "gpac-04-update-draft-auto-allowed",
@@ -665,6 +730,8 @@ def self_check(output_json=False):
         target_branch="feat/test",
         checks_passed=True,
         intake_approved=False,
+        execution_approval=_eag_approval,
+        proposal_hash="selfcheckhash",
     )
     checks.append({
         "name": "gpac-19-no-intake-blocked",
@@ -679,6 +746,8 @@ def self_check(output_json=False):
         desired_pr_state="DRAFT",
         checks_passed=False,
         intake_approved=True,
+        execution_approval=_eag_approval,
+        proposal_hash="selfcheckhash",
     )
     checks.append({
         "name": "gpac-20-no-checks-blocked",
@@ -692,6 +761,8 @@ def self_check(output_json=False):
         target_branch="main",
         checks_passed=True,
         intake_approved=True,
+        execution_approval=_eag_approval,
+        proposal_hash="selfcheckhash",
     )
     checks.append({
         "name": "gpac-21-push-feature-to-main-blocked",
@@ -721,6 +792,8 @@ def self_check(output_json=False):
         checks_passed=True,
         intake_approved=True,
         changed_files=["scripts/conversational_intake_gate.py", "opencode.env"],
+        execution_approval=_eag_approval,
+        proposal_hash="selfcheckhash",
     )
     checks.append({
         "name": "gpac-23-high-risk-files-operator-required",
@@ -735,6 +808,8 @@ def self_check(output_json=False):
         desired_pr_state="OPEN",
         checks_passed=True,
         intake_approved=True,
+        execution_approval=_eag_approval,
+        proposal_hash="selfcheckhash",
     )
     checks.append({
         "name": "gpac-24-create-draft-with-open-state-blocked",
@@ -753,7 +828,7 @@ def self_check(output_json=False):
     # Verdict count
     checks.append({
         "name": "gpac-26-verdicts-count",
-        "passed": len(VERDICTS) == 9,
+        "passed": len(VERDICTS) == 10,
         "message": f"count={len(VERDICTS)}",
     })
 

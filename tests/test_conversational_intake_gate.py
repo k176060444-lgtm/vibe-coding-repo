@@ -252,12 +252,30 @@ class TestActionBlocking:
 
     def test_allowed_after_approval(self):
         appr = create_approval_record(intake_id="test", approved=True)
-        result = check_action_allowed("code_modify", "APPROVED", appr)
+        # V1.21.12: Add fields required by execution_approval_gate
+        appr["approval_id"] = "test-approval"
+        appr["proposal_id"] = "test-proposal"
+        appr["proposal_hash"] = "testhash"
+        appr["risk_level"] = "medium"
+        appr["operator_message_raw"] = "approved"
+        appr["operator_confirmation_phrase"] = "approved"
+        appr["approval_scope"] = "all"
+        result = check_action_allowed("code_modify", "APPROVED", appr,
+                                       proposal_hash="testhash")
         assert result["allowed"] is True
 
     def test_push_allowed_after_approval(self):
         appr = create_approval_record(intake_id="test", approved=True)
-        result = check_action_allowed("push", "APPROVED", appr)
+        # V1.21.12: Add fields required by execution_approval_gate
+        appr["approval_id"] = "test-approval"
+        appr["proposal_id"] = "test-proposal"
+        appr["proposal_hash"] = "testhash"
+        appr["risk_level"] = "medium"
+        appr["operator_message_raw"] = "approved"
+        appr["operator_confirmation_phrase"] = "approved"
+        appr["approval_scope"] = "all"
+        result = check_action_allowed("push", "APPROVED", appr,
+                                       proposal_hash="testhash")
         assert result["allowed"] is True
 
 
@@ -304,4 +322,4 @@ class TestVerdicts:
 
 class TestVersion:
     def test_version(self):
-        assert __version__ == "1.0.0"
+        assert __version__ == "1.1.0"

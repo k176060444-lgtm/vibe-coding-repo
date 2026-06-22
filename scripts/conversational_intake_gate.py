@@ -39,13 +39,24 @@ Exit codes:
     2 = usage error
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import argparse
 import hashlib
 import json
 import sys
 from datetime import datetime, timezone
+
+try:
+    from execution_approval_gate import (
+        check_execution_approval,
+        EXECUTION_ACTIONS as _EAG_EXECUTION_ACTIONS,
+    )
+    _EXECUTION_APPROVAL_GATE_AVAILABLE = True
+except ImportError:
+    check_execution_approval = None
+    _EAG_EXECUTION_ACTIONS = set()
+    _EXECUTION_APPROVAL_GATE_AVAILABLE = False
 
 # ── Verdicts ──────────────────────────────────────────────────────────
 
@@ -390,13 +401,23 @@ def validate_role_model_matrix(matrix: list) -> list:
 # ── Action blocking ───────────────────────────────────────────────────
 
 
-def check_action_allowed(action: str, state: str, approval: dict = None) -> dict:
+def check_action_allowed(action: str, state: str, approval: dict = None,
+                         proposal_hash: str = None,
+                         changed_files: list = None,
+                         operator_message: str = None) -> dict:
     """Check whether an action is allowed in the current intake state.
+
+    V1.21.12: For execution actions, additionally validates approval binding
+    via execution_approval_gate (proposal_hash, approved_actions, file scope,
+    role_model_matrix_hash risk-aware check, clarification detection).
 
     Args:
         action: Action name (e.g. "code_modify", "push")
         state: Current intake state (e.g. "CLASSIFIED", "APPROVED")
         approval: Approval record dict (if exists)
+        proposal_hash: Current proposal hash (for binding validation)
+        changed_files: Files being changed (for scope check)
+        operator_message: Raw operator message (for clarification detection)
 
     Returns:
         {
@@ -415,7 +436,51 @@ def check_action_allowed(action: str, state: str, approval: dict = None) -> dict
 
     # Blocked actions require approval
     if action in BLOCKED_ACTIONS_BEFORE_APPROVAL:
-        # Check if approved
+        # V1.21.12: Run execution_approval_gate for execution actions
+        if _EXECUTION_APPROVAL_GATE_AVAILABLE and action in _EAG_EXECUTION_ACTIONS:
+            eag_result = check_execution_approval(
+                action=action,
+                approval=approval,
+                proposal_hash=proposal_hash,
+                operator_message=operator_message,
+                changed_files=changed_files,
+            )
+            eag_verdict = eag_result.get("verdict", "")
+            # Map EAG verdicts to intake gate verdicts
+            if eag_verdict == "PASS_READ_ONLY":
+                return {
+                    "allowed": True,
+                    "verdict": VERDICT_APPROVED_FOR_EXECUTION,
+                    "detail": eag_result["detail"],
+                }
+            if eag_verdict == "APPROVAL_BOUND":
+                # EAG approved — also check intake state
+                if state == "APPROVED" and approval and approval.get("approved"):
+                    return {
+                        "allowed": True,
+                        "verdict": VERDICT_APPROVED_FOR_EXECUTION,
+                        "detail": (
+                            f"Action '{action}' approved by operator "
+                            f"and bound to approval '{eag_result.get('approval_id', '?')}'."
+                        ),
+                    }
+                # EAG passed but intake state not APPROVED
+                return {
+                    "allowed": False,
+                    "verdict": VERDICT_APPROVAL_REQUIRED,
+                    "detail": (
+                        f"Approval binding valid but intake state is '{state}', "
+                        f"not 'APPROVED'."
+                    ),
+                }
+            # All other EAG verdicts are blocks
+            return {
+                "allowed": False,
+                "verdict": VERDICT_BLOCKED_UNAPPROVED,
+                "detail": eag_result["detail"],
+            }
+
+        # Fallback: original logic if EAG not available
         if state == "APPROVED" and approval and approval.get("approved"):
             approved_actions = approval.get("approved_actions", [])
             if action in approved_actions or not approved_actions:
@@ -602,6 +667,15 @@ def self_check() -> dict:
 
     # cig-10: approval record
     appr = create_approval_record(intake_id="intake-test", approved=True)
+    # V1.21.12: Add fields required by execution_approval_gate
+    appr["approval_id"] = "approval-intake-test"
+    appr["proposal_id"] = "proposal-test"
+    appr["proposal_hash"] = "testhash123"
+    appr["risk_level"] = "medium"
+    appr["operator_message_raw"] = "approved for self-check"
+    appr["operator_confirmation_phrase"] = "approved"
+    appr["approval_scope"] = "scripts/"
+    appr["role_model_matrix_hash"] = "testrmatrix"
     check("cig-10-approval-record", appr["approved"] is True)
 
     # cig-11: validate intake record
@@ -630,8 +704,9 @@ def self_check() -> dict:
     block3 = check_action_allowed("live_model_call", "CLASSIFIED", None)
     check("cig-16-live-model-blocked", block3["allowed"] is False)
 
-    # cig-17: action allowed after approval
-    allow = check_action_allowed("code_modify", "APPROVED", appr)
+    # cig-17: action allowed after approval (V1.21.12: needs proposal_hash for binding)
+    allow = check_action_allowed("code_modify", "APPROVED", appr,
+                                  proposal_hash="testhash123")
     check("cig-17-code-modify-allowed-after-approval", allow["allowed"] is True)
 
     # cig-18: read-only always allowed

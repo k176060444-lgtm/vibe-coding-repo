@@ -489,3 +489,244 @@ class TestValidateApprovalRecord:
         approval = _make_approval(approved_actions=[])
         r = validate_approval_record(approval)
         assert r["valid"] is False
+
+
+# ── F-01: Risk-aware role_model_matrix_hash ──────────────────────────
+
+
+class TestF01RiskAwareRoleModelMatrixHash:
+    """F-01: role_model_matrix_hash missing must BLOCK for high/critical,
+    WARN for low/medium."""
+
+    def test_high_risk_no_hash_blocked(self):
+        """T-01: high risk + missing hash -> BLOCKED."""
+        approval = _make_approval()
+        del approval["role_model_matrix_hash"]
+        approval["risk_level"] = "high"
+        r = check_execution_approval(
+            action="code_modify",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_ACTION_NOT_APPROVED
+
+    def test_critical_risk_no_hash_blocked(self):
+        """T-02: critical risk + missing hash -> BLOCKED."""
+        approval = _make_approval()
+        del approval["role_model_matrix_hash"]
+        approval["risk_level"] = "critical"
+        r = check_execution_approval(
+            action="code_modify",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == BLOCKED_ACTION_NOT_APPROVED
+
+    def test_medium_risk_no_hash_warn(self):
+        """T-03: medium risk + missing hash -> WARN (APPROVAL_BOUND)."""
+        approval = _make_approval()
+        del approval["role_model_matrix_hash"]
+        approval["risk_level"] = "medium"
+        r = check_execution_approval(
+            action="code_modify",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == APPROVAL_BOUND
+        # Check that WARN was emitted
+        rm_checks = [c for c in r["checks"] if c["name"] == "role_model_matrix"]
+        assert rm_checks[0]["result"] == "WARN"
+
+    def test_low_risk_no_hash_warn(self):
+        """T-04: low risk + missing hash -> WARN (APPROVAL_BOUND)."""
+        approval = _make_approval()
+        del approval["role_model_matrix_hash"]
+        approval["risk_level"] = "low"
+        r = check_execution_approval(
+            action="code_modify",
+            approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["verdict"] == APPROVAL_BOUND
+        rm_checks = [c for c in r["checks"] if c["name"] == "role_model_matrix"]
+        assert rm_checks[0]["result"] == "WARN"
+
+    def test_hash_present_any_risk_passes(self):
+        """T-05: hash present + any risk -> PASS."""
+        for risk in ("low", "medium", "high", "critical"):
+            approval = _make_approval()
+            approval["risk_level"] = risk
+            r = check_execution_approval(
+                action="code_modify",
+                approval=approval,
+                proposal_hash="abc123def456",
+            )
+            assert r["verdict"] == APPROVAL_BOUND, f"Failed for risk_level={risk}"
+
+
+# ── Integration: conversational_intake_gate wiring ────────────────────
+
+
+class TestIntakeGateWiring:
+    """T-14/T-15/T-16/T-18: conversational_intake_gate + execution_approval_gate integration."""
+
+    def test_intake_approved_with_binding(self):
+        """T-14: check_action_allowed with valid approval + binding -> allowed."""
+        from conversational_intake_gate import check_action_allowed, create_approval_record, create_intake_record
+        intake = create_intake_record(user_request_raw="test", risk_level="medium")
+        approval = create_approval_record(
+            intake_id=intake["intake_id"],
+            approved=True,
+            approved_actions=["code_modify"],
+        )
+        # Add required fields for execution_approval_gate
+        approval["approval_id"] = "approval-test-001"
+        approval["proposal_id"] = "p1"
+        approval["proposal_hash"] = "abc123"
+        approval["risk_level"] = "medium"
+        approval["operator_message_raw"] = "approved"
+        approval["operator_confirmation_phrase"] = "approved"
+        approval["approval_scope"] = "all"
+        r = check_action_allowed(
+            action="code_modify",
+            state="APPROVED",
+            approval=approval,
+            proposal_hash="abc123",
+        )
+        assert r["allowed"] is True
+
+    def test_intake_no_binding_blocked(self):
+        """T-15: check_action_allowed with approval but no binding -> blocked."""
+        from conversational_intake_gate import check_action_allowed, create_approval_record, create_intake_record
+        intake = create_intake_record(user_request_raw="test", risk_level="medium")
+        approval = create_approval_record(
+            intake_id=intake["intake_id"],
+            approved=True,
+            approved_actions=["code_modify"],
+        )
+        # No proposal_id/proposal_hash — should be blocked by EAG
+        r = check_action_allowed(
+            action="code_modify",
+            state="APPROVED",
+            approval=approval,
+        )
+        assert r["allowed"] is False
+
+    def test_intake_clarification_blocked(self):
+        """T-08: #50719 flow — clarification answer via intake gate -> blocked."""
+        from conversational_intake_gate import check_action_allowed
+        r = check_action_allowed(
+            action="code_modify",
+            state="APPROVED",
+            approval={"approved": True},
+            operator_message="1.A 2.A 3.A 4.A 5.A 6.A",
+        )
+        assert r["allowed"] is False
+        assert "clarification" in r["detail"].lower() or "BLOCKED" in r["verdict"]
+
+    def test_intake_proposal_state_blocked(self):
+        """T-16: check_action_allowed in PROPOSED state -> blocked."""
+        from conversational_intake_gate import check_action_allowed
+        r = check_action_allowed(
+            action="push",
+            state="PROPOSED",
+            approval=None,
+        )
+        assert r["allowed"] is False
+
+
+# ── Integration: git_pr_approval_gate Gate 0 ──────────────────────────
+
+
+class TestGitPrGate0:
+    """T-10/T-11/T-12/T-13/T-17/T-19: git_pr_approval_gate Gate 0 wiring."""
+
+    def test_push_without_execution_approval_blocked(self):
+        """T-11: push_feature_branch without execution approval -> BLOCKED."""
+        from git_pr_approval_gate import check_git_pr_action
+        r = check_git_pr_action(
+            action="push_feature_branch",
+            target_branch="feat/test",
+            source_branch="feat/test",
+            checks_passed=True,
+            intake_approved=True,
+            execution_approval=None,
+        )
+        assert r["allowed"] is False
+        assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+
+    def test_push_with_execution_approval_allowed(self):
+        """T-12: push_feature_branch with execution approval -> AUTO_ALLOWED."""
+        from git_pr_approval_gate import check_git_pr_action
+        approval = _make_approval(
+            approved_actions=["push_feature_branch", "create_draft_pr"],
+        )
+        r = check_git_pr_action(
+            action="push_feature_branch",
+            target_branch="feat/test",
+            source_branch="feat/test",
+            checks_passed=True,
+            intake_approved=True,
+            execution_approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["allowed"] is True
+        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
+
+    def test_draft_pr_without_execution_approval_blocked(self):
+        """T-13: create_draft_pr without execution approval -> BLOCKED."""
+        from git_pr_approval_gate import check_git_pr_action
+        r = check_git_pr_action(
+            action="create_draft_pr",
+            checks_passed=True,
+            intake_approved=True,
+            execution_approval=None,
+        )
+        assert r["allowed"] is False
+        assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+
+    def test_draft_pr_with_execution_approval_allowed(self):
+        """T-14 git: create_draft_pr with execution approval -> AUTO_ALLOWED."""
+        from git_pr_approval_gate import check_git_pr_action
+        approval = _make_approval(
+            approved_actions=["push_feature_branch", "create_draft_pr"],
+        )
+        r = check_git_pr_action(
+            action="create_draft_pr",
+            checks_passed=True,
+            intake_approved=True,
+            execution_approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["allowed"] is True
+        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
+
+    def test_gate0_high_risk_no_hash_blocked(self):
+        """T-19: high risk + missing hash via git flow -> BLOCKED."""
+        from git_pr_approval_gate import check_git_pr_action
+        approval = _make_approval(
+            approved_actions=["push_feature_branch"],
+        )
+        del approval["role_model_matrix_hash"]
+        approval["risk_level"] = "high"
+        r = check_git_pr_action(
+            action="push_feature_branch",
+            target_branch="feat/test",
+            source_branch="feat/test",
+            checks_passed=True,
+            intake_approved=True,
+            execution_approval=approval,
+            proposal_hash="abc123def456",
+        )
+        assert r["allowed"] is False
+
+    def test_clarification_via_git_flow_blocked(self):
+        """T-10: #50719 — clarification answer via git flow -> BLOCKED."""
+        from git_pr_approval_gate import check_git_pr_action
+        r = check_git_pr_action(
+            action="create_draft_pr",
+            checks_passed=True,
+            intake_approved=True,
+            operator_message="1.A 2.A 3.A 4.A 5.A 6.A",
+        )
+        assert r["allowed"] is False
