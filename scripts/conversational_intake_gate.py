@@ -480,7 +480,19 @@ def check_action_allowed(action: str, state: str, approval: dict = None,
                 "detail": eag_result["detail"],
             }
 
-        # Fallback: original logic if EAG not available
+        # FAIL-CLOSED: EAG not available → block execution actions (V1.21.12)
+        if not _EXECUTION_APPROVAL_GATE_AVAILABLE and action in _EAG_EXECUTION_ACTIONS:
+            return {
+                "allowed": False,
+                "verdict": VERDICT_BLOCKED_UNAPPROVED,
+                "detail": (
+                    f"Execution approval gate unavailable — cannot verify "
+                    f"approval binding for execution action '{action}'. "
+                    f"FAIL-CLOSED: action blocked."
+                ),
+            }
+
+        # Fallback: original logic if EAG not available (read-only actions only)
         if state == "APPROVED" and approval and approval.get("approved"):
             approved_actions = approval.get("approved_actions", [])
             if action in approved_actions or not approved_actions:

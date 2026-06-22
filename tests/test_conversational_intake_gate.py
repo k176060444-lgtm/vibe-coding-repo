@@ -320,6 +320,121 @@ class TestVerdicts:
         assert len(ALL_VERDICTS) == 6
 
 
+class TestFailClosed:
+    """V1.21.12: EAG import/call failure must BLOCK execution actions."""
+
+    def test_eag_unavailable_code_modify_blocked(self):
+        """EAG import fails + code_modify → BLOCKED (not fail-open)."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS",
+            {"code_modify", "commit", "push", "branch_create"},
+        ):
+            r = check_action_allowed("code_modify", "APPROVED", {"approved": True})
+            assert r["allowed"] is False
+            assert "FAIL-CLOSED" in r["detail"] or "unavailable" in r["detail"].lower()
+
+    def test_eag_unavailable_commit_blocked(self):
+        """EAG import fails + commit → BLOCKED."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS",
+            {"code_modify", "commit", "push", "branch_create"},
+        ):
+            r = check_action_allowed("commit", "APPROVED", {"approved": True})
+            assert r["allowed"] is False
+            assert "FAIL-CLOSED" in r["detail"] or "unavailable" in r["detail"].lower()
+
+    def test_eag_unavailable_push_blocked(self):
+        """EAG import fails + push → BLOCKED."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS",
+            {"code_modify", "commit", "push", "branch_create"},
+        ):
+            r = check_action_allowed("push", "APPROVED", {"approved": True})
+            assert r["allowed"] is False
+
+    def test_eag_unavailable_readonly_not_blocked(self):
+        """EAG import fails + read-only action → not affected by fail-closed."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS",
+            {"code_modify", "commit", "push"},
+        ):
+            # clarify is in ALLOWED_WITHOUT_APPROVAL, should still pass
+            r = check_action_allowed("clarify", "PENDING", {})
+            assert r["allowed"] is True
+
+    def test_eag_import_error_simulation(self):
+        """Simulate EAG raising exception on call → should block, not crash."""
+        import unittest.mock as mock
+
+        def _raise(*a, **kw):
+            raise RuntimeError("EAG internal error")
+
+        with mock.patch(
+            "conversational_intake_gate.check_execution_approval", side_effect=_raise
+        ), mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"code_modify"}
+        ):
+            # Should propagate or be caught — either way, not allow
+            try:
+                r = check_action_allowed("code_modify", "APPROVED", {"approved": True})
+                # If it returns instead of raising, must not be allowed
+                assert r["allowed"] is False
+            except RuntimeError:
+                # Exception propagated = not silently allowing = acceptable
+                pass
+
+
+
+    def test_eag_invalid_result_commit_blocked(self):
+        """EAG returns unexpected result + commit → blocked or exception, not allow."""
+        import unittest.mock as mock
+
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"commit"}
+        ), mock.patch(
+            "conversational_intake_gate.check_execution_approval",
+            return_value={"verdict": "UNKNOWN_VERDICT", "detail": "bad"},
+        ):
+            r = check_action_allowed("commit", "APPROVED", {"approved": True})
+            # UNKNOWN_VERDICT hits "All other EAG verdicts are blocks" → blocked
+            assert r["allowed"] is False
+
+    def test_eag_none_result_commit_blocked(self):
+        """EAG returns None + commit → blocked or exception, not allow."""
+        import unittest.mock as mock
+
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"commit"}
+        ), mock.patch(
+            "conversational_intake_gate.check_execution_approval",
+            return_value=None,
+        ):
+            try:
+                r = check_action_allowed("commit", "APPROVED", {"approved": True})
+                assert r["allowed"] is False
+            except (AttributeError, TypeError):
+                # .get() on None crashes = not silently allowing = acceptable
+                pass
+
+
 class TestVersion:
     def test_version(self):
         assert __version__ == "1.1.0"

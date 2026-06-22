@@ -241,6 +241,17 @@ def check_git_pr_action(
                 result["required_next_step"] = "Obtain execution approval before git actions"
                 result["forbidden_actions"] = [action]
                 return result
+        else:
+            # FAIL-CLOSED: EAG unavailable → block AUTO_ALLOWED actions (V1.21.12)
+            result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+            result["allowed"] = False
+            result["blocked_reason"] = (
+                f"Execution approval gate unavailable — cannot verify approval binding "
+                f"for git action '{action}'. FAIL-CLOSED: action blocked."
+            )
+            result["required_next_step"] = "Ensure execution_approval_gate is importable before proceeding"
+            result["forbidden_actions"] = [action]
+            return result
 
         # Gate 1: intake must be approved (V1.21.6)
         if not intake_approved:
