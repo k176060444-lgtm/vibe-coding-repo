@@ -28,6 +28,7 @@ from conversational_intake_gate import (
     VERDICT_APPROVED_FOR_EXECUTION,
     VERDICT_APPROVAL_REQUIRED,
     VERDICT_BLOCKED_UNAPPROVED,
+    VERDICT_BLOCKED_EAG_ERROR,
     VERDICT_INTAKE_REQUIRED,
     VERDICT_NEEDS_CLARIFICATION,
     VERDICT_PROPOSAL_READY,
@@ -316,8 +317,8 @@ class TestVerdicts:
         })
         assert v["verdict"] == VERDICT_PROPOSAL_READY
 
-    def test_six_verdicts_defined(self):
-        assert len(ALL_VERDICTS) == 6
+    def test_seven_verdicts_defined(self):
+        assert len(ALL_VERDICTS) == 7
 
 
 class TestFailClosed:
@@ -437,4 +438,121 @@ class TestFailClosed:
 
 class TestVersion:
     def test_version(self):
-        assert __version__ == "1.1.0"
+        assert __version__ == "1.2.0"
+
+
+class TestExceptionCleanBlock:
+    """V1.21.13A: EAG exception returns clean BLOCK verdict, not traceback."""
+
+    def test_eag_runtime_error_clean_block(self):
+        """T-01: EAG raises RuntimeError + code_modify → clean BLOCK."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"code_modify"}
+        ), mock.patch(
+            "conversational_intake_gate.check_execution_approval",
+            side_effect=RuntimeError("internal EAG error"),
+        ):
+            r = check_action_allowed("code_modify", "APPROVED", {"approved": True})
+            assert r["allowed"] is False
+            assert r["verdict"] == VERDICT_BLOCKED_EAG_ERROR
+            assert "RuntimeError" in r["detail"]
+            assert "fail-closed" in r["detail"].lower()
+
+    def test_eag_type_error_clean_block(self):
+        """T-02: EAG raises TypeError + commit → clean BLOCK."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"commit"}
+        ), mock.patch(
+            "conversational_intake_gate.check_execution_approval",
+            side_effect=TypeError("bad arg"),
+        ):
+            r = check_action_allowed("commit", "APPROVED", {"approved": True})
+            assert r["allowed"] is False
+            assert r["verdict"] == VERDICT_BLOCKED_EAG_ERROR
+            assert "TypeError" in r["detail"]
+
+    def test_eag_returns_none_clean_block(self):
+        """T-03: EAG returns None + code_modify → clean BLOCK."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"code_modify"}
+        ), mock.patch(
+            "conversational_intake_gate.check_execution_approval",
+            return_value=None,
+        ):
+            r = check_action_allowed("code_modify", "APPROVED", {"approved": True})
+            assert r["allowed"] is False
+            assert r["verdict"] == VERDICT_BLOCKED_EAG_ERROR
+            assert "None" in r["detail"]
+
+    def test_eag_invalid_result_clean_block(self):
+        """T-04: EAG returns unknown verdict + push → clean BLOCK."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"push"}
+        ), mock.patch(
+            "conversational_intake_gate.check_execution_approval",
+            return_value={"verdict": "UNKNOWN_VERDICT", "detail": "bad"},
+        ):
+            r = check_action_allowed("push", "APPROVED", {"approved": True})
+            assert r["allowed"] is False
+            # Unknown verdict → BLOCKED_EXECUTION_APPROVAL_GATE_ERROR
+            assert r["verdict"] == VERDICT_BLOCKED_EAG_ERROR
+
+    def test_readonly_unaffected_by_exception(self):
+        """T-11: Read-only action + EAG raises → unaffected (allowed)."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"code_modify"}
+        ), mock.patch(
+            "conversational_intake_gate.check_execution_approval",
+            side_effect=RuntimeError("crash"),
+        ):
+            # clarify is ALLOWED_WITHOUT_APPROVAL, not in BLOCKED_ACTIONS
+            r = check_action_allowed("clarify", "PENDING", {})
+            assert r["allowed"] is True
+
+    def test_normal_path_unaffected(self):
+        """T-12: Normal path + valid approval → allowed."""
+        import unittest.mock as mock
+        appr = {
+            "approved": True,
+            "approval_id": "test",
+            "proposal_id": "p",
+            "proposal_hash": "h",
+            "approved_actions": ["code_modify"],
+            "risk_level": "medium",
+            "operator_message_raw": "ok",
+            "operator_confirmation_phrase": "ok",
+            "timestamp": "2026-06-22",
+            "approval_scope": "all",
+            "role_model_matrix_hash": "rm",
+        }
+        r = check_action_allowed("code_modify", "APPROVED", appr, proposal_hash="h")
+        assert r["allowed"] is True
+
+    def test_50719_regression_still_passes(self):
+        """T-14: #50719 clarification → still blocked."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"code_modify"}
+        ):
+            r = check_action_allowed(
+                "code_modify", "APPROVED", {"approved": True},
+                operator_message="1.A 2.A 3.A 4.A 5.A 6.A",
+            )
+            assert r["allowed"] is False

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for Git/PR State Approval Gate v1.1.0 (V1.21.12)."""
+"""Tests for Git/PR State Approval Gate v1.2.0 (V1.21.13A)."""
 
 import sys
 from datetime import datetime, timezone
@@ -484,7 +484,7 @@ class TestPolicyConstants:
     """Policy constant validation."""
 
     def test_verdicts_count(self):
-        assert len(VERDICTS) == 10
+        assert len(VERDICTS) == 11
 
     def test_auto_allowed_count(self):
         assert len(AUTO_ALLOWED_ACTIONS) == 3
@@ -679,3 +679,107 @@ class TestFailClosed:
 class TestSelfCheck:
     """Self-check validation."""
 
+
+
+class TestExceptionCleanBlock:
+    """V1.21.13A: EAG exception returns clean BLOCK verdict, not traceback."""
+
+    def test_eag_runtime_error_clean_block(self):
+        """T-05: EAG raises RuntimeError + push_feature_branch → clean BLOCK."""
+        import unittest.mock as mock
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "git_pr_approval_gate._eag_check",
+            side_effect=RuntimeError("EAG crash"),
+        ):
+            r = check_git_pr_action(
+                action="push_feature_branch",
+                target_branch="feat/t",
+                source_branch="feat/t",
+                checks_passed=True,
+                intake_approved=True,
+                execution_approval=_EAG_APPROVAL,
+                proposal_hash="testhash",
+            )
+            assert r["allowed"] is False
+            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
+            assert "RuntimeError" in r["blocked_reason"]
+            assert "fail-closed" in r["blocked_reason"].lower()
+
+    def test_eag_attribute_error_clean_block(self):
+        """T-06: EAG raises AttributeError + create_draft_pr → clean BLOCK."""
+        import unittest.mock as mock
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "git_pr_approval_gate._eag_check",
+            side_effect=AttributeError("None.get"),
+        ):
+            r = check_git_pr_action(
+                action="create_draft_pr",
+                checks_passed=True,
+                intake_approved=True,
+                execution_approval=_EAG_APPROVAL,
+                proposal_hash="testhash",
+            )
+            assert r["allowed"] is False
+            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
+            assert "AttributeError" in r["blocked_reason"]
+
+    def test_eag_returns_none_clean_block(self):
+        """T-07: EAG returns None + push_feature_branch → clean BLOCK."""
+        import unittest.mock as mock
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "git_pr_approval_gate._eag_check",
+            return_value=None,
+        ):
+            r = check_git_pr_action(
+                action="push_feature_branch",
+                target_branch="feat/t",
+                source_branch="feat/t",
+                checks_passed=True,
+                intake_approved=True,
+                execution_approval=_EAG_APPROVAL,
+                proposal_hash="testhash",
+            )
+            assert r["allowed"] is False
+            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
+            assert "None" in r["blocked_reason"]
+
+    def test_eag_invalid_result_clean_block(self):
+        """T-08: EAG returns invalid result + create_draft_pr → clean BLOCK."""
+        import unittest.mock as mock
+        with mock.patch(
+            "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "git_pr_approval_gate._eag_check",
+            return_value={"verdict": "UNKNOWN", "detail": "bad"},
+        ):
+            r = check_git_pr_action(
+                action="create_draft_pr",
+                checks_passed=True,
+                intake_approved=True,
+                execution_approval=_EAG_APPROVAL,
+                proposal_hash="testhash",
+            )
+            assert r["allowed"] is False
+            # Unknown/invalid verdict → BLOCKED_EXECUTION_APPROVAL_GATE_ERROR
+            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
+            assert "fail-closed" in r["blocked_reason"].lower()
+
+    def test_normal_path_unaffected(self):
+        """T-13: Normal path + valid approval → AUTO_ALLOWED."""
+        r = check_git_pr_action(
+            action="push_feature_branch",
+            target_branch="feat/t",
+            source_branch="feat/t",
+            checks_passed=True,
+            intake_approved=True,
+            execution_approval=_EAG_APPROVAL,
+            proposal_hash="testhash",
+        )
+        assert r["allowed"] is True
+        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"

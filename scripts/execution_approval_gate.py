@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execution Approval Binding Gate v1.0.0
+"""Execution Approval Binding Gate v1.2.0
 
 Enforces the critical distinction between:
   - Clarification answer ≠ execution approval
@@ -19,6 +19,7 @@ Verdicts:
   BLOCKED_ACTION_NOT_APPROVED             — approval exists but action not in approved_actions
   BLOCKED_CLARIFICATION_NOT_APPROVAL      — user answer to clarification misinterpreted as approval
   BLOCKED_STALE_APPROVAL                  — approval exists but is stale (proposal changed after approval)
+  BLOCKED_EXECUTION_APPROVAL_GATE_ERROR   — EAG internal error, cannot verify binding (fail-closed)
 
 Usage:
     python scripts/execution_approval_gate.py --self-check [--json]
@@ -33,7 +34,7 @@ Exit codes:
     2 = usage error
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import argparse
 import hashlib
@@ -51,6 +52,7 @@ BLOCKED_APPROVAL_NOT_BOUND_TO_PROPOSAL = "BLOCKED_APPROVAL_NOT_BOUND_TO_PROPOSAL
 BLOCKED_ACTION_NOT_APPROVED = "BLOCKED_ACTION_NOT_APPROVED"
 BLOCKED_CLARIFICATION_NOT_APPROVAL = "BLOCKED_CLARIFICATION_NOT_APPROVAL"
 BLOCKED_STALE_APPROVAL = "BLOCKED_STALE_APPROVAL"
+BLOCKED_EXECUTION_APPROVAL_GATE_ERROR = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
 
 ALL_VERDICTS = {
     PASS_READ_ONLY,
@@ -61,6 +63,7 @@ ALL_VERDICTS = {
     BLOCKED_ACTION_NOT_APPROVED,
     BLOCKED_CLARIFICATION_NOT_APPROVAL,
     BLOCKED_STALE_APPROVAL,
+    BLOCKED_EXECUTION_APPROVAL_GATE_ERROR,
 }
 
 # ── Action classification ─────────────────────────────────────────────
