@@ -26,7 +26,7 @@ Constraints:
     - No secrets read. No live model calls.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import argparse
 import json
@@ -100,6 +100,7 @@ def fetch_pr_data(repo: str, pr_number: int) -> tuple:
     """Fetch PR data via gh CLI. Returns (data_dict, error_string).
 
     Does NOT read secrets. Only reads PR metadata.
+    Error string is prefixed with "PR_NOT_FOUND: " when the PR doesn't exist.
     """
     try:
         result = subprocess.run(
@@ -130,6 +131,25 @@ def fetch_pr_data(repo: str, pr_number: int) -> tuple:
         return None, "gh pr view timed out (30s)"
     except Exception as e:
         return None, f"Unexpected error: {e}"
+
+
+def fetch_pr_data_result(repo: str, pr_number: int) -> dict:
+    """Fetch PR data and return structured result for verify_pr().
+
+    Returns dict with keys: pr_data, pr_not_found, pr_error.
+    Callers pass these directly into verify_pr() keyword args.
+
+    Example:
+        fr = fetch_pr_data_result("owner/repo", 197)
+        result = verify_pr(pr_diff_files=..., **fr)
+    """
+    pr_data, pr_error = fetch_pr_data(repo, pr_number)
+    pr_not_found = pr_error is not None and pr_error.startswith("PR_NOT_FOUND:")
+    return {
+        "pr_data": pr_data,
+        "pr_not_found": pr_not_found,
+        "pr_error": pr_error,
+    }
 
 
 def fetch_pr_diff_files(repo: str, pr_number: int) -> tuple:
@@ -184,8 +204,27 @@ def verify_pr(
     report_claims_merged: bool = None,
     local_diff_files: list = None,
     current_main_oid: str = None,
+    pr_not_found: bool = False,
+    pr_error: str = None,
 ) -> dict:
     """Verify PR remote state against expectations.
+
+    Args:
+        pr_data: PR data dict from gh CLI (None if fetch failed).
+        pr_diff_files: File list from gh pr diff --name-only.
+        expected_head_oid: Expected PR headRefOid (BLOCK on mismatch).
+        expected_base_oid: Expected PR baseRefOid (BLOCK on mismatch).
+        expected_files: Expected diff file list (BLOCK on mismatch).
+        expected_body_contains: Texts that must appear in PR body (WARNING on missing).
+        expected_is_draft: Expected isDraft state (WARNING on mismatch).
+        report_claims_merged: Three-state:
+            None  = merged check skipped (caller didn't assert merged status);
+            True  = report claims PR is merged (PASS if PR is MERGED);
+            False = report does NOT mention merged (BLOCK if PR is MERGED).
+        local_diff_files: Local diff file list for cross-check against remote.
+        current_main_oid: Current main HEAD for stale base detection (BLOCK on mismatch).
+        pr_not_found: If True, produce pr_not_found BLOCK instead of api_failure.
+        pr_error: Raw error string from fetch (recorded in result for diagnostics).
 
     Returns:
         {
@@ -202,13 +241,20 @@ def verify_pr(
     checks_total = 0
     checks_passed = 0
 
-    # Handle API failure
+    # Handle API failure / PR not found
     if pr_data is None:
-        mismatches.append({
-            "type": "api_failure",
-            "severity": SEVERITY_BLOCK,
-            "detail": "Could not fetch PR data from GitHub",
-        })
+        if pr_not_found:
+            mismatches.append({
+                "type": "pr_not_found",
+                "severity": SEVERITY_BLOCK,
+                "detail": pr_error or "PR not found on GitHub",
+            })
+        else:
+            mismatches.append({
+                "type": "api_failure",
+                "severity": SEVERITY_BLOCK,
+                "detail": pr_error or "Could not fetch PR data from GitHub",
+            })
         return _build_result(mismatches, warnings, checks_total, checks_passed, None)
 
     # Extract PR fields
@@ -221,7 +267,7 @@ def verify_pr(
     pr_base_name = pr_data.get("baseRefName", "")
     pr_head_name = pr_data.get("headRefName", "")
     pr_body = pr_data.get("body", "")
-    pr_files_count = pr_data.get("files", [])
+    pr_files = pr_data.get("files", [])
     pr_commits = pr_data.get("commits", [])
 
     pr_summary = {
@@ -233,7 +279,7 @@ def verify_pr(
         "baseRefOid": pr_base_oid,
         "headRefName": pr_head_name,
         "headRefOid": pr_head_oid,
-        "file_count": len(pr_files_count) if isinstance(pr_files_count, list) else pr_files_count,
+        "file_count": len(pr_files) if isinstance(pr_files, list) else pr_files,
         "commit_count": len(pr_commits) if isinstance(pr_commits, list) else 0,
     }
 
@@ -558,6 +604,61 @@ def self_check() -> dict:
     # rv-16: fetch_pr_data with mock (test the function signature)
     check("rv-16-fetch-sig", callable(fetch_pr_data))
 
+    # rv-17: pr_not_found via verify_pr (M-2 — unified path)
+    result_pnf = verify_pr(
+        pr_data=None,
+        pr_not_found=True,
+        pr_error="PR_NOT_FOUND: PR #999 not found in owner/repo",
+    )
+    check("rv-17-pr-not-found-verdict", result_pnf["verdict"] == "BLOCKED")
+    check("rv-17-pr-not-found-type",
+          any(m["type"] == "pr_not_found" for m in result_pnf["mismatches"]),
+          f"types={[m['type'] for m in result_pnf['mismatches']]}")
+
+    # rv-18: pr_not_found does NOT produce api_failure
+    check("rv-18-pr-not-found-no-api",
+          not any(m["type"] == "api_failure" for m in result_pnf["mismatches"]))
+
+    # rv-19: api_failure still works without pr_not_found flag
+    result_api2 = verify_pr(
+        pr_data=None,
+        pr_error="gh pr view failed (exit=1): network error",
+    )
+    check("rv-19-api-failure-still-works", result_api2["verdict"] == "BLOCKED")
+    check("rv-19-api-type",
+          any(m["type"] == "api_failure" for m in result_api2["mismatches"]))
+    check("rv-19-no-pr-not-found",
+          not any(m["type"] == "pr_not_found" for m in result_api2["mismatches"]))
+
+    # rv-20: fetch_pr_data_result signature
+    check("rv-20-fetch-result-sig", callable(fetch_pr_data_result))
+
+    # rv-21: draft_ready_mismatch warning alone = WARNING (M-3)
+    result_draft_alone = verify_pr(
+        pr_data=mock_pr,
+        expected_is_draft=True,
+    )
+    check("rv-21-draft-alone-warn", result_draft_alone["verdict"] == "WARNING",
+          f"got={result_draft_alone['verdict']}")
+
+    # rv-22: draft_ready_mismatch + BLOCK coexistence = BLOCKED (M-3)
+    result_draft_block = verify_pr(
+        pr_data=mock_pr,
+        expected_head_oid="wrong",
+        expected_is_draft=True,
+    )
+    check("rv-22-draft-plus-block", result_draft_block["verdict"] == "BLOCKED",
+          f"got={result_draft_block['verdict']}")
+    check("rv-22-has-draft-warn",
+          any(w["type"] == "draft_ready_mismatch" for w in result_draft_block["warnings"]))
+    check("rv-22-has-head-block",
+          any(m["type"] == "head_sha_mismatch" for m in result_draft_block["mismatches"]))
+
+    # rv-23: pr_not_found with empty detail fallback
+    result_pnf_empty = verify_pr(pr_data=None, pr_not_found=True)
+    check("rv-23-pr-not-found-fallback",
+          result_pnf_empty["mismatches"][0]["detail"] == "PR not found on GitHub")
+
     return {
         "version": __version__,
         "passed": passed == total,
@@ -618,45 +719,20 @@ def main():
         if args.pr_data_file:
             with open(args.pr_data_file, "r", encoding="utf-8") as f:
                 pr_data = json.load(f)
+            pr_not_found = False
             pr_error = None
         else:
-            pr_data, pr_error = fetch_pr_data(args.repo, args.pr)
-
-        if pr_error:
-            pr_data = None
-            if pr_error.startswith("PR_NOT_FOUND"):
-                result = {
-                    "verdict": "BLOCKED",
-                    "version": __version__,
-                    "mismatches": [{
-                        "type": "pr_not_found",
-                        "severity": SEVERITY_BLOCK,
-                        "detail": pr_error,
-                    }],
-                    "warnings": [],
-                    "all_issues": [{
-                        "type": "pr_not_found",
-                        "severity": SEVERITY_BLOCK,
-                        "detail": pr_error,
-                    }],
-                    "checks_passed": 0,
-                    "checks_total": 1,
-                    "pr_summary": None,
-                    "api_error": pr_error,
-                }
-                if args.json:
-                    print(json.dumps(result, indent=2, ensure_ascii=False))
-                else:
-                    print(f"Remote Verification: BLOCKED")
-                    print(f"  ❌ {pr_error}")
-                sys.exit(1)
+            fr = fetch_pr_data_result(args.repo, args.pr)
+            pr_data = fr["pr_data"]
+            pr_not_found = fr["pr_not_found"]
+            pr_error = fr["pr_error"]
 
         # Fetch PR diff files
         pr_diff_files = None
         if pr_data is not None:
             pr_diff_files, _ = fetch_pr_diff_files(args.repo, args.pr)
 
-        # Run verification
+        # Run verification (pr_not_found and pr_error handled inside verify_pr)
         result = verify_pr(
             pr_data=pr_data,
             pr_diff_files=pr_diff_files,
@@ -668,10 +744,9 @@ def main():
             report_claims_merged=args.report_claims_merged,
             local_diff_files=args.local_diff_files,
             current_main_oid=args.current_main_oid,
+            pr_not_found=pr_not_found,
+            pr_error=pr_error,
         )
-
-        if pr_error:
-            result["api_error"] = pr_error
 
         if args.json:
             print(json.dumps(result, indent=2, ensure_ascii=False))
