@@ -51,12 +51,26 @@ try:
     from execution_approval_gate import (
         check_execution_approval,
         EXECUTION_ACTIONS as _EAG_EXECUTION_ACTIONS,
+        BLOCKED_EXECUTION_WITHOUT_APPROVAL as _EAG_BLOCKED_NO_APPROVAL,
+        BLOCKED_APPROVAL_NOT_BOUND_TO_PROPOSAL as _EAG_BLOCKED_NO_PROPOSAL,
+        BLOCKED_ACTION_NOT_APPROVED as _EAG_BLOCKED_ACTION,
+        BLOCKED_CLARIFICATION_NOT_APPROVAL as _EAG_BLOCKED_CLARIFICATION,
+        BLOCKED_STALE_APPROVAL as _EAG_BLOCKED_STALE,
     )
     _EXECUTION_APPROVAL_GATE_AVAILABLE = True
+    # Known EAG block verdicts (not errors — legitimate blocks)
+    _EAG_KNOWN_BLOCK_VERDICTS = {
+        _EAG_BLOCKED_NO_APPROVAL,
+        _EAG_BLOCKED_NO_PROPOSAL,
+        _EAG_BLOCKED_ACTION,
+        _EAG_BLOCKED_CLARIFICATION,
+        _EAG_BLOCKED_STALE,
+    }
 except ImportError:
     check_execution_approval = None
     _EAG_EXECUTION_ACTIONS = set()
     _EXECUTION_APPROVAL_GATE_AVAILABLE = False
+    _EAG_KNOWN_BLOCK_VERDICTS = set()
 
 # ── Verdicts ──────────────────────────────────────────────────────────
 
@@ -66,6 +80,7 @@ VERDICT_PROPOSAL_READY = "PROPOSAL_READY"
 VERDICT_APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
 VERDICT_APPROVED_FOR_EXECUTION = "APPROVED_FOR_EXECUTION"
 VERDICT_BLOCKED_UNAPPROVED = "BLOCKED_UNAPPROVED_ACTION"
+VERDICT_BLOCKED_EAG_ERROR = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
 
 ALL_VERDICTS = {
     VERDICT_INTAKE_REQUIRED,
@@ -74,6 +89,7 @@ ALL_VERDICTS = {
     VERDICT_APPROVAL_REQUIRED,
     VERDICT_APPROVED_FOR_EXECUTION,
     VERDICT_BLOCKED_UNAPPROVED,
+    VERDICT_BLOCKED_EAG_ERROR,
 }
 
 # ── State machine ─────────────────────────────────────────────────────
@@ -450,7 +466,7 @@ def check_action_allowed(action: str, state: str, approval: dict = None,
             except Exception as e:
                 return {
                     "allowed": False,
-                    "verdict": VERDICT_BLOCKED_UNAPPROVED,
+                    "verdict": VERDICT_BLOCKED_EAG_ERROR,
                     "detail": (
                         f"Execution approval gate error for action '{action}': "
                         f"{type(e).__name__}: {e}. Action blocked (fail-closed)."
@@ -459,7 +475,7 @@ def check_action_allowed(action: str, state: str, approval: dict = None,
             if eag_result is None:
                 return {
                     "allowed": False,
-                    "verdict": VERDICT_BLOCKED_UNAPPROVED,
+                    "verdict": VERDICT_BLOCKED_EAG_ERROR,
                     "detail": (
                         f"Execution approval gate returned None for action '{action}'. "
                         f"Action blocked (fail-closed)."
@@ -493,11 +509,22 @@ def check_action_allowed(action: str, state: str, approval: dict = None,
                         f"not 'APPROVED'."
                     ),
                 }
-            # All other EAG verdicts are blocks
+            # All other EAG verdicts: known blocks → UNAPPROVED, unknown → EAG_ERROR
+            if eag_verdict in _EAG_KNOWN_BLOCK_VERDICTS:
+                return {
+                    "allowed": False,
+                    "verdict": VERDICT_BLOCKED_UNAPPROVED,
+                    "detail": eag_result["detail"],
+                }
+            # Truly unknown verdict → EAG error (fail-closed)
             return {
                 "allowed": False,
-                "verdict": VERDICT_BLOCKED_UNAPPROVED,
-                "detail": eag_result["detail"],
+                "verdict": VERDICT_BLOCKED_EAG_ERROR,
+                "detail": (
+                    f"Execution approval gate returned unknown verdict "
+                    f"'{eag_verdict}' for action '{action}'. "
+                    f"Action blocked (fail-closed)."
+                ),
             }
 
         # FAIL-CLOSED: EAG not available → block execution actions (V1.21.12)
@@ -784,8 +811,8 @@ def self_check() -> dict:
     check("cig-23-just-do-it-blocked",
           block4["verdict"] == VERDICT_BLOCKED_UNAPPROVED)
 
-    # cig-24: 6 verdicts defined
-    check("cig-24-verdicts-count", len(ALL_VERDICTS) == 6,
+    # cig-24: 7 verdicts defined
+    check("cig-24-verdicts-count", len(ALL_VERDICTS) == 7,
           f"count={len(ALL_VERDICTS)}")
 
     # cig-25: blocked actions count

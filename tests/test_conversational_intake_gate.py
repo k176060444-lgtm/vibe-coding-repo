@@ -28,6 +28,7 @@ from conversational_intake_gate import (
     VERDICT_APPROVED_FOR_EXECUTION,
     VERDICT_APPROVAL_REQUIRED,
     VERDICT_BLOCKED_UNAPPROVED,
+    VERDICT_BLOCKED_EAG_ERROR,
     VERDICT_INTAKE_REQUIRED,
     VERDICT_NEEDS_CLARIFICATION,
     VERDICT_PROPOSAL_READY,
@@ -316,8 +317,8 @@ class TestVerdicts:
         })
         assert v["verdict"] == VERDICT_PROPOSAL_READY
 
-    def test_six_verdicts_defined(self):
-        assert len(ALL_VERDICTS) == 6
+    def test_seven_verdicts_defined(self):
+        assert len(ALL_VERDICTS) == 7
 
 
 class TestFailClosed:
@@ -456,7 +457,7 @@ class TestExceptionCleanBlock:
         ):
             r = check_action_allowed("code_modify", "APPROVED", {"approved": True})
             assert r["allowed"] is False
-            assert r["verdict"] == VERDICT_BLOCKED_UNAPPROVED
+            assert r["verdict"] == VERDICT_BLOCKED_EAG_ERROR
             assert "RuntimeError" in r["detail"]
             assert "fail-closed" in r["detail"].lower()
 
@@ -473,7 +474,7 @@ class TestExceptionCleanBlock:
         ):
             r = check_action_allowed("commit", "APPROVED", {"approved": True})
             assert r["allowed"] is False
-            assert r["verdict"] == VERDICT_BLOCKED_UNAPPROVED
+            assert r["verdict"] == VERDICT_BLOCKED_EAG_ERROR
             assert "TypeError" in r["detail"]
 
     def test_eag_returns_none_clean_block(self):
@@ -489,7 +490,7 @@ class TestExceptionCleanBlock:
         ):
             r = check_action_allowed("code_modify", "APPROVED", {"approved": True})
             assert r["allowed"] is False
-            assert r["verdict"] == VERDICT_BLOCKED_UNAPPROVED
+            assert r["verdict"] == VERDICT_BLOCKED_EAG_ERROR
             assert "None" in r["detail"]
 
     def test_eag_invalid_result_clean_block(self):
@@ -505,8 +506,8 @@ class TestExceptionCleanBlock:
         ):
             r = check_action_allowed("push", "APPROVED", {"approved": True})
             assert r["allowed"] is False
-            # Unknown verdict hits "All other EAG verdicts are blocks"
-            assert "BLOCKED" in r["verdict"]
+            # Unknown verdict → BLOCKED_EXECUTION_APPROVAL_GATE_ERROR
+            assert r["verdict"] == VERDICT_BLOCKED_EAG_ERROR
 
     def test_readonly_unaffected_by_exception(self):
         """T-11: Read-only action + EAG raises → unaffected (allowed)."""
