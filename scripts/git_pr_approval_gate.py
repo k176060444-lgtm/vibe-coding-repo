@@ -21,7 +21,7 @@ Exit codes:
     2 = usage error
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import argparse
 import json
@@ -101,6 +101,7 @@ VERDICTS = {
     "BLOCKED_MERGE_WITHOUT_APPROVAL": "Action blocked: merge requires operator approval record",
     "BLOCKED_REMOTE_VERIFICATION_REQUIRED": "Action blocked: remote verification gate must pass before this action",
     "BLOCKED_EXECUTION_APPROVAL_REQUIRED": "Action blocked: execution approval binding required (V1.21.12)",
+    "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR": "Action blocked: execution approval gate internal error, cannot verify binding (V1.21.13A, fail-closed)",
     "PASS": "Action approved and allowed",
 }
 
@@ -222,14 +223,36 @@ def check_git_pr_action(
     # --- AUTO_ALLOWED_WITH_GATES actions ---
     if action in AUTO_ALLOWED_ACTIONS:
         # Gate 0: execution approval binding must exist (V1.21.12)
+        # V1.21.13A: Exception clean block — catch EAG errors, return clean verdict
         if _EXECUTION_APPROVAL_GATE_AVAILABLE:
-            eag_result = _eag_check(
-                action=action,
-                approval=execution_approval,
-                proposal_hash=proposal_hash,
-                operator_message=operator_message,
-                changed_files=changed_files,
-            )
+            try:
+                eag_result = _eag_check(
+                    action=action,
+                    approval=execution_approval,
+                    proposal_hash=proposal_hash,
+                    operator_message=operator_message,
+                    changed_files=changed_files,
+                )
+            except Exception as e:
+                result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
+                result["allowed"] = False
+                result["blocked_reason"] = (
+                    f"Execution approval gate error for action '{action}': "
+                    f"{type(e).__name__}: {e}. AUTO_ALLOWED actions blocked (fail-closed)."
+                )
+                result["required_next_step"] = "Fix execution approval gate before proceeding"
+                result["forbidden_actions"] = [action]
+                return result
+            if eag_result is None:
+                result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
+                result["allowed"] = False
+                result["blocked_reason"] = (
+                    f"Execution approval gate returned None for action '{action}'. "
+                    f"AUTO_ALLOWED actions blocked (fail-closed)."
+                )
+                result["required_next_step"] = "Fix execution approval gate before proceeding"
+                result["forbidden_actions"] = [action]
+                return result
             eag_verdict = eag_result.get("verdict", "")
             if eag_verdict not in (_EAG_APPROVAL_BOUND, _EAG_PASS_READ_ONLY):
                 result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
@@ -839,7 +862,7 @@ def self_check(output_json=False):
     # Verdict count
     checks.append({
         "name": "gpac-26-verdicts-count",
-        "passed": len(VERDICTS) == 10,
+        "passed": len(VERDICTS) == 11,
         "message": f"count={len(VERDICTS)}",
     })
 

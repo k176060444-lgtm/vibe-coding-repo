@@ -730,3 +730,22 @@ class TestGitPrGate0:
             operator_message="1.A 2.A 3.A 4.A 5.A 6.A",
         )
         assert r["allowed"] is False
+
+
+class TestNewVerdict:
+    """V1.21.13A: BLOCKED_EXECUTION_APPROVAL_GATE_ERROR verdict exists."""
+
+    def test_new_verdict_in_all_verdicts(self):
+        """T-16: New verdict is in ALL_VERDICTS."""
+        from execution_approval_gate import ALL_VERDICTS, BLOCKED_EXECUTION_APPROVAL_GATE_ERROR
+        assert BLOCKED_EXECUTION_APPROVAL_GATE_ERROR in ALL_VERDICTS
+
+    def test_new_verdict_value(self):
+        """New verdict has expected string value."""
+        from execution_approval_gate import BLOCKED_EXECUTION_APPROVAL_GATE_ERROR
+        assert BLOCKED_EXECUTION_APPROVAL_GATE_ERROR == 'BLOCKED_EXECUTION_APPROVAL_GATE_ERROR'
+
+    def test_verdict_count(self):
+        """ALL_VERDICTS has 9 verdicts (8 original + 1 new)."""
+        from execution_approval_gate import ALL_VERDICTS
+        assert len(ALL_VERDICTS) == 9

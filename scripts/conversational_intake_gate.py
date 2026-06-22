@@ -39,7 +39,7 @@ Exit codes:
     2 = usage error
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import argparse
 import hashlib
@@ -437,14 +437,34 @@ def check_action_allowed(action: str, state: str, approval: dict = None,
     # Blocked actions require approval
     if action in BLOCKED_ACTIONS_BEFORE_APPROVAL:
         # V1.21.12: Run execution_approval_gate for execution actions
+        # V1.21.13A: Exception clean block — catch EAG errors, return clean verdict
         if _EXECUTION_APPROVAL_GATE_AVAILABLE and action in _EAG_EXECUTION_ACTIONS:
-            eag_result = check_execution_approval(
-                action=action,
-                approval=approval,
-                proposal_hash=proposal_hash,
-                operator_message=operator_message,
-                changed_files=changed_files,
-            )
+            try:
+                eag_result = check_execution_approval(
+                    action=action,
+                    approval=approval,
+                    proposal_hash=proposal_hash,
+                    operator_message=operator_message,
+                    changed_files=changed_files,
+                )
+            except Exception as e:
+                return {
+                    "allowed": False,
+                    "verdict": VERDICT_BLOCKED_UNAPPROVED,
+                    "detail": (
+                        f"Execution approval gate error for action '{action}': "
+                        f"{type(e).__name__}: {e}. Action blocked (fail-closed)."
+                    ),
+                }
+            if eag_result is None:
+                return {
+                    "allowed": False,
+                    "verdict": VERDICT_BLOCKED_UNAPPROVED,
+                    "detail": (
+                        f"Execution approval gate returned None for action '{action}'. "
+                        f"Action blocked (fail-closed)."
+                    ),
+                }
             eag_verdict = eag_result.get("verdict", "")
             # Map EAG verdicts to intake gate verdicts
             if eag_verdict == "PASS_READ_ONLY":
