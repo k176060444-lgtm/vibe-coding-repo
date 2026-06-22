@@ -92,6 +92,7 @@ COMMAND_SCRIPTS = {
     "batch-cancel": "vibe_batch_runner.py",
     "batch-abort": "vibe_batch_runner.py",
     "worker-resilience": "vibe_worker_resilience.py",
+    "remote-verify": "remote_verification_gate.py",
 }
 
 # Short aliases
@@ -165,6 +166,8 @@ ALIASES = {
     "resilience": "worker-resilience",
     "rg": "role-gate",
     "rag": "role-gate",
+    "rv": "remote-verify",
+    "pr-verify": "remote-verify",
     "?": "help",
     "v": "version",
 }
@@ -200,6 +203,7 @@ COMMAND_DESCRIPTIONS = {
     "run-report": "Run Report / Session Handoff - execution summary for QQ/mobile",
     "v1-freeze": "V1 Freeze Check - verify operational freeze is healthy",
     "role-gate": "Role Assignment Gate - enforce role plans before coding execution",
+    "remote-verify": "Remote Verification Gate - verify GitHub PR source-of-truth",
     "priv-approval": "Privileged Approval - controlled approval for high-privilege actions",
     "priv-push": "Privileged Push Wrapper - dry-run controlled push for approved actions",
     "help": "Show this help message",
@@ -229,6 +233,10 @@ COMMAND_FLAGS = {
     "transcript": ["--json", "--transcript-dir"],
     "quality-gate": ["--json", "--compact", "--repo-root", "--jobs-dir"],
     "priv-approval": ["--json", "--approval-dir"],
+    "remote-verify": ["--json", "--pr", "--repo", "--expected-head", "--expected-base",
+                      "--expected-files", "--expected-body-contains", "--expected-is-draft",
+                      "--current-main-oid", "--local-diff-files",
+                      "--report-claims-merged", "--pr-data-file"],
     "priv-push": ["--json", "--compact", "--approval-dir", "--action-id", "--list-approved"],
     "trusted-loop": ["--json", "--compact", "--check", "--contract"],
     "batch-runner": ["--json", "--compact", "--batch", "--status", "--dry-run"],

@@ -48,6 +48,7 @@ OPTIONAL_SECTIONS = [
     "quality_metrics",
     "role_assignment_matrix",
     "planned_vs_actual_role_ledger",
+    "remote_verification",
 ]
 
 
