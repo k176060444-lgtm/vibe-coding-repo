@@ -95,6 +95,9 @@ COMMAND_SCRIPTS = {
     "remote-verify": "remote_verification_gate.py",
     "model-ledger-check": "delegate_capability_gate.py",
     "delegate-capability-check": "delegate_capability_gate.py",
+    "intake-check": "conversational_intake_gate.py",
+    "intake-proposal": "conversational_intake_gate.py",
+    "intake-approve-check": "conversational_intake_gate.py",
 }
 
 # Short aliases
@@ -172,6 +175,9 @@ ALIASES = {
     "pr-verify": "remote-verify",
     "mlc": "model-ledger-check",
     "dcc": "delegate-capability-check",
+    "ic": "intake-check",
+    "ip": "intake-proposal",
+    "iac": "intake-approve-check",
     "?": "help",
     "v": "version",
 }
@@ -210,6 +216,9 @@ COMMAND_DESCRIPTIONS = {
     "remote-verify": "Remote Verification Gate - verify GitHub PR source-of-truth",
     "model-ledger-check": "Planned/Actual Model Ledger + Capability Declaration Gate",
     "delegate-capability-check": "Delegate Capability Declaration - executor capability audit",
+    "intake-check": "Conversational Intake Check - detect if intake is required",
+    "intake-proposal": "Intake Proposal - generate structured proposal for operator",
+    "intake-approve-check": "Intake Approval Check - verify approval before execution",
     "priv-approval": "Privileged Approval - controlled approval for high-privilege actions",
     "priv-push": "Privileged Push Wrapper - dry-run controlled push for approved actions",
     "help": "Show this help message",
@@ -247,6 +256,9 @@ COMMAND_FLAGS = {
     "delegate-capability-check": ["--json", "--executor", "--model-override",
                                    "--node-override", "--model-receipt",
                                    "--node-receipt", "--token-receipt", "--notes"],
+    "intake-check": ["--json", "--text"],
+    "intake-proposal": ["--json", "--text", "--goal", "--risk", "--op", "--area"],
+    "intake-approve-check": ["--json", "--action", "--state", "--approval-json"],
     "priv-push": ["--json", "--compact", "--approval-dir", "--action-id", "--list-approved"],
     "trusted-loop": ["--json", "--compact", "--check", "--contract"],
     "batch-runner": ["--json", "--compact", "--batch", "--status", "--dry-run"],

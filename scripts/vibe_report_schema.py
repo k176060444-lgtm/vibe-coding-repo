@@ -51,6 +51,9 @@ OPTIONAL_SECTIONS = [
     "remote_verification",
     "capability_declaration",
     "planned_actual_model_ledger",
+    "intake_record",
+    "intake_proposal",
+    "intake_approval",
 ]
 
 
