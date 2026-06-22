@@ -48,7 +48,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.15.0"
+VERSION = "2.16.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -98,6 +98,8 @@ COMMAND_SCRIPTS = {
     "intake-check": "conversational_intake_gate.py",
     "intake-proposal": "conversational_intake_gate.py",
     "intake-approve-check": "conversational_intake_gate.py",
+    "git-pr-approval-check": "git_pr_approval_gate.py",
+    "pr-state-check": "git_pr_approval_gate.py",
 }
 
 # Short aliases
@@ -178,6 +180,8 @@ ALIASES = {
     "ic": "intake-check",
     "ip": "intake-proposal",
     "iac": "intake-approve-check",
+    "gpac": "git-pr-approval-check",
+    "psc": "pr-state-check",
     "?": "help",
     "v": "version",
 }
@@ -219,6 +223,8 @@ COMMAND_DESCRIPTIONS = {
     "intake-check": "Conversational Intake Check - detect if intake is required",
     "intake-proposal": "Intake Proposal - generate structured proposal for operator",
     "intake-approve-check": "Intake Approval Check - verify approval before execution",
+    "git-pr-approval-check": "Git/PR State Approval Gate - enforce PR state transition policy",
+    "pr-state-check": "PR State Check - verify Git/PR action is allowed",
     "priv-approval": "Privileged Approval - controlled approval for high-privilege actions",
     "priv-push": "Privileged Push Wrapper - dry-run controlled push for approved actions",
     "help": "Show this help message",
@@ -259,6 +265,12 @@ COMMAND_FLAGS = {
     "intake-check": ["--json", "--text"],
     "intake-proposal": ["--json", "--text", "--goal", "--risk", "--op", "--area"],
     "intake-approve-check": ["--json", "--action", "--state", "--approval-json"],
+    "git-pr-approval-check": ["--json", "--self-check", "--action", "--target-branch", "--source-branch",
+                              "--pr-number", "--desired-pr-state", "--current-pr-state", "--is-draft",
+                              "--operator-approval-id", "--operator-approved-actions", "--force-push",
+                              "--changed-files", "--risk-level", "--checks-passed", "--intake-approved",
+                              "--remote-verified", "--merge-check-passed"],
+    "pr-state-check": ["--json", "--action", "--target-branch", "--operator-approval-id"],
     "priv-push": ["--json", "--compact", "--approval-dir", "--action-id", "--list-approved"],
     "trusted-loop": ["--json", "--compact", "--check", "--contract"],
     "batch-runner": ["--json", "--compact", "--batch", "--status", "--dry-run"],
