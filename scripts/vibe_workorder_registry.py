@@ -66,7 +66,7 @@ def _save_entry(registry_dir, entry):
     with open(tmp_file, "w", encoding="utf-8") as f:
         json.dump(entry, f, indent=2, ensure_ascii=False)
         f.write("\n")
-    tmp_file.rename(entry_file)
+    os.replace(str(tmp_file), str(entry_file))
 
 def _list_entries(registry_dir):
     """List all registry entries."""
@@ -416,12 +416,28 @@ def register_deferred_action(action, eag_result, approval=None, repo_root=None):
         registry_dir = Path(repo_root) / ".vibe" / "deferred_registry"
         registry_dir.mkdir(parents=True, exist_ok=True)
 
-        now = datetime.now(timezone.utc).isoformat()
-        workorder_id = f"deferred-{action}-{now.replace(':', '').replace('-', '')[:15]}"
-
-        # Extract approval info
+        # Extract approval info (needed for dedup check)
         approval_id = (eag_result.get("approval_id")
                        or (approval or {}).get("approval_id", ""))
+
+        # V1.21.20: Dedup — if same (approval_id, action) already exists, return it
+        if approval_id:
+            for existing_file in registry_dir.glob("*.json"):
+                try:
+                    with open(existing_file, "r", encoding="utf-8") as fh:
+                        existing = json.load(fh)
+                    if (existing.get("approval_id") == approval_id
+                            and existing.get("action") == action):
+                        return existing
+                except (json.JSONDecodeError, IOError):
+                    continue
+
+        now = datetime.now(timezone.utc).isoformat()
+        # V1.21.20: Include microseconds + random suffix to prevent any collision
+        ts = now.replace(':', '').replace('-', '').replace('.', '')[:21]
+        rand_suffix = os.urandom(4).hex()
+        workorder_id = f"deferred-{action}-{ts}-{rand_suffix}"
+
         risk_level = (eag_result.get("risk_level")
                       or (approval or {}).get("risk_level", "low"))
 
