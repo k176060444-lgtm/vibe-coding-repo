@@ -34,7 +34,7 @@ Exit codes:
     2 = usage error
 """
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 import argparse
 import hashlib
@@ -354,6 +354,150 @@ def validate_action_specific_fields(action: str, approval: dict) -> dict:
 
     return {"valid": True, "verdict": None, "errors": [], "warnings": warnings}
 
+
+# ── Action-specific audit field builder (V1.21.15) ──────────────────
+
+# Machine-readable blocked reason codes
+_REASON_FIELDS_MISSING = "FIELDS_MISSING"
+_REASON_FIELD_INVALID = "FIELD_INVALID"
+_REASON_SERVICE_ADMIN_CRITICAL = "SERVICE_ADMIN_CRITICAL"
+_REASON_SERVICE_ADMIN_DEDICATED = "SERVICE_ADMIN_DEDICATED"
+_REASON_SERVICE_ADMIN_PHRASE = "SERVICE_ADMIN_PHRASE"
+_REASON_REPO_SCOPE_RESTRICTED = "REPO_SCOPE_RESTRICTED"
+_REASON_DATA_CLASSIFICATION_SENSITIVE = "DATA_CLASSIFICATION_SENSITIVE"
+_REASON_BUDGET_UNLIMITED_LOW_RISK = "BUDGET_UNLIMITED_LOW_RISK"
+
+ALL_BLOCKED_REASON_CODES = {
+    _REASON_FIELDS_MISSING,
+    _REASON_FIELD_INVALID,
+    _REASON_SERVICE_ADMIN_CRITICAL,
+    _REASON_SERVICE_ADMIN_DEDICATED,
+    _REASON_SERVICE_ADMIN_PHRASE,
+    _REASON_REPO_SCOPE_RESTRICTED,
+    _REASON_DATA_CLASSIFICATION_SENSITIVE,
+    _REASON_BUDGET_UNLIMITED_LOW_RISK,
+}
+
+
+def _determine_blocked_reason_code(action: str, verdict: str,
+                                    approval: dict = None) -> str:
+    """Determine machine-readable blocked_reason_code for action-specific actions.
+
+    Returns a code string if blocked, None if PASS or non-action-specific.
+    """
+    if action not in ACTION_SPECIFIC_ACTIONS:
+        return None
+    if verdict in (APPROVAL_BOUND, PASS_READ_ONLY):
+        return None
+    if verdict == BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING:
+        return _REASON_FIELDS_MISSING
+    if verdict == BLOCKED_ACTION_SPECIFIC_FIELD_INVALID:
+        return _REASON_FIELD_INVALID
+    if verdict == BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL:
+        if not approval:
+            return _REASON_SERVICE_ADMIN_CRITICAL
+        risk = approval.get("risk_level", "").lower()
+        if risk != "critical":
+            return _REASON_SERVICE_ADMIN_CRITICAL
+        change_type = approval.get("change_type", "")
+        approved_actions = approval.get("approved_actions", [])
+        if change_type in ("permission", "credential"):
+            is_dedicated = (len(approved_actions) == 1
+                           and "service_admin_uac" in approved_actions)
+            if not is_dedicated:
+                return _REASON_SERVICE_ADMIN_DEDICATED
+        phrase = approval.get("operator_confirmation_phrase", "")
+        target_service = approval.get("target_service", "")
+        if (target_service and target_service not in phrase
+                and "service_admin_uac" not in phrase):
+            return _REASON_SERVICE_ADMIN_PHRASE
+        return _REASON_SERVICE_ADMIN_CRITICAL
+    return None
+
+
+def _build_action_specific_audit(action: str, action_class: str,
+                                  approval: dict = None,
+                                  verdict: str = None) -> dict:
+    """Build structured action-specific audit fields for return dict.
+
+    Returns a dict to merge into the check_execution_approval result.
+    """
+    if action_class != "execution":
+        return {}
+
+    is_action_specific = action in ACTION_SPECIFIC_ACTIONS
+    audit = {
+        "action_category": "action_specific" if is_action_specific else "ordinary",
+    }
+
+    if not is_action_specific:
+        return audit
+
+    schema = ACTION_SPECIFIC_SCHEMAS.get(action, {})
+    audit["action_specific_required_fields"] = schema.get("required_fields", [])
+    audit["dedicated_approval_required"] = (
+        action == "service_admin_uac"
+        and approval
+        and approval.get("change_type", "") in ("permission", "credential")
+    )
+    audit["service_admin_critical_required"] = (action == "service_admin_uac")
+
+    # Determine missing/invalid fields from the approval
+    if approval:
+        as_result = validate_action_specific_fields(action, approval)
+        if not as_result["valid"]:
+            err_str = "; ".join(as_result["errors"])
+            if as_result["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING:
+                # Extract missing field names from error message
+                import re
+                m = re.search(r"missing required fields: (\[.*?\])", err_str)
+                if m:
+                    try:
+                        audit["missing_fields"] = eval(m.group(1))
+                    except Exception:
+                        audit["missing_fields"] = []
+                else:
+                    audit["missing_fields"] = []
+                audit["invalid_fields"] = []
+            elif as_result["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELD_INVALID:
+                audit["missing_fields"] = []
+                audit["invalid_fields"] = as_result["errors"]
+                # Determine specific reason code from error content
+                audit["blocked_reason_code"] = _determine_specific_field_reason(
+                    action, err_str
+                )
+                audit["action_specific_required_fields"] = schema.get("required_fields", [])
+                return audit
+            else:
+                audit["missing_fields"] = []
+                audit["invalid_fields"] = []
+        else:
+            audit["missing_fields"] = []
+            audit["invalid_fields"] = []
+    else:
+        required = schema.get("required_fields", [])
+        audit["missing_fields"] = required
+        audit["invalid_fields"] = []
+
+    audit["blocked_reason_code"] = _determine_blocked_reason_code(
+        action, verdict or "", approval
+    )
+
+    return audit
+
+
+def _determine_specific_field_reason(action: str, error_str: str) -> str:
+    """Determine specific blocked_reason_code for FIELD_INVALID verdicts."""
+    err_lower = error_str.lower()
+    if "data_classification" in err_lower and "sensitive" in err_lower:
+        return _REASON_DATA_CLASSIFICATION_SENSITIVE
+    if "budget_policy" in err_lower and "unlimited" in err_lower:
+        return _REASON_BUDGET_UNLIMITED_LOW_RISK
+    if "allowed_repo_scope" in err_lower and "restricted keyword" in err_lower:
+        return _REASON_REPO_SCOPE_RESTRICTED
+    return _REASON_FIELD_INVALID
+
+
 # ── Clarification detection patterns ──────────────────────────────────
 # Patterns in operator messages that indicate clarification answers,
 # NOT execution approval.
@@ -538,7 +682,7 @@ def check_execution_approval(
         proposal_hash: The hash of the current proposal
         proposal_exists: Whether a proposal has been generated
         operator_message: Raw operator message (to detect clarification vs approval)
-        changed_files: Files being changed (to check scope)
+        changed_files: Files being changed (for scope check)
         max_approval_age_seconds: Max age before approval is stale (default 24h)
 
     Returns:
@@ -549,8 +693,33 @@ def check_execution_approval(
             "detail": str,
             "approval_id": str or None,
             "checks": list[dict],
+            # V1.21.15: action-specific audit fields (when applicable)
+            "action_category": str,  # "action_specific" or "ordinary"
+            ...additional fields for action_specific actions...
         }
     """
+    result = _check_execution_approval_core(
+        action=action, approval=approval, proposal_hash=proposal_hash,
+        proposal_exists=proposal_exists, operator_message=operator_message,
+        changed_files=changed_files, max_approval_age_seconds=max_approval_age_seconds,
+    )
+    # V1.21.15: Enrich with action-specific audit fields
+    action_class = result.get("action_class", classify_action(action))
+    audit = _build_action_specific_audit(action, action_class, approval, result.get("verdict"))
+    result.update(audit)
+    return result
+
+
+def _check_execution_approval_core(
+    action: str,
+    approval: dict = None,
+    proposal_hash: str = None,
+    proposal_exists: bool = False,
+    operator_message: str = None,
+    changed_files: list = None,
+    max_approval_age_seconds: int = 86400,
+) -> dict:
+    """Core implementation — returns base result without action-specific audit fields."""
     action_class = classify_action(action)
     checks = []
 
