@@ -300,3 +300,113 @@ class TestSelfCheck:
     def test_version_in_output(self):
         """Version is reported correctly."""
         assert VERSION == "1.2.0"
+
+
+# ── V1.21.17: Auto-discovery + write_eag_result tests ────────────────
+
+import json as _json
+import os as _os
+
+
+def _setup_fake_repo(tmp_path):
+    """Create minimal repo structure for run_report() with mocked helpers."""
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    # Create empty script files so _run_script doesn't fail hard
+    (scripts_dir / "vibe_quality_gate.py").touch()
+    (scripts_dir / "vibe_loop_summary.py").touch()
+    (scripts_dir / "vibe_operator_snapshot.py").touch()
+    (scripts_dir / "vibe_repo_status.py").touch()
+    (scripts_dir / "vibe_v1_freeze_check.py").touch()
+    return tmp_path
+
+
+class TestAutoDiscovery:
+    """T-11 through T-14: Auto-discovery from .vibe/eag_result.json."""
+
+    def test_autodiscovery_from_vibe_dir(self, tmp_path):
+        """T-11: Auto-discovery loads eag_result from .vibe/eag_result.json."""
+        repo_root = _setup_fake_repo(tmp_path)
+        vibe_dir = repo_root / ".vibe"
+        vibe_dir.mkdir()
+        eag = _make_eag_action_specific_blocked()
+        with open(vibe_dir / "eag_result.json", "w", encoding="utf-8") as f:
+            _json.dump(eag, f)
+
+        result = run_report(repo_root=str(repo_root))
+        asa = result.get("action_specific_approval")
+        assert asa is not None
+        assert asa["action_category"] == "action_specific"
+        assert asa["blocked_reason_code"] == "FIELDS_MISSING"
+
+    def test_explicit_overrides_autodiscovery(self, tmp_path):
+        """T-12: Explicit eag_result param overrides auto-discovery."""
+        repo_root = _setup_fake_repo(tmp_path)
+        vibe_dir = repo_root / ".vibe"
+        vibe_dir.mkdir()
+        # Write blocked result to .vibe/
+        blocked_eag = _make_eag_action_specific_blocked()
+        with open(vibe_dir / "eag_result.json", "w", encoding="utf-8") as f:
+            _json.dump(blocked_eag, f)
+
+        # Pass ordinary result explicitly — should override
+        ordinary_eag = _make_eag_ordinary()
+        result = run_report(repo_root=str(repo_root), eag_result=ordinary_eag)
+        asa = result.get("action_specific_approval")
+        assert asa is not None
+        assert asa["action_category"] == "ordinary"
+        # Should NOT have blocked_reason_code (ordinary)
+        assert "blocked_reason_code" not in asa
+
+    def test_missing_vibe_dir_backward_compat(self, tmp_path):
+        """T-13: No .vibe/eag_result.json → no section (backward compat)."""
+        repo_root = _setup_fake_repo(tmp_path)
+        # No .vibe/ directory created
+        result = run_report(repo_root=str(repo_root))
+        assert "action_specific_approval" not in result
+
+    def test_invalid_json_graceful_fallback(self, tmp_path):
+        """T-14: Invalid JSON in .vibe/eag_result.json → graceful fallback."""
+        repo_root = _setup_fake_repo(tmp_path)
+        vibe_dir = repo_root / ".vibe"
+        vibe_dir.mkdir()
+        with open(vibe_dir / "eag_result.json", "w", encoding="utf-8") as f:
+            f.write("NOT VALID JSON {{{")
+
+        result = run_report(repo_root=str(repo_root))
+        assert "action_specific_approval" not in result
+
+
+class TestWriteEagResult:
+    """T-15, T-16: write_eag_result() tests."""
+
+    def test_write_creates_file(self, tmp_path):
+        """T-15: write_eag_result creates .vibe/eag_result.json with correct content."""
+        from conversational_intake_gate import write_eag_result
+
+        eag = _make_eag_action_specific_blocked()
+        write_eag_result(eag, repo_root=str(tmp_path))
+
+        result_path = tmp_path / ".vibe" / "eag_result.json"
+        assert result_path.is_file()
+        with open(result_path, encoding="utf-8") as f:
+            loaded = _json.load(f)
+        assert loaded["action"] == "delegate_task_dispatch"
+        assert loaded["blocked_reason_code"] == "FIELDS_MISSING"
+
+    def test_write_silent_failure(self, tmp_path):
+        """T-16: write_eag_result silent failure on permission/path error."""
+        from conversational_intake_gate import write_eag_result
+
+        eag = _make_eag_action_specific_blocked()
+        # Use a non-existent nested path that can't be created
+        bad_root = str(tmp_path / "nonexistent" / "deeply" / "nested" / "path")
+        # Should not raise
+        write_eag_result(eag, repo_root=bad_root)
+
+
+class TestVersionUnchanged:
+    """T-17: vibe_run_report version unchanged 1.2.0."""
+
+    def test_version_still_120(self):
+        assert VERSION == "1.2.0"

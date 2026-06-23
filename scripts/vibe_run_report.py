@@ -223,6 +223,16 @@ def run_report(repo_root=None, jobs_dir=None, eag_result=None):
     if jobs_dir is None:
         jobs_dir = os.path.expanduser("~/vibedev/jobs")
 
+    # V1.21.17: Auto-discover EAG result from .vibe/eag_result.json
+    if eag_result is None:
+        eag_result_path = repo_root / ".vibe" / "eag_result.json"
+        try:
+            if eag_result_path.is_file():
+                with open(eag_result_path, encoding="utf-8") as _f:
+                    eag_result = json.load(_f)
+        except (json.JSONDecodeError, OSError):
+            pass  # Graceful fallback — no section injected
+
     timestamp = datetime.now(timezone.utc).isoformat()
 
     # Collect all data
