@@ -57,6 +57,7 @@ OPTIONAL_SECTIONS = [
     "git_pr_approval",
     "execution_approval",
     "action_specific_approval",
+    "deferred_action_registry",
 ]
 
 
