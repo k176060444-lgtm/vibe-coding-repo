@@ -22,6 +22,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# V1.21.22: Import run_report for deferred registry export
+try:
+    from vibe_run_report import run_report as _run_report
+except ImportError:
+    _run_report = None
+
 
 def _run_script(script_path, args, timeout=30):
     """Run a script and return (returncode, stdout, stderr)."""
@@ -41,6 +47,25 @@ def _export_kind(script_dir, kind):
 
     if kind == "snapshot":
         rc, stdout, stderr = _run_script(script_dir / "vibe_operator_snapshot.py", ["--compact"])
+        # V1.21.22: Append deferred registry section to snapshot
+        if rc == 0 and stdout and _run_report is not None:
+            try:
+                _rr = _run_report(repo_root=script_dir.parent)
+                _dar = _rr.get("deferred_action_registry") if _rr else None
+                if _dar:
+                    _lines = ["\n## Deferred Action Registry\n"]
+                    _lines.append("- %d deferred action(s) registered\n" % len(_dar))
+                    for _e in _dar:
+                        _action = _e.get("action", "?")
+                        _wid = _e.get("workorder_id", "?")
+                        _risk = _e.get("risk_level", "low")
+                        _dedicated = " ⚠️ dedicated/critical" if _e.get("dedicated_approval") else ""
+                        _real = "yes" if _e.get("real_execution") else "no"
+                        _lines.append("- `%s` | wo=`%s` | risk=%s | real_exec=%s%s\n" % (
+                            _action, _wid, _risk, _real, _dedicated))
+                    stdout += "".join(_lines)
+            except Exception:
+                pass  # Graceful fallback — deferred section not appended
         filename = "snapshot_%s.md" % timestamp
     elif kind == "release-notes":
         rc, stdout, stderr = _run_script(script_dir / "vibe_release_notes.py", ["--compact"])

@@ -23,6 +23,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# V1.21.22: Import run_report for deferred registry collection
+try:
+    from vibe_run_report import run_report as _run_report
+except ImportError:
+    _run_report = None
+
 VERSION = "1.0.0"
 
 def _evidence_dir_path(args):
@@ -156,6 +162,15 @@ def cmd_create(args):
         "timestamp": now,
         "digest": digest,
     }
+
+    # V1.21.22: Collect deferred registry summary via run_report
+    if _run_report is not None:
+        try:
+            _rr = _run_report(repo_root=Path.cwd())
+            if _rr and _rr.get("deferred_action_registry"):
+                evidence["deferred_action_registry"] = _rr["deferred_action_registry"]
+        except Exception:
+            pass  # Graceful fallback — deferred section not included
 
     _save_evidence(evidence_dir, evidence)
 
