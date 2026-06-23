@@ -47,47 +47,45 @@ def _export_kind(script_dir, kind):
 
     if kind == "snapshot":
         rc, stdout, stderr = _run_script(script_dir / "vibe_operator_snapshot.py", ["--compact"])
-        # V1.21.22: Append deferred registry section to snapshot
+        # V1.21.25A: Single run_report() call — SSOT for deferred/verifier
+        _rr = None
         if rc == 0 and stdout and _run_report is not None:
             try:
                 _rr = _run_report(repo_root=script_dir.parent)
-                _dar = _rr.get("deferred_action_registry") if _rr else None
-                if _dar:
-                    _lines = ["\n## Deferred Action Registry\n"]
-                    _lines.append("- %d deferred action(s) registered\n" % len(_dar))
-                    for _e in _dar:
-                        _action = _e.get("action", "?")
-                        _wid = _e.get("workorder_id", "?")
-                        _risk = _e.get("risk_level", "low")
-                        _dedicated = " ⚠️ dedicated/critical" if _e.get("dedicated_approval") else ""
-                        _real = "yes" if _e.get("real_execution") else "no"
-                        _lines.append("- `%s` | wo=`%s` | risk=%s | real_exec=%s%s\n" % (
-                            _action, _wid, _risk, _real, _dedicated))
-                    stdout += "".join(_lines)
             except Exception:
-                pass  # Graceful fallback — deferred section not appended
-        # V1.21.24: Append verifier deferred result section to snapshot
-        if rc == 0 and stdout and _run_report is not None:
-            try:
-                _rr2 = _run_report(repo_root=script_dir.parent)
-                _vdr = _rr2.get("verifier_deferred_result") if _rr2 else None
-                if _vdr:
-                    _vdr_result = _vdr.get("result", "UNKNOWN")
-                    _vdr_detail = _vdr.get("detail", "")
-                    _vlines = ["\n## Verifier Deferred Registry\n"]
-                    if _vdr_result == "PASS":
-                        _vlines.append("- ✅ %s\n" % _vdr_detail)
-                    elif _vdr_result == "WARN":
-                        _vlines.append("- ⚠️ %s\n" % _vdr_detail)
-                        for _w in _vdr.get("warnings", []):
-                            _vlines.append("  - %s\n" % _w)
-                    elif _vdr_result == "FAIL":
-                        _vlines.append("- ❌ %s\n" % _vdr_detail)
-                        for _e2 in _vdr.get("errors", []):
-                            _vlines.append("  - %s\n" % _e2)
-                    stdout += "".join(_vlines)
-            except Exception:
-                pass  # Graceful fallback — verifier deferred section not appended
+                _rr = None  # Graceful fallback — no deferred/verifier sections
+        # Append deferred registry section (from cached _rr)
+        if _rr:
+            _dar = _rr.get("deferred_action_registry")
+            if _dar:
+                _lines = ["\n## Deferred Action Registry\n"]
+                _lines.append("- %d deferred action(s) registered\n" % len(_dar))
+                for _e in _dar:
+                    _action = _e.get("action", "?")
+                    _wid = _e.get("workorder_id", "?")
+                    _risk = _e.get("risk_level", "low")
+                    _dedicated = " ⚠️ dedicated/critical" if _e.get("dedicated_approval") else ""
+                    _real = "yes" if _e.get("real_execution") else "no"
+                    _lines.append("- `%s` | wo=`%s` | risk=%s | real_exec=%s%s\n" % (
+                        _action, _wid, _risk, _real, _dedicated))
+                stdout += "".join(_lines)
+            # Append verifier deferred result section (from same cached _rr)
+            _vdr = _rr.get("verifier_deferred_result")
+            if _vdr:
+                _vdr_result = _vdr.get("result", "UNKNOWN")
+                _vdr_detail = _vdr.get("detail", "")
+                _vlines = ["\n## Verifier Deferred Registry\n"]
+                if _vdr_result == "PASS":
+                    _vlines.append("- ✅ %s\n" % _vdr_detail)
+                elif _vdr_result == "WARN":
+                    _vlines.append("- ⚠️ %s\n" % _vdr_detail)
+                    for _w in _vdr.get("warnings", []):
+                        _vlines.append("  - %s\n" % _w)
+                elif _vdr_result == "FAIL":
+                    _vlines.append("- ❌ %s\n" % _vdr_detail)
+                    for _e2 in _vdr.get("errors", []):
+                        _vlines.append("  - %s\n" % _e2)
+                stdout += "".join(_vlines)
         filename = "snapshot_%s.md" % timestamp
     elif kind == "release-notes":
         rc, stdout, stderr = _run_script(script_dir / "vibe_release_notes.py", ["--compact"])
