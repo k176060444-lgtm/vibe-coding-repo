@@ -54,6 +54,13 @@ except ImportError:
     _EXECUTION_APPROVAL_GATE_AVAILABLE = False
     _EAG_KNOWN_BLOCK_VERDICTS = set()
 
+try:
+    from conversational_intake_gate import write_eag_result as _write_eag_result
+    _WRITE_EAG_RESULT_AVAILABLE = True
+except ImportError:
+    _write_eag_result = None
+    _WRITE_EAG_RESULT_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # Git/PR actions
 # ---------------------------------------------------------------------------
@@ -246,6 +253,9 @@ def check_git_pr_action(
                     operator_message=operator_message,
                     changed_files=changed_files,
                 )
+                # V1.21.18: Persist EAG result for vibe_run_report auto-discovery
+                if _WRITE_EAG_RESULT_AVAILABLE:
+                    _write_eag_result(eag_result)
             except Exception as e:
                 result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
                 result["allowed"] = False
