@@ -11,7 +11,7 @@ import json
 import sys
 from datetime import datetime, timezone
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 REQUIRED_SECTIONS = [
     "pr_merge_info",
@@ -56,6 +56,7 @@ OPTIONAL_SECTIONS = [
     "intake_approval",
     "git_pr_approval",
     "execution_approval",
+    "action_specific_approval",
 ]
 
 

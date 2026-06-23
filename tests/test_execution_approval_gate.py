@@ -1069,3 +1069,179 @@ class TestExistingBehaviorUnaffected:
     def test_eag_error_verdict_exists(self):
         """T-22: BLOCKED_EXECUTION_APPROVAL_GATE_ERROR still in ALL_VERDICTS."""
         assert BLOCKED_EXECUTION_APPROVAL_GATE_ERROR in ALL_VERDICTS
+
+
+# ── V1.21.15: Action-specific audit field tests ───────────────────
+
+
+def _make_ts():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+
+class TestAuditFieldsOrdinaryAction:
+    """Ordinary execution actions get action_category=ordinary."""
+
+    def test_code_modify_has_ordinary_category(self):
+        """T-09: code_modify → action_category=ordinary."""
+        r = check_execution_approval(action="code_modify")
+        assert r["action_category"] == "ordinary"
+
+    def test_code_modify_no_action_specific_fields(self):
+        """T-09: code_modify should not have action-specific fields."""
+        r = check_execution_approval(action="code_modify")
+        assert "action_specific_required_fields" not in r
+        assert "missing_fields" not in r
+        assert "blocked_reason_code" not in r
+
+    def test_commit_has_ordinary_category(self):
+        """commit → action_category=ordinary."""
+        approval = _make_approval()
+        r = check_execution_approval(action="commit", approval=approval, proposal_hash="abc123def456")
+        assert r["action_category"] == "ordinary"
+
+
+class TestAuditFieldsReadOnly:
+    """Read-only actions should not have action_category."""
+
+    def test_research_no_action_category(self):
+        """T-10: read-only → no action_category."""
+        r = check_execution_approval(action="research")
+        assert r.get("action_category") is None
+
+
+class TestAuditFieldsDelegateTaskDispatch:
+    """delegate_task_dispatch audit fields."""
+
+    def test_valid_approval_has_audit_fields(self):
+        """T-01: valid → action_category=action_specific, blocked_reason_code=None."""
+        approval = _make_approval(approved_actions=["delegate_task_dispatch"])
+        approval["target_node"] = "windows"
+        approval["target_role"] = "leaf"
+        approval["task_goal_summary"] = "test"
+        approval["allowed_repo_scope"] = ["scripts/"]
+        approval["model_plan"] = {"provider": "x", "model": "y", "max_calls": 1}
+        approval["max_parallel"] = 1
+        approval["fallback_policy"] = "disabled"
+        approval["timeout_seconds"] = 100
+        r = check_execution_approval(action="delegate_task_dispatch", approval=approval, proposal_hash="abc123def456")
+        assert r["action_category"] == "action_specific"
+        assert r["blocked_reason_code"] is None
+        assert r["missing_fields"] == []
+        assert r["invalid_fields"] == []
+
+    def test_missing_fields_populated(self):
+        """T-02: missing fields → missing_fields populated, blocked_reason_code=FIELDS_MISSING."""
+        approval = _make_approval(approved_actions=["delegate_task_dispatch"])
+        approval["target_role"] = "leaf"
+        approval["task_goal_summary"] = "test"
+        approval["allowed_repo_scope"] = ["scripts/"]
+        approval["model_plan"] = {"provider": "x", "model": "y", "max_calls": 1}
+        approval["max_parallel"] = 1
+        approval["fallback_policy"] = "disabled"
+        approval["timeout_seconds"] = 100
+        r = check_execution_approval(action="delegate_task_dispatch", approval=approval, proposal_hash="abc123def456")
+        assert r["action_category"] == "action_specific"
+        assert "target_node" in r["missing_fields"]
+        assert r["blocked_reason_code"] == "FIELDS_MISSING"
+
+    def test_invalid_fields_populated(self):
+        """T-03: invalid node → invalid_fields populated, blocked_reason_code=FIELD_INVALID."""
+        approval = _make_approval(approved_actions=["delegate_task_dispatch"])
+        approval["target_node"] = "invalid"
+        approval["target_role"] = "leaf"
+        approval["task_goal_summary"] = "test"
+        approval["allowed_repo_scope"] = ["scripts/"]
+        approval["model_plan"] = {"provider": "x", "model": "y", "max_calls": 1}
+        approval["max_parallel"] = 1
+        approval["fallback_policy"] = "disabled"
+        approval["timeout_seconds"] = 100
+        r = check_execution_approval(action="delegate_task_dispatch", approval=approval, proposal_hash="abc123def456")
+        assert r["action_category"] == "action_specific"
+        assert len(r["invalid_fields"]) > 0
+        assert r["blocked_reason_code"] == "FIELD_INVALID"
+
+
+class TestAuditFieldsLiveModelCall:
+    """live_model_call audit fields."""
+
+    def test_sensitive_non_critical_reason_code(self):
+        """T-04: sensitive + non-CRITICAL → DATA_CLASSIFICATION_SENSITIVE."""
+        approval = _make_approval(approved_actions=["live_model_call"])
+        approval["provider"] = "x"
+        approval["model"] = "y"
+        approval["role"] = "r"
+        approval["max_calls"] = 5
+        approval["budget_policy"] = "within_budget"
+        approval["fallback_policy"] = "disabled"
+        approval["data_classification"] = "sensitive"
+        approval["risk_level"] = "high"
+        r = check_execution_approval(action="live_model_call", approval=approval, proposal_hash="abc123def456")
+        assert r["blocked_reason_code"] == "DATA_CLASSIFICATION_SENSITIVE"
+
+    def test_unlimited_low_risk_reason_code(self):
+        """T-05: unlimited + low risk → BUDGET_UNLIMITED_LOW_RISK."""
+        approval = _make_approval(approved_actions=["live_model_call"])
+        approval["provider"] = "x"
+        approval["model"] = "y"
+        approval["role"] = "r"
+        approval["max_calls"] = 5
+        approval["budget_policy"] = "unlimited"
+        approval["fallback_policy"] = "disabled"
+        approval["data_classification"] = "no_secrets"
+        approval["risk_level"] = "low"
+        r = check_execution_approval(action="live_model_call", approval=approval, proposal_hash="abc123def456")
+        assert r["blocked_reason_code"] == "BUDGET_UNLIMITED_LOW_RISK"
+
+
+class TestAuditFieldsServiceAdminUac:
+    """service_admin_uac audit fields."""
+
+    def test_non_critical_reason_code(self):
+        """T-06: non-CRITICAL → SERVICE_ADMIN_CRITICAL."""
+        approval = _make_approval(approved_actions=["service_admin_uac"])
+        approval["risk_level"] = "high"
+        approval["target_service"] = "gateway"
+        approval["change_type"] = "config"
+        approval["affected_scope"] = "test"
+        approval["rollback_plan"] = "revert"
+        approval["requires_outage"] = False
+        approval["operator_confirmation_phrase"] = "I approve gateway"
+        r = check_execution_approval(action="service_admin_uac", approval=approval, proposal_hash="abc123def456")
+        assert r["blocked_reason_code"] == "SERVICE_ADMIN_CRITICAL"
+        assert r["service_admin_critical_required"] is True
+
+    def test_bundled_permission_reason_code(self):
+        """T-07: bundled permission → SERVICE_ADMIN_DEDICATED."""
+        approval = _make_approval(approved_actions=["service_admin_uac", "code_modify"])
+        approval["risk_level"] = "critical"
+        approval["target_service"] = "admin"
+        approval["change_type"] = "permission"
+        approval["affected_scope"] = "test"
+        approval["rollback_plan"] = "revert"
+        approval["requires_outage"] = False
+        approval["operator_confirmation_phrase"] = "I approve admin"
+        r = check_execution_approval(action="service_admin_uac", approval=approval, proposal_hash="abc123def456")
+        assert r["blocked_reason_code"] == "SERVICE_ADMIN_DEDICATED"
+        assert r["dedicated_approval_required"] is True
+
+    def test_missing_phrase_reason_code(self):
+        """T-08: missing phrase → SERVICE_ADMIN_PHRASE."""
+        approval = _make_approval(approved_actions=["service_admin_uac"])
+        approval["risk_level"] = "critical"
+        approval["target_service"] = "gateway"
+        approval["change_type"] = "config"
+        approval["affected_scope"] = "test"
+        approval["rollback_plan"] = "revert"
+        approval["requires_outage"] = False
+        approval["operator_confirmation_phrase"] = "I approve this"
+        r = check_execution_approval(action="service_admin_uac", approval=approval, proposal_hash="abc123def456")
+        assert r["blocked_reason_code"] == "SERVICE_ADMIN_PHRASE"
+
+
+class TestAuditFieldsVerdictCount:
+    """V1.21.15 must not change verdict count."""
+
+    def test_verdict_count_unchanged(self):
+        """T-15: ALL_VERDICTS still 12."""
+        assert len(ALL_VERDICTS) == 12
