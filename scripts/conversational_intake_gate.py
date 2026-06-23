@@ -39,7 +39,7 @@ Exit codes:
     2 = usage error
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import argparse
 import hashlib
@@ -51,11 +51,15 @@ try:
     from execution_approval_gate import (
         check_execution_approval,
         EXECUTION_ACTIONS as _EAG_EXECUTION_ACTIONS,
+        ACTION_SPECIFIC_ACTIONS as _EAG_ACTION_SPECIFIC_ACTIONS,
         BLOCKED_EXECUTION_WITHOUT_APPROVAL as _EAG_BLOCKED_NO_APPROVAL,
         BLOCKED_APPROVAL_NOT_BOUND_TO_PROPOSAL as _EAG_BLOCKED_NO_PROPOSAL,
         BLOCKED_ACTION_NOT_APPROVED as _EAG_BLOCKED_ACTION,
         BLOCKED_CLARIFICATION_NOT_APPROVAL as _EAG_BLOCKED_CLARIFICATION,
         BLOCKED_STALE_APPROVAL as _EAG_BLOCKED_STALE,
+        BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING as _EAG_BLOCKED_AS_FIELDS_MISSING,
+        BLOCKED_ACTION_SPECIFIC_FIELD_INVALID as _EAG_BLOCKED_AS_FIELD_INVALID,
+        BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL as _EAG_BLOCKED_SERVICE_ADMIN,
     )
     _EXECUTION_APPROVAL_GATE_AVAILABLE = True
     # Known EAG block verdicts (not errors — legitimate blocks)
@@ -65,10 +69,14 @@ try:
         _EAG_BLOCKED_ACTION,
         _EAG_BLOCKED_CLARIFICATION,
         _EAG_BLOCKED_STALE,
+        _EAG_BLOCKED_AS_FIELDS_MISSING,
+        _EAG_BLOCKED_AS_FIELD_INVALID,
+        _EAG_BLOCKED_SERVICE_ADMIN,
     }
 except ImportError:
     check_execution_approval = None
     _EAG_EXECUTION_ACTIONS = set()
+    _EAG_ACTION_SPECIFIC_ACTIONS = set()
     _EXECUTION_APPROVAL_GATE_AVAILABLE = False
     _EAG_KNOWN_BLOCK_VERDICTS = set()
 
@@ -81,6 +89,9 @@ VERDICT_APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
 VERDICT_APPROVED_FOR_EXECUTION = "APPROVED_FOR_EXECUTION"
 VERDICT_BLOCKED_UNAPPROVED = "BLOCKED_UNAPPROVED_ACTION"
 VERDICT_BLOCKED_EAG_ERROR = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
+VERDICT_BLOCKED_AS_FIELDS_MISSING = "BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING"
+VERDICT_BLOCKED_AS_FIELD_INVALID = "BLOCKED_ACTION_SPECIFIC_FIELD_INVALID"
+VERDICT_BLOCKED_SERVICE_ADMIN = "BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL"
 
 ALL_VERDICTS = {
     VERDICT_INTAKE_REQUIRED,
@@ -90,6 +101,9 @@ ALL_VERDICTS = {
     VERDICT_APPROVED_FOR_EXECUTION,
     VERDICT_BLOCKED_UNAPPROVED,
     VERDICT_BLOCKED_EAG_ERROR,
+    VERDICT_BLOCKED_AS_FIELDS_MISSING,
+    VERDICT_BLOCKED_AS_FIELD_INVALID,
+    VERDICT_BLOCKED_SERVICE_ADMIN,
 }
 
 # ── State machine ─────────────────────────────────────────────────────
@@ -454,7 +468,10 @@ def check_action_allowed(action: str, state: str, approval: dict = None,
     if action in BLOCKED_ACTIONS_BEFORE_APPROVAL:
         # V1.21.12: Run execution_approval_gate for execution actions
         # V1.21.13A: Exception clean block — catch EAG errors, return clean verdict
-        if _EXECUTION_APPROVAL_GATE_AVAILABLE and action in _EAG_EXECUTION_ACTIONS:
+        # V1.21.14A: Also route action-specific actions through EAG
+        if _EXECUTION_APPROVAL_GATE_AVAILABLE and (
+            action in _EAG_EXECUTION_ACTIONS or action in _EAG_ACTION_SPECIFIC_ACTIONS
+        ):
             try:
                 eag_result = check_execution_approval(
                     action=action,
@@ -509,6 +526,18 @@ def check_action_allowed(action: str, state: str, approval: dict = None,
                         f"not 'APPROVED'."
                     ),
                 }
+            # V1.21.14A: Pass through action-specific verdicts verbatim
+            _ACTION_SPECIFIC_VERDICTS = {
+                "BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING",
+                "BLOCKED_ACTION_SPECIFIC_FIELD_INVALID",
+                "BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL",
+            }
+            if eag_verdict in _ACTION_SPECIFIC_VERDICTS:
+                return {
+                    "allowed": False,
+                    "verdict": eag_verdict,
+                    "detail": eag_result["detail"],
+                }
             # All other EAG verdicts: known blocks → UNAPPROVED, unknown → EAG_ERROR
             if eag_verdict in _EAG_KNOWN_BLOCK_VERDICTS:
                 return {
@@ -528,7 +557,10 @@ def check_action_allowed(action: str, state: str, approval: dict = None,
             }
 
         # FAIL-CLOSED: EAG not available → block execution actions (V1.21.12)
-        if not _EXECUTION_APPROVAL_GATE_AVAILABLE and action in _EAG_EXECUTION_ACTIONS:
+        # V1.21.14A: Also block action-specific actions
+        if not _EXECUTION_APPROVAL_GATE_AVAILABLE and (
+            action in _EAG_EXECUTION_ACTIONS or action in _EAG_ACTION_SPECIFIC_ACTIONS
+        ):
             return {
                 "allowed": False,
                 "verdict": VERDICT_BLOCKED_UNAPPROVED,
@@ -811,8 +843,8 @@ def self_check() -> dict:
     check("cig-23-just-do-it-blocked",
           block4["verdict"] == VERDICT_BLOCKED_UNAPPROVED)
 
-    # cig-24: 7 verdicts defined
-    check("cig-24-verdicts-count", len(ALL_VERDICTS) == 7,
+    # cig-24: 10 verdicts defined (V1.21.14A: 7 → 10)
+    check("cig-24-verdicts-count", len(ALL_VERDICTS) == 10,
           f"count={len(ALL_VERDICTS)}")
 
     # cig-25: blocked actions count

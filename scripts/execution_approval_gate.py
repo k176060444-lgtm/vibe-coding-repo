@@ -34,7 +34,7 @@ Exit codes:
     2 = usage error
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import argparse
 import hashlib
@@ -53,6 +53,9 @@ BLOCKED_ACTION_NOT_APPROVED = "BLOCKED_ACTION_NOT_APPROVED"
 BLOCKED_CLARIFICATION_NOT_APPROVAL = "BLOCKED_CLARIFICATION_NOT_APPROVAL"
 BLOCKED_STALE_APPROVAL = "BLOCKED_STALE_APPROVAL"
 BLOCKED_EXECUTION_APPROVAL_GATE_ERROR = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
+BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING = "BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING"
+BLOCKED_ACTION_SPECIFIC_FIELD_INVALID = "BLOCKED_ACTION_SPECIFIC_FIELD_INVALID"
+BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL = "BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL"
 
 ALL_VERDICTS = {
     PASS_READ_ONLY,
@@ -64,6 +67,9 @@ ALL_VERDICTS = {
     BLOCKED_CLARIFICATION_NOT_APPROVAL,
     BLOCKED_STALE_APPROVAL,
     BLOCKED_EXECUTION_APPROVAL_GATE_ERROR,
+    BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING,
+    BLOCKED_ACTION_SPECIFIC_FIELD_INVALID,
+    BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL,
 }
 
 # ── Action classification ─────────────────────────────────────────────
@@ -109,6 +115,244 @@ READ_ONLY_ACTIONS = {
     "snapshot",
     "health",
 }
+
+# Action-specific approval actions — require action-specific schema validation
+ACTION_SPECIFIC_ACTIONS = {
+    "delegate_task_dispatch",
+    "live_model_call",
+    "service_admin_uac",
+}
+
+# ── Action-specific schema definitions ─────────────────────────────
+
+# Restricted repo scope keywords — not allowed in allowed_repo_scope
+_RESTRICTED_REPO_KEYWORDS = {"secrets", "production", "gateway", "admin"}
+
+ACTION_SPECIFIC_SCHEMAS = {
+    "delegate_task_dispatch": {
+        "required_fields": [
+            "target_node", "target_role", "task_goal_summary",
+            "allowed_repo_scope", "model_plan", "max_parallel",
+            "fallback_policy", "timeout_seconds",
+        ],
+        "constraints": {
+            "target_node": ["windows", "debian", "any"],
+            "target_role": ["leaf", "orchestrator"],
+            "max_parallel_min": 1,
+            "fallback_policy_values": ["disabled", "operator_approved"],
+            "restricted_repo_keywords": sorted(_RESTRICTED_REPO_KEYWORDS),
+        },
+    },
+    "live_model_call": {
+        "required_fields": [
+            "provider", "model", "role", "max_calls",
+            "budget_policy", "fallback_policy", "data_classification",
+        ],
+        "constraints": {
+            "max_calls_min": 1,
+            "budget_policy_values": ["free_only", "within_budget", "unlimited"],
+            "fallback_policy_values": ["disabled", "operator_approved"],
+            "data_classification_values": ["no_secrets", "contains_context", "sensitive"],
+        },
+    },
+    "service_admin_uac": {
+        "required_fields": [
+            "target_service", "change_type", "affected_scope",
+            "rollback_plan", "requires_outage",
+        ],
+        "constraints": {
+            "target_service_values": ["gateway", "production", "admin", "uac"],
+            "change_type_values": ["config", "restart", "permission", "credential"],
+            "risk_level_must_be_critical": True,
+            "permission_credential_requires_dedicated_approval": True,
+            "operator_phrase_must_contain_target_service": True,
+        },
+    },
+}
+
+
+def validate_action_specific_fields(action: str, approval: dict) -> dict:
+    """Validate action-specific fields for deferred actions.
+
+    Returns:
+        {
+            "valid": bool,
+            "verdict": str or None,
+            "errors": list[str],
+            "warnings": list[str],
+        }
+    """
+    schema = ACTION_SPECIFIC_SCHEMAS.get(action)
+    if not schema:
+        return {"valid": True, "verdict": None, "errors": [], "warnings": []}
+
+    errors = []
+    warnings = []
+    required_fields = schema["required_fields"]
+    constraints = schema["constraints"]
+
+    # Check required fields presence
+    missing = []
+    for field in required_fields:
+        if field not in approval or approval[field] is None:
+            missing.append(field)
+    if missing:
+        return {
+            "valid": False,
+            "verdict": BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING,
+            "errors": [f"action '{action}': missing required fields: {missing}"],
+            "warnings": [],
+        }
+
+    # Action-specific constraint validation
+    if action == "delegate_task_dispatch":
+        target_node = approval.get("target_node", "")
+        if target_node not in constraints["target_node"]:
+            errors.append(
+                f"target_node '{target_node}' not in {constraints['target_node']}"
+            )
+
+        target_role = approval.get("target_role", "")
+        if target_role not in constraints["target_role"]:
+            errors.append(
+                f"target_role '{target_role}' not in {constraints['target_role']}"
+            )
+
+        max_parallel = approval.get("max_parallel", 0)
+        if not isinstance(max_parallel, int) or max_parallel < constraints["max_parallel_min"]:
+            errors.append(
+                f"max_parallel must be >= {constraints['max_parallel_min']}, got {max_parallel}"
+            )
+
+        fallback = approval.get("fallback_policy", "")
+        if fallback not in constraints["fallback_policy_values"]:
+            errors.append(
+                f"fallback_policy '{fallback}' not in {constraints['fallback_policy_values']}"
+            )
+
+        # Check allowed_repo_scope for restricted keywords
+        repo_scope = approval.get("allowed_repo_scope", [])
+        if isinstance(repo_scope, list):
+            # Check if approval is separately CRITICAL-approved for restricted paths
+            is_critical = approval.get("risk_level", "").lower() == "critical"
+            for path in repo_scope:
+                if isinstance(path, str):
+                    path_lower = path.lower()
+                    for keyword in _RESTRICTED_REPO_KEYWORDS:
+                        if keyword in path_lower and not is_critical:
+                            errors.append(
+                                f"allowed_repo_scope contains restricted keyword "
+                                f"'{keyword}' in '{path}' — requires CRITICAL approval"
+                            )
+
+    elif action == "live_model_call":
+        max_calls = approval.get("max_calls", 0)
+        if not isinstance(max_calls, int) or max_calls < constraints["max_calls_min"]:
+            errors.append(
+                f"max_calls must be >= {constraints['max_calls_min']}, got {max_calls}"
+            )
+
+        budget = approval.get("budget_policy", "")
+        if budget not in constraints["budget_policy_values"]:
+            errors.append(
+                f"budget_policy '{budget}' not in {constraints['budget_policy_values']}"
+            )
+        # unlimited requires high/critical + explicit approval
+        if budget == "unlimited":
+            risk = approval.get("risk_level", "").lower()
+            if risk not in ("high", "critical"):
+                errors.append(
+                    f"budget_policy='unlimited' requires risk_level >= high, got '{risk}'"
+                )
+
+        fallback = approval.get("fallback_policy", "")
+        if fallback not in constraints["fallback_policy_values"]:
+            errors.append(
+                f"fallback_policy '{fallback}' not in {constraints['fallback_policy_values']}"
+            )
+
+        data_class = approval.get("data_classification", "")
+        if data_class not in constraints["data_classification_values"]:
+            errors.append(
+                f"data_classification '{data_class}' not in "
+                f"{constraints['data_classification_values']}"
+            )
+        # sensitive requires CRITICAL
+        if data_class == "sensitive":
+            risk = approval.get("risk_level", "").lower()
+            if risk != "critical":
+                errors.append(
+                    f"data_classification='sensitive' requires risk_level=critical, "
+                    f"got '{risk}'"
+                )
+
+    elif action == "service_admin_uac":
+        # CRITICAL risk level is mandatory
+        risk = approval.get("risk_level", "").lower()
+        if risk != "critical":
+            return {
+                "valid": False,
+                "verdict": BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL,
+                "errors": [
+                    f"service_admin_uac requires risk_level=critical, got '{risk}'"
+                ],
+                "warnings": [],
+            }
+
+        target_service = approval.get("target_service", "")
+        if target_service not in constraints["target_service_values"]:
+            errors.append(
+                f"target_service '{target_service}' not in "
+                f"{constraints['target_service_values']}"
+            )
+
+        change_type = approval.get("change_type", "")
+        if change_type not in constraints["change_type_values"]:
+            errors.append(
+                f"change_type '{change_type}' not in "
+                f"{constraints['change_type_values']}"
+            )
+        # permission/credential requires dedicated approval
+        # "dedicated" means service_admin_uac is the ONLY approved action
+        if change_type in ("permission", "credential"):
+            approved_actions = approval.get("approved_actions", [])
+            is_dedicated = (
+                len(approved_actions) == 1
+                and "service_admin_uac" in approved_actions
+            )
+            if not is_dedicated:
+                return {
+                    "valid": False,
+                    "verdict": BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL,
+                    "errors": [
+                        f"change_type='{change_type}' requires dedicated "
+                        f"service_admin_uac approval (not bundled with other actions)"
+                    ],
+                    "warnings": [],
+                }
+
+        # operator_confirmation_phrase must contain target_service or action name
+        phrase = approval.get("operator_confirmation_phrase", "")
+        if target_service not in phrase and "service_admin_uac" not in phrase:
+            return {
+                "valid": False,
+                "verdict": BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL,
+                "errors": [
+                    f"operator_confirmation_phrase must contain "
+                    f"target_service='{target_service}' or 'service_admin_uac'"
+                ],
+                "warnings": [],
+            }
+
+    if errors:
+        return {
+            "valid": False,
+            "verdict": BLOCKED_ACTION_SPECIFIC_FIELD_INVALID,
+            "errors": errors,
+            "warnings": warnings,
+        }
+
+    return {"valid": True, "verdict": None, "errors": [], "warnings": warnings}
 
 # ── Clarification detection patterns ──────────────────────────────────
 # Patterns in operator messages that indicate clarification answers,
@@ -160,6 +404,8 @@ def classify_action(action: str) -> str:
         return "execution"
     if action in READ_ONLY_ACTIONS:
         return "read_only"
+    if action in ACTION_SPECIFIC_ACTIONS:
+        return "execution"
     return "unknown"
 
 
@@ -637,6 +883,33 @@ def check_execution_approval(
                 "detail": f"Cannot parse approval timestamp: {approval_ts}",
             })
 
+    # ── Rule 9: Action-specific schema validation (V1.21.14A) ──
+    if action in ACTION_SPECIFIC_ACTIONS:
+        as_result = validate_action_specific_fields(action, approval)
+        if not as_result["valid"]:
+            verdict = as_result["verdict"] or BLOCKED_ACTION_SPECIFIC_FIELD_INVALID
+            checks.append({
+                "name": "action_specific_validation",
+                "result": "BLOCK",
+                "detail": f"Action-specific validation failed: {as_result['errors']}",
+            })
+            return {
+                "verdict": verdict,
+                "action": action,
+                "action_class": action_class,
+                "detail": (
+                    f"Action-specific validation for '{action}' failed: "
+                    f"{'; '.join(as_result['errors'])}"
+                ),
+                "approval_id": approval_id,
+                "checks": checks,
+            }
+        checks.append({
+            "name": "action_specific_validation",
+            "result": "PASS",
+            "detail": f"Action-specific fields validated for '{action}'",
+        })
+
     # ── All checks passed ──
     return {
         "verdict": APPROVAL_BOUND,
@@ -940,6 +1213,111 @@ def self_check(output_json=False):
         "name": "f01_low_no_hash_warn",
         "passed": r["verdict"] == APPROVAL_BOUND,
         "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 23: delegate_task_dispatch without approval -> BLOCKED
+    r = check_execution_approval(action="delegate_task_dispatch")
+    checks.append({
+        "name": "delegate_no_approval_blocked",
+        "passed": r["verdict"] == BLOCKED_EXECUTION_WITHOUT_APPROVAL,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 24: live_model_call without approval -> BLOCKED
+    r = check_execution_approval(action="live_model_call")
+    checks.append({
+        "name": "live_model_no_approval_blocked",
+        "passed": r["verdict"] == BLOCKED_EXECUTION_WITHOUT_APPROVAL,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 25: service_admin_uac without approval -> BLOCKED
+    r = check_execution_approval(action="service_admin_uac")
+    checks.append({
+        "name": "service_admin_no_approval_blocked",
+        "passed": r["verdict"] == BLOCKED_EXECUTION_WITHOUT_APPROVAL,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 26: delegate_task_dispatch + generic impl approval (no action-specific fields) -> BLOCKED
+    generic_approval = _make_valid_approval(
+        approved_actions=["delegate_task_dispatch", "code_modify"]
+    )
+    r = check_execution_approval(
+        action="delegate_task_dispatch",
+        approval=generic_approval,
+        proposal_hash="abc123def456",
+    )
+    checks.append({
+        "name": "delegate_generic_approval_blocked",
+        "passed": r["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 27: live_model_call + generic impl approval -> BLOCKED
+    generic_approval2 = _make_valid_approval(
+        approved_actions=["live_model_call", "code_modify"]
+    )
+    r = check_execution_approval(
+        action="live_model_call",
+        approval=generic_approval2,
+        proposal_hash="abc123def456",
+    )
+    checks.append({
+        "name": "live_model_generic_approval_blocked",
+        "passed": r["verdict"] == BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 28: service_admin_uac + non-CRITICAL -> BLOCKED
+    admin_approval = _make_valid_approval(
+        approved_actions=["service_admin_uac"]
+    )
+    admin_approval["risk_level"] = "high"
+    admin_approval["target_service"] = "gateway"
+    admin_approval["change_type"] = "config"
+    admin_approval["affected_scope"] = "test"
+    admin_approval["rollback_plan"] = "revert"
+    admin_approval["requires_outage"] = False
+    admin_approval["operator_confirmation_phrase"] = "I approve gateway change"
+    r = check_execution_approval(
+        action="service_admin_uac",
+        approval=admin_approval,
+        proposal_hash="abc123def456",
+    )
+    checks.append({
+        "name": "service_admin_non_critical_blocked",
+        "passed": r["verdict"] == BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 29: service_admin_uac + CRITICAL + valid -> APPROVAL_BOUND
+    admin_approval_ok = _make_valid_approval(
+        approved_actions=["service_admin_uac"]
+    )
+    admin_approval_ok["risk_level"] = "critical"
+    admin_approval_ok["target_service"] = "gateway"
+    admin_approval_ok["change_type"] = "config"
+    admin_approval_ok["affected_scope"] = "test"
+    admin_approval_ok["rollback_plan"] = "revert"
+    admin_approval_ok["requires_outage"] = False
+    admin_approval_ok["operator_confirmation_phrase"] = "I approve gateway change"
+    r = check_execution_approval(
+        action="service_admin_uac",
+        approval=admin_approval_ok,
+        proposal_hash="abc123def456",
+    )
+    checks.append({
+        "name": "service_admin_critical_valid_passes",
+        "passed": r["verdict"] == APPROVAL_BOUND,
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # Test 30: 12 verdicts defined
+    checks.append({
+        "name": "verdict_count_12",
+        "passed": len(ALL_VERDICTS) == 12,
+        "message": f"count={len(ALL_VERDICTS)}",
     })
 
     passed = sum(1 for c in checks if c["passed"])

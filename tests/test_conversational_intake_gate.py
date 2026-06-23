@@ -318,7 +318,7 @@ class TestVerdicts:
         assert v["verdict"] == VERDICT_PROPOSAL_READY
 
     def test_seven_verdicts_defined(self):
-        assert len(ALL_VERDICTS) == 7
+        assert len(ALL_VERDICTS) == 10
 
 
 class TestFailClosed:
@@ -438,7 +438,7 @@ class TestFailClosed:
 
 class TestVersion:
     def test_version(self):
-        assert __version__ == "1.2.0"
+        assert __version__ == "1.3.0"
 
 
 class TestExceptionCleanBlock:
@@ -556,3 +556,149 @@ class TestExceptionCleanBlock:
                 operator_message="1.A 2.A 3.A 4.A 5.A 6.A",
             )
             assert r["allowed"] is False
+
+
+class TestActionSpecificIntakeRouting:
+    """V1.21.14A: action-specific actions routed through EAG via intake gate."""
+
+    def test_delegate_task_dispatch_generic_approval_blocked(self):
+        """T-18: generic impl approval cannot approve delegate_task_dispatch."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"code_modify"}
+        ), mock.patch(
+            "conversational_intake_gate._EAG_ACTION_SPECIFIC_ACTIONS",
+            {"delegate_task_dispatch", "live_model_call", "service_admin_uac"},
+        ):
+            appr = {
+                "approved": True,
+                "approval_id": "test",
+                "proposal_id": "p",
+                "proposal_hash": "h",
+                "approved_actions": ["delegate_task_dispatch", "code_modify"],
+                "risk_level": "medium",
+                "operator_message_raw": "ok",
+                "operator_confirmation_phrase": "ok",
+                "timestamp": "2026-06-22",
+                "approval_scope": "all",
+                "role_model_matrix_hash": "rm",
+            }
+            r = check_action_allowed(
+                "delegate_task_dispatch", "APPROVED", appr, proposal_hash="h"
+            )
+            assert r["allowed"] is False
+            assert r["verdict"] == "BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING"
+
+    def test_live_model_call_generic_approval_blocked(self):
+        """T-19: generic impl approval cannot approve live_model_call."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"code_modify"}
+        ), mock.patch(
+            "conversational_intake_gate._EAG_ACTION_SPECIFIC_ACTIONS",
+            {"delegate_task_dispatch", "live_model_call", "service_admin_uac"},
+        ):
+            appr = {
+                "approved": True,
+                "approval_id": "test",
+                "proposal_id": "p",
+                "proposal_hash": "h",
+                "approved_actions": ["live_model_call", "code_modify"],
+                "risk_level": "medium",
+                "operator_message_raw": "ok",
+                "operator_confirmation_phrase": "ok",
+                "timestamp": "2026-06-22",
+                "approval_scope": "all",
+                "role_model_matrix_hash": "rm",
+            }
+            r = check_action_allowed(
+                "live_model_call", "APPROVED", appr, proposal_hash="h"
+            )
+            assert r["allowed"] is False
+            assert r["verdict"] == "BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING"
+
+    def test_service_admin_uac_generic_approval_blocked(self):
+        """T-11b: generic implementation approval cannot approve service_admin_uac."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"code_modify"}
+        ), mock.patch(
+            "conversational_intake_gate._EAG_ACTION_SPECIFIC_ACTIONS",
+            {"delegate_task_dispatch", "live_model_call", "service_admin_uac"},
+        ):
+            appr = {
+                "approved": True,
+                "approval_id": "test",
+                "proposal_id": "p",
+                "proposal_hash": "h",
+                "approved_actions": ["service_admin_uac", "code_modify"],
+                "risk_level": "medium",
+                "operator_message_raw": "ok",
+                "operator_confirmation_phrase": "ok",
+                "timestamp": "2026-06-22",
+                "approval_scope": "all",
+                "role_model_matrix_hash": "rm",
+            }
+            r = check_action_allowed(
+                "service_admin_uac", "APPROVED", appr, proposal_hash="h"
+            )
+            assert r["allowed"] is False
+            # Missing action-specific fields → FIELDS_MISSING (checked before risk_level)
+            assert r["verdict"] == "BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING"
+
+    def test_code_modify_path_unaffected(self):
+        """T-12b: code_modify + valid approval → still allowed."""
+        appr = {
+            "approved": True,
+            "approval_id": "test",
+            "proposal_id": "p",
+            "proposal_hash": "h",
+            "approved_actions": ["code_modify"],
+            "risk_level": "medium",
+            "operator_message_raw": "ok",
+            "operator_confirmation_phrase": "ok",
+            "timestamp": "2026-06-22",
+            "approval_scope": "all",
+            "role_model_matrix_hash": "rm",
+        }
+        r = check_action_allowed("code_modify", "APPROVED", appr, proposal_hash="h")
+        assert r["allowed"] is True
+
+    def test_readonly_unaffected(self):
+        """T-13b: read-only action → still allowed."""
+        r = check_action_allowed("read_only_check", "RAW", None)
+        assert r["allowed"] is True
+
+    def test_50719_regression_unaffected(self):
+        """T-15b: #50719 clarification → still blocked."""
+        r = check_action_allowed(
+            "code_modify", "APPROVED", {"approved": True},
+            operator_message="1.A 2.A 3.A 4.A 5.A 6.A",
+        )
+        assert r["allowed"] is False
+
+    def test_eag_exception_clean_block_unaffected(self):
+        """T-22b: V1.21.13A EAG exception → still clean BLOCK."""
+        import unittest.mock as mock
+        with mock.patch(
+            "conversational_intake_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
+        ), mock.patch(
+            "conversational_intake_gate._EAG_EXECUTION_ACTIONS", {"code_modify"}
+        ), mock.patch(
+            "conversational_intake_gate.check_execution_approval",
+            side_effect=RuntimeError("test error"),
+        ):
+            r = check_action_allowed("code_modify", "APPROVED", {"approved": True})
+            assert r["allowed"] is False
+            assert r["verdict"] == VERDICT_BLOCKED_EAG_ERROR
+
+
+class TestVersionV130:
+    def test_version(self):
+        assert __version__ == "1.3.0"
