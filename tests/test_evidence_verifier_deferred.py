@@ -366,5 +366,320 @@ class TestT52VerdictSetUnchanged:
         assert result["verdict"] in ("PASS", "WARN", "FAIL")
 
 
+# ── T-64: evidence file missing → FAIL ──────────────────────────────────────
+
+class TestT64EvidenceFileMissing:
+    """T-64: Evidence file absent at verify time → FAIL with not-found error."""
+
+    def test_missing_evidence_file_returns_fail(self, tmp_path):
+        """When evidence file doesn't exist, verifier returns FAIL."""
+        from vibe_evidence_verifier import cmd_verify
+        import types
+
+        evidence_dir = tmp_path / "evidence"
+        evidence_dir.mkdir()
+        registry_dir = tmp_path / "registry"
+        registry_dir.mkdir()
+
+        args = types.SimpleNamespace(
+            command="verify",
+            evidence_dir=str(evidence_dir),
+            evidence_id="ev-nonexistent",
+            registry_dir=str(registry_dir),
+            json=True,
+        )
+
+        import io
+        import contextlib
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            cmd_verify(args)
+
+        result = json.loads(f.getvalue())
+        assert result["verdict"] == "FAIL"
+        assert any("not found" in e.lower() for e in result.get("errors", []))
+
+    def test_missing_evidence_file_has_empty_checks(self, tmp_path):
+        """When evidence file doesn't exist, checks list is empty."""
+        from vibe_evidence_verifier import cmd_verify
+        import types
+
+        evidence_dir = tmp_path / "evidence"
+        evidence_dir.mkdir()
+        registry_dir = tmp_path / "registry"
+        registry_dir.mkdir()
+
+        args = types.SimpleNamespace(
+            command="verify",
+            evidence_dir=str(evidence_dir),
+            evidence_id="ev-nonexistent",
+            registry_dir=str(registry_dir),
+            json=True,
+        )
+
+        import io
+        import contextlib
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            cmd_verify(args)
+
+        result = json.loads(f.getvalue())
+        assert result["checks"] == []
+
+
+# ── T-65: registry entry file missing at verify time ────────────────────────
+
+class TestT65RegistryEntryMissingAtVerify:
+    """T-65: Registry entry file absent at verify time → WARN for registry_entry check."""
+
+    def test_missing_registry_entry_file_warns(self, tmp_path):
+        """When registry entry file doesn't exist, registry_entry check is WARN."""
+        evidence = _make_evidence(dar_entries=[_valid_entry()])
+        evidence_dir = tmp_path / "evidence"
+        evidence_dir.mkdir(exist_ok=True)
+        evidence_file = evidence_dir / "ev-test.json"
+        evidence_file.write_text(json.dumps(evidence, ensure_ascii=False), encoding="utf-8")
+
+        # Empty registry dir — no entry files
+        registry_dir = tmp_path / "registry"
+        registry_dir.mkdir(exist_ok=True)
+
+        from vibe_evidence_verifier import cmd_verify
+        import types
+
+        args = types.SimpleNamespace(
+            command="verify",
+            evidence_dir=str(evidence_dir),
+            evidence_id="ev-test",
+            registry_dir=str(registry_dir),
+            json=True,
+        )
+
+        import io
+        import contextlib
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            cmd_verify(args)
+
+        result = json.loads(f.getvalue())
+        reg_check = None
+        for c in result.get("checks", []):
+            if c["name"] == "registry_entry":
+                reg_check = c
+                break
+        assert reg_check is not None
+        assert reg_check["result"] == "WARN"
+
+
+# ── T-66: malformed evidence JSON → FAIL ────────────────────────────────────
+
+class TestT66MalformedEvidenceJSON:
+    """T-66: Evidence file with malformed JSON → FAIL with not-found error."""
+
+    def test_malformed_json_returns_fail(self, tmp_path):
+        """Corrupted JSON in evidence file → verifier returns FAIL."""
+        evidence_dir = tmp_path / "evidence"
+        evidence_dir.mkdir()
+        evidence_file = evidence_dir / "ev-test.json"
+        evidence_file.write_text("{invalid json content", encoding="utf-8")
+
+        registry_dir = tmp_path / "registry"
+        registry_dir.mkdir()
+
+        from vibe_evidence_verifier import cmd_verify
+        import types
+
+        args = types.SimpleNamespace(
+            command="verify",
+            evidence_dir=str(evidence_dir),
+            evidence_id="ev-test",
+            registry_dir=str(registry_dir),
+            json=True,
+        )
+
+        import io
+        import contextlib
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            cmd_verify(args)
+
+        result = json.loads(f.getvalue())
+        assert result["verdict"] == "FAIL"
+        assert any("not found" in e.lower() for e in result.get("errors", []))
+
+    def test_empty_file_returns_fail(self, tmp_path):
+        """Empty evidence file → verifier returns FAIL."""
+        evidence_dir = tmp_path / "evidence"
+        evidence_dir.mkdir()
+        evidence_file = evidence_dir / "ev-test.json"
+        evidence_file.write_text("", encoding="utf-8")
+
+        registry_dir = tmp_path / "registry"
+        registry_dir.mkdir()
+
+        from vibe_evidence_verifier import cmd_verify
+        import types
+
+        args = types.SimpleNamespace(
+            command="verify",
+            evidence_dir=str(evidence_dir),
+            evidence_id="ev-test",
+            registry_dir=str(registry_dir),
+            json=True,
+        )
+
+        import io
+        import contextlib
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            cmd_verify(args)
+
+        result = json.loads(f.getvalue())
+        assert result["verdict"] == "FAIL"
+
+
+# ── T-67: malformed registry entry JSON → WARN ──────────────────────────────
+
+class TestT67MalformedRegistryJSON:
+    """T-67: Registry entry file with malformed JSON → WARN for registry_entry check."""
+
+    def test_malformed_registry_json_warns(self, tmp_path):
+        """Corrupted JSON in registry entry → registry_entry check is WARN."""
+        evidence = _make_evidence(dar_entries=[_valid_entry()])
+        evidence_dir = tmp_path / "evidence"
+        evidence_dir.mkdir(exist_ok=True)
+        evidence_file = evidence_dir / "ev-test.json"
+        evidence_file.write_text(json.dumps(evidence, ensure_ascii=False), encoding="utf-8")
+
+        # Write malformed registry entry
+        registry_dir = tmp_path / "registry"
+        registry_dir.mkdir(exist_ok=True)
+        entry_file = registry_dir / f"{evidence['workorder_id']}.json"
+        entry_file.write_text("{corrupted json", encoding="utf-8")
+
+        from vibe_evidence_verifier import cmd_verify
+        import types
+
+        args = types.SimpleNamespace(
+            command="verify",
+            evidence_dir=str(evidence_dir),
+            evidence_id="ev-test",
+            registry_dir=str(registry_dir),
+            json=True,
+        )
+
+        import io
+        import contextlib
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            cmd_verify(args)
+
+        result = json.loads(f.getvalue())
+        reg_check = None
+        for c in result.get("checks", []):
+            if c["name"] == "registry_entry":
+                reg_check = c
+                break
+        assert reg_check is not None
+        assert reg_check["result"] == "WARN"
+
+    def test_malformed_registry_dar_check_still_runs(self, tmp_path):
+        """Even with malformed registry entry, DAR check still runs on evidence."""
+        entry = _valid_entry()
+        evidence = _make_evidence(dar_entries=[entry])
+        evidence_dir = tmp_path / "evidence"
+        evidence_dir.mkdir(exist_ok=True)
+        evidence_file = evidence_dir / "ev-test.json"
+        evidence_file.write_text(json.dumps(evidence, ensure_ascii=False), encoding="utf-8")
+
+        # Write malformed registry entry
+        registry_dir = tmp_path / "registry"
+        registry_dir.mkdir(exist_ok=True)
+        entry_file = registry_dir / f"{evidence['workorder_id']}.json"
+        entry_file.write_text("not json", encoding="utf-8")
+
+        from vibe_evidence_verifier import cmd_verify
+        import types
+
+        args = types.SimpleNamespace(
+            command="verify",
+            evidence_dir=str(evidence_dir),
+            evidence_id="ev-test",
+            registry_dir=str(registry_dir),
+            json=True,
+        )
+
+        import io
+        import contextlib
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            cmd_verify(args)
+
+        result = json.loads(f.getvalue())
+        dar_check = _get_dar_check(result)
+        assert dar_check is not None, "DAR check should still run even with malformed registry"
+        assert dar_check["result"] == "PASS"
+
+
+# ── T-68: evidence directory completely empty ───────────────────────────────
+
+class TestT68EmptyEvidenceDir:
+    """T-68: Evidence directory exists but is completely empty → FAIL."""
+
+    def test_empty_evidence_dir_returns_fail(self, tmp_path):
+        """Empty evidence directory → FAIL with not-found."""
+        from vibe_evidence_verifier import cmd_verify
+        import types
+
+        evidence_dir = tmp_path / "evidence"
+        evidence_dir.mkdir()
+        registry_dir = tmp_path / "registry"
+        registry_dir.mkdir()
+
+        args = types.SimpleNamespace(
+            command="verify",
+            evidence_dir=str(evidence_dir),
+            evidence_id="ev-001",
+            registry_dir=str(registry_dir),
+            json=True,
+        )
+
+        import io
+        import contextlib
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            cmd_verify(args)
+
+        result = json.loads(f.getvalue())
+        assert result["verdict"] == "FAIL"
+
+
+# ── T-69: missing evidence_id arg ───────────────────────────────────────────
+
+class TestT69MissingEvidenceId:
+    """T-69: Missing --evidence-id → error."""
+
+    def test_missing_evidence_id_returns_error(self):
+        """No evidence_id → cmd_verify returns error code."""
+        from vibe_evidence_verifier import cmd_verify
+        import types
+
+        args = types.SimpleNamespace(
+            command="verify",
+            evidence_dir="/tmp/nonexistent",
+            evidence_id=None,
+            registry_dir="/tmp/nonexistent",
+            json=False,
+        )
+
+        import io
+        import contextlib
+        stderr_buf = io.StringIO()
+        with contextlib.redirect_stderr(stderr_buf):
+            ret = cmd_verify(args)
+
+        assert ret == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
