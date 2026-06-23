@@ -365,3 +365,133 @@ class TestNoImportCycle:
         """T-11c: vibe_safe_executor imports are standalone."""
         from vibe_safe_executor import generate_deferred_action_dry_run_plan
         assert callable(generate_deferred_action_dry_run_plan)
+
+
+# ── V1.21.20: Dedup + constant consolidation tests ──────────────────
+
+class TestRegistryDedup:
+    """T-12, T-13: Registry dedup by (approval_id, action)."""
+
+    def test_same_approval_id_action_returns_existing(self, tmp_path):
+        """T-12: Same approval_id + action → returns existing entry, no duplicate."""
+        eag = {
+            "verdict": "APPROVAL_BOUND",
+            "action": "delegate_task_dispatch",
+            "approval_id": "approval-dedup-test-001",
+            "detail": "ok",
+            "target_node": "debian",
+            "target_role": "leaf",
+        }
+        entry1 = register_deferred_action(
+            action="delegate_task_dispatch",
+            eag_result=eag,
+            repo_root=str(tmp_path),
+        )
+        assert entry1 is not None
+
+        # Second call with same approval_id + action
+        entry2 = register_deferred_action(
+            action="delegate_task_dispatch",
+            eag_result=eag,
+            repo_root=str(tmp_path),
+        )
+        assert entry2 is not None
+        # Should be the same entry (dedup)
+        assert entry1["workorder_id"] == entry2["workorder_id"]
+
+        # Verify only one file exists
+        registry_dir = tmp_path / ".vibe" / "deferred_registry"
+        files = list(registry_dir.glob("*.json"))
+        assert len(files) == 1
+
+    def test_different_approval_creates_new(self, tmp_path):
+        """T-13: Different approval_id → creates new entry."""
+        eag1 = {
+            "verdict": "APPROVAL_BOUND",
+            "action": "delegate_task_dispatch",
+            "approval_id": "approval-diff-001",
+            "detail": "ok",
+        }
+        eag2 = {
+            "verdict": "APPROVAL_BOUND",
+            "action": "delegate_task_dispatch",
+            "approval_id": "approval-diff-002",
+            "detail": "ok",
+        }
+        entry1 = register_deferred_action(
+            action="delegate_task_dispatch",
+            eag_result=eag1,
+            repo_root=str(tmp_path),
+        )
+        entry2 = register_deferred_action(
+            action="delegate_task_dispatch",
+            eag_result=eag2,
+            repo_root=str(tmp_path),
+        )
+        assert entry1 is not None
+        assert entry2 is not None
+        # Different approval_id → different entries
+        assert entry1["workorder_id"] != entry2["workorder_id"]
+
+        # Two files exist
+        registry_dir = tmp_path / ".vibe" / "deferred_registry"
+        files = list(registry_dir.glob("*.json"))
+        assert len(files) == 2
+
+    def test_same_approval_different_action_creates_new(self, tmp_path):
+        """T-13b: Same approval_id but different action → creates new entry."""
+        eag1 = {
+            "verdict": "APPROVAL_BOUND",
+            "action": "delegate_task_dispatch",
+            "approval_id": "approval-same-001",
+            "detail": "ok",
+        }
+        eag2 = {
+            "verdict": "APPROVAL_BOUND",
+            "action": "live_model_call",
+            "approval_id": "approval-same-001",
+            "detail": "ok",
+        }
+        entry1 = register_deferred_action(
+            action="delegate_task_dispatch",
+            eag_result=eag1,
+            repo_root=str(tmp_path),
+        )
+        entry2 = register_deferred_action(
+            action="live_model_call",
+            eag_result=eag2,
+            repo_root=str(tmp_path),
+        )
+        assert entry1 is not None
+        assert entry2 is not None
+        assert entry1["workorder_id"] != entry2["workorder_id"]
+        assert entry1["action"] == "delegate_task_dispatch"
+        assert entry2["action"] == "live_model_call"
+
+
+class TestConstantConsolidation:
+    """T-14: DEFERRED_ACTION_TYPES imported from canonical source."""
+
+    def test_safe_executor_imports_from_registry(self):
+        """T-14: vibe_safe_executor.DEFERRED_ACTION_TYPES is the same object as registry's."""
+        from vibe_workorder_registry import DEFERRED_ACTION_TYPES as REG_TYPES
+        from vibe_safe_executor import DEFERRED_ACTION_TYPES as SAFE_TYPES
+        # Should be the same set (imported, not duplicated)
+        assert SAFE_TYPES == REG_TYPES
+        assert SAFE_TYPES is REG_TYPES
+
+    def test_intake_gate_imports_from_registry(self):
+        """T-14b: conversational_intake_gate imports from registry."""
+        from vibe_workorder_registry import DEFERRED_ACTION_TYPES as REG_TYPES
+        from conversational_intake_gate import _DEFERRED_ACTION_TYPES as INTAKE_TYPES
+        assert INTAKE_TYPES == REG_TYPES
+
+
+class TestExistingTestsUnaffected:
+    """T-15: Existing T-01~T-11 still pass (verified by scoped pytest run)."""
+
+    def test_deferred_types_consistent(self):
+        """T-15: DEFERRED_ACTION_TYPES consistent across all modules."""
+        from vibe_workorder_registry import DEFERRED_ACTION_TYPES as REG
+        from vibe_safe_executor import DEFERRED_ACTION_TYPES as SAFE
+        assert REG == SAFE == {"delegate_task_dispatch", "live_model_call", "service_admin_uac"}

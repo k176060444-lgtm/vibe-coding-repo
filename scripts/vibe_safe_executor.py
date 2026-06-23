@@ -241,11 +241,15 @@ def main(argv=None):
 
 # ── V1.21.19: Deferred action dry-run plan generation ───────────────
 
-DEFERRED_ACTION_TYPES = {
-    "delegate_task_dispatch",
-    "live_model_call",
-    "service_admin_uac",
-}
+# V1.21.20: Import canonical DEFERRED_ACTION_TYPES from registry
+try:
+    from vibe_workorder_registry import DEFERRED_ACTION_TYPES
+except ImportError:
+    DEFERRED_ACTION_TYPES = {
+        "delegate_task_dispatch",
+        "live_model_call",
+        "service_admin_uac",
+    }
 
 
 def generate_deferred_action_dry_run_plan(action, entry):
