@@ -44,6 +44,7 @@ __version__ = "1.3.0"
 import argparse
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone
 
@@ -79,6 +80,29 @@ except ImportError:
     _EAG_ACTION_SPECIFIC_ACTIONS = set()
     _EXECUTION_APPROVAL_GATE_AVAILABLE = False
     _EAG_KNOWN_BLOCK_VERDICTS = set()
+
+# ── EAG result persistence (V1.21.17) ────────────────────────────────
+
+_EAG_RESULT_DIR = ".vibe"
+_EAG_RESULT_FILE = "eag_result.json"
+
+
+def write_eag_result(eag_result, repo_root=None):
+    """Persist EAG result to .vibe/eag_result.json for report auto-discovery.
+
+    Graceful: never raises — write failures are silently ignored.
+    """
+    try:
+        if repo_root is None:
+            repo_root = os.getcwd()
+        vibe_dir = os.path.join(repo_root, _EAG_RESULT_DIR)
+        os.makedirs(vibe_dir, exist_ok=True)
+        result_path = os.path.join(vibe_dir, _EAG_RESULT_FILE)
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(eag_result, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # Graceful — never affects gate verdict
+
 
 # ── Verdicts ──────────────────────────────────────────────────────────
 
@@ -498,6 +522,8 @@ def check_action_allowed(action: str, state: str, approval: dict = None,
                         f"Action blocked (fail-closed)."
                     ),
                 }
+            # V1.21.17: Persist EAG result for report auto-discovery
+            write_eag_result(eag_result)
             eag_verdict = eag_result.get("verdict", "")
             # Map EAG verdicts to intake gate verdicts
             if eag_verdict == "PASS_READ_ONLY":
