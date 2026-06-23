@@ -356,9 +356,15 @@ def run_report(repo_root=None, jobs_dir=None, eag_result=None):
             "overall_health": loop_summary.get("overall_health"),
         },
         "operator_snapshot": {
-            "overall": operator_snapshot.get("overall_status", "unknown"),
+            "repo": operator_snapshot.get("repo", {}),
+            "jobs_summary": operator_snapshot.get("jobs_summary", {}),
+            "locks": operator_snapshot.get("locks", []),
+            "recommended_next_action": operator_snapshot.get("recommended_next_action", "unknown"),
+            "warnings": operator_snapshot.get("warnings", []),
         },
-        "evidence_verifier": {"status": "available"},
+        "evidence_verifier": {
+            "status": "available" if (Path(repo_root) / "scripts" / "vibe_evidence_verifier.py").is_file() else "unavailable",
+        },
         "audit_lock": audit_lock,
         "pr_summary": pr_summary,
         "new_freeze_baseline": origin_main.get("sha", "unknown"),
@@ -406,6 +412,57 @@ def run_report(repo_root=None, jobs_dir=None, eag_result=None):
         result['verifier_deferred_result'] = verifier_deferred
 
     return result
+
+
+def render_dar_section(result):
+    """Render Deferred Action Registry markdown section.
+
+    Unified rendering for run_report markdown and export snapshot.
+    Returns empty string if no deferred_action_registry present.
+    """
+    dar = result.get("deferred_action_registry")
+    if not dar:
+        return ""
+    lines = ["## Deferred Action Registry"]
+    lines.append("- %d deferred action(s) registered" % len(dar))
+    for entry in dar:
+        action = entry.get("action", "?")
+        wid = entry.get("workorder_id", "?")
+        approval_id = entry.get("approval_id", "")
+        risk = entry.get("risk_level", "low")
+        dedicated = entry.get("dedicated_approval", False)
+        real = "yes" if entry.get("real_execution") else "no"
+        warn = " ⚠️ dedicated/critical visibility only" if dedicated else ""
+        lines.append("- `%s` | wo=`%s` | approval=`%s` | risk=%s | real_exec=%s%s" % (
+            action, wid, approval_id, risk, real, warn))
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_vdr_section(result):
+    """Render Verifier Deferred Registry markdown section.
+
+    Unified rendering for run_report markdown and export snapshot.
+    Returns empty string if no verifier_deferred_result present.
+    """
+    vdr = result.get("verifier_deferred_result")
+    if not vdr:
+        return ""
+    lines = ["## Verifier Deferred Registry"]
+    vdr_result = vdr.get("result", "UNKNOWN")
+    vdr_detail = vdr.get("detail", "")
+    if vdr_result == "PASS":
+        lines.append("- ✅ %s" % vdr_detail)
+    elif vdr_result == "WARN":
+        lines.append("- ⚠️ %s" % vdr_detail)
+        for w in vdr.get("warnings", []):
+            lines.append("  - %s" % w)
+    elif vdr_result == "FAIL":
+        lines.append("- ❌ %s" % vdr_detail)
+        for e in vdr.get("errors", []):
+            lines.append("  - %s" % e)
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _format_markdown(result):
@@ -469,36 +526,16 @@ def _format_markdown(result):
                 lines.append("- ⚠️ CRITICAL risk level required")
         lines.append("")
 
-    # V1.21.21: Deferred Action Registry
-    dar = result.get("deferred_action_registry")
-    if dar:
-        lines.append("## Deferred Action Registry")
-        lines.append("- %d deferred action(s) registered" % len(dar))
-        for entry in dar:
-            action = entry.get("action", "unknown")
-            approval_id = entry.get("approval_id", "")
-            risk = entry.get("risk_level", "low")
-            dedicated = entry.get("dedicated_approval", False)
-            warn = " ⚠️ dedicated/critical" if dedicated and action == "service_admin_uac" else ""
-            lines.append("- `%s` | approval: `%s` | risk: %s%s" % (action, approval_id, risk, warn))
+    # V1.21.21+V1.21.25A: Deferred Action Registry (unified rendering)
+    dar_section = render_dar_section(result)
+    if dar_section:
+        lines.append(dar_section.rstrip())
         lines.append("")
 
-    # V1.21.24: Verifier Deferred Registry Result
-    vdr = result.get("verifier_deferred_result")
-    if vdr:
-        lines.append("## Verifier Deferred Registry")
-        vdr_result = vdr.get("result", "UNKNOWN")
-        vdr_detail = vdr.get("detail", "")
-        if vdr_result == "PASS":
-            lines.append("- ✅ %s" % vdr_detail)
-        elif vdr_result == "WARN":
-            lines.append("- ⚠️ %s" % vdr_detail)
-            for w in vdr.get("warnings", []):
-                lines.append("  - %s" % w)
-        elif vdr_result == "FAIL":
-            lines.append("- ❌ %s" % vdr_detail)
-            for e in vdr.get("errors", []):
-                lines.append("  - %s" % e)
+    # V1.21.24+V1.21.25A: Verifier Deferred Registry Result (unified rendering)
+    vdr_section = render_vdr_section(result)
+    if vdr_section:
+        lines.append(vdr_section.rstrip())
         lines.append("")
 
     # Baseline
