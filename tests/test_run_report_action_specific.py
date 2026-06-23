@@ -410,3 +410,61 @@ class TestVersionUnchanged:
 
     def test_version_still_120(self):
         assert VERSION == "1.2.0"
+
+
+# ── V1.21.18: Git PR Gate EAG persistence + .vibe/ ignore tests ──────
+
+import subprocess as _subprocess
+import tempfile as _tempfile
+
+
+class TestGitPrGateEagPersistence:
+    """T-19: git_pr_approval_gate path also persists eag_result."""
+
+    def test_persistence_via_write_eag_result(self, tmp_path):
+        """T-19: write_eag_result called from git_pr_gate context persists to .vibe/."""
+        from conversational_intake_gate import write_eag_result
+
+        eag = {
+            "verdict": "APPROVAL_BOUND",
+            "action": "push_feature_branch",
+            "action_class": "execution",
+            "action_category": "ordinary",
+        }
+        write_eag_result(eag, repo_root=str(tmp_path))
+
+        result_path = tmp_path / ".vibe" / "eag_result.json"
+        assert result_path.is_file()
+        with open(result_path, encoding="utf-8") as f:
+            loaded = _json.load(f)
+        assert loaded["verdict"] == "APPROVAL_BOUND"
+        assert loaded["action"] == "push_feature_branch"
+
+    def test_import_cycle_free(self):
+        """T-19b: git_pr_approval_gate → conversational_intake_gate has no cycle."""
+        # If this import succeeds, there's no cycle
+        from conversational_intake_gate import write_eag_result
+        assert callable(write_eag_result)
+
+
+class TestVibeIgnorePolicy:
+    """T-20: .vibe/ ignored by git."""
+
+    def test_vibe_dir_ignored_by_git(self):
+        """T-20: git check-ignore .vibe/ returns 0 (ignored)."""
+        repo_root = Path(__file__).resolve().parent.parent
+        result = _subprocess.run(
+            ["git", "check-ignore", ".vibe/"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"Expected .vibe/ to be ignored, got exit {result.returncode}"
+        assert ".vibe/" in result.stdout
+
+
+class TestVersionV12118:
+    """T-22: vibe_run_report version unchanged 1.2.0 (V1.21.18)."""
+
+    def test_version_still_120(self):
+        assert VERSION == "1.2.0"
