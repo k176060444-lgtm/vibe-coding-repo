@@ -212,6 +212,43 @@ def _collect_action_specific(eag_result):
     return section
 
 
+def _collect_deferred_registry(repo_root):
+    """Collect deferred registry summary from .vibe/deferred_registry/*.json.
+
+    Returns list of summary dicts, or empty list if no entries / dir missing.
+    Graceful fallback: bad JSON, missing fields, IO errors are skipped.
+    """
+    registry_dir = Path(repo_root) / ".vibe" / "deferred_registry"
+    if not registry_dir.is_dir():
+        return []
+
+    entries = []
+    for f in sorted(registry_dir.glob("*.json")):
+        if f.name.startswith("."):
+            continue
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (json.JSONDecodeError, IOError, OSError):
+            continue
+
+        entry = {
+            "action": raw.get("action", "unknown"),
+            "approval_id": raw.get("approval_id", ""),
+            "workorder_id": raw.get("workorder_id", ""),
+            "risk_level": raw.get("risk_level", "low"),
+            "dedicated_approval": raw.get("dedicated_approval", False),
+            "registry_only": raw.get("registry_only", True),
+            "dry_run_only": raw.get("dry_run_only", True),
+            "real_execution": False,
+            "created_at": raw.get("created_at", ""),
+            "history_digest": raw.get("history_digest", ""),
+        }
+        entries.append(entry)
+
+    return entries
+
+
 def run_report(repo_root=None, jobs_dir=None, eag_result=None):
     """Generate run report."""
     if repo_root is None:
@@ -309,6 +346,11 @@ def run_report(repo_root=None, jobs_dir=None, eag_result=None):
     if action_specific:
         result['action_specific_approval'] = action_specific
 
+    # V1.21.21: Collect deferred registry entries
+    deferred_entries = _collect_deferred_registry(repo_root)
+    if deferred_entries:
+        result['deferred_action_registry'] = deferred_entries
+
     return result
 
 
@@ -371,6 +413,20 @@ def _format_markdown(result):
                 lines.append("- ⚠️ Dedicated approval required")
             if asa.get("service_admin_critical_required"):
                 lines.append("- ⚠️ CRITICAL risk level required")
+        lines.append("")
+
+    # V1.21.21: Deferred Action Registry
+    dar = result.get("deferred_action_registry")
+    if dar:
+        lines.append("## Deferred Action Registry")
+        lines.append("- %d deferred action(s) registered" % len(dar))
+        for entry in dar:
+            action = entry.get("action", "unknown")
+            approval_id = entry.get("approval_id", "")
+            risk = entry.get("risk_level", "low")
+            dedicated = entry.get("dedicated_approval", False)
+            warn = " ⚠️ dedicated/critical" if dedicated and action == "service_admin_uac" else ""
+            lines.append("- `%s` | approval: `%s` | risk: %s%s" % (action, approval_id, risk, warn))
         lines.append("")
 
     # Baseline
@@ -454,6 +510,11 @@ def _format_compact(result):
         if asa_code:
             asa_part += "(%s)" % asa_code
         base += " | " + asa_part
+    # V1.21.21: Append DAR info if present
+    dar = result.get("deferred_action_registry")
+    if dar:
+        actions = sorted(set(e.get("action", "?") for e in dar))
+        base += " | DAR:%d (%s)" % (len(dar), ", ".join(actions))
     return base
 
 
