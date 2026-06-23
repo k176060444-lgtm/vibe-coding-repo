@@ -81,6 +81,18 @@ except ImportError:
     _EXECUTION_APPROVAL_GATE_AVAILABLE = False
     _EAG_KNOWN_BLOCK_VERDICTS = set()
 
+# V1.21.19: Deferred action registry glue
+try:
+    from vibe_workorder_registry import (
+        register_deferred_action as _register_deferred_action,
+        DEFERRED_ACTION_TYPES as _DEFERRED_ACTION_TYPES,
+    )
+    _DEFERRED_ACTION_REGISTRY_AVAILABLE = True
+except ImportError:
+    _register_deferred_action = None
+    _DEFERRED_ACTION_TYPES = set()
+    _DEFERRED_ACTION_REGISTRY_AVAILABLE = False
+
 # ── EAG result persistence (V1.21.17) ────────────────────────────────
 
 _EAG_RESULT_DIR = ".vibe"
@@ -535,6 +547,14 @@ def check_action_allowed(action: str, state: str, approval: dict = None,
             if eag_verdict == "APPROVAL_BOUND":
                 # EAG approved — also check intake state
                 if state == "APPROVED" and approval and approval.get("approved"):
+                    # V1.21.19: Registry glue for deferred actions
+                    if (_DEFERRED_ACTION_REGISTRY_AVAILABLE
+                            and action in _DEFERRED_ACTION_TYPES):
+                        _register_deferred_action(
+                            action=action,
+                            eag_result=eag_result,
+                            approval=approval,
+                        )
                     return {
                         "allowed": True,
                         "verdict": VERDICT_APPROVED_FOR_EXECUTION,
