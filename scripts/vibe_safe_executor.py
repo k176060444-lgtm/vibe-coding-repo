@@ -239,5 +239,88 @@ def main(argv=None):
         parser.print_help()
         return 0
 
+# ── V1.21.19: Deferred action dry-run plan generation ───────────────
+
+DEFERRED_ACTION_TYPES = {
+    "delegate_task_dispatch",
+    "live_model_call",
+    "service_admin_uac",
+}
+
+
+def generate_deferred_action_dry_run_plan(action, entry):
+    """Generate a dry-run execution plan for a deferred action.
+
+    Returns a plan dict describing what WOULD happen if real execution were enabled.
+    Never performs real execution — plan text only.
+
+    Args:
+        action: Deferred action type
+        entry: Work Order registry entry dict
+
+    Returns:
+        Plan dict with steps, total_steps, estimated_duration, reversible, notes.
+        Returns None if action is not a deferred action type.
+    """
+    if action not in DEFERRED_ACTION_TYPES:
+        return None
+    if entry is None:
+        return None
+
+    base_steps = [
+        {"step": 1, "action": "validate-registry", "description": "Verify registry entry status is 'approved'"},
+        {"step": 2, "action": "validate-approval", "description": "Verify approval binding and EAG verdict"},
+    ]
+
+    if action == "delegate_task_dispatch":
+        target_node = entry.get("target_node", "any")
+        target_role = entry.get("target_role", "leaf")
+        model_plan = entry.get("model_plan", "unspecified")
+        action_steps = [
+            {"step": 3, "action": "plan-worktree", "description": f"Would create isolated worktree for {target_node} worker"},
+            {"step": 4, "action": "plan-dispatch", "description": f"Would dispatch task to {target_node}/{target_role} with model_plan={model_plan}"},
+            {"step": 5, "action": "plan-monitor", "description": "Would monitor worker progress and collect evidence"},
+        ]
+        notes = f"DRY-RUN: Would dispatch to {target_node} node, role={target_role}, model_plan={model_plan}. No real worker dispatch."
+    elif action == "live_model_call":
+        provider = entry.get("provider", "unspecified")
+        model = entry.get("model", "unspecified")
+        budget_policy = entry.get("budget_policy", "unspecified")
+        action_steps = [
+            {"step": 3, "action": "plan-budget-check", "description": f"Would verify budget_policy={budget_policy} allows call"},
+            {"step": 4, "action": "plan-model-call", "description": f"Would call {provider}/{model} with approved parameters"},
+            {"step": 5, "action": "plan-response-capture", "description": "Would capture model response and log to evidence"},
+        ]
+        notes = f"DRY-RUN: Would call {provider}/{model}, budget={budget_policy}. No real model API call."
+    elif action == "service_admin_uac":
+        target_service = entry.get("target_service", "unspecified")
+        change_type = entry.get("change_type", "unspecified")
+        action_steps = [
+            {"step": 3, "action": "plan-pre-check", "description": f"Would verify {target_service} health before {change_type}"},
+            {"step": 4, "action": "plan-service-change", "description": f"Would execute {change_type} on {target_service} (CRITICAL)"},
+            {"step": 5, "action": "plan-post-check", "description": f"Would verify {target_service} health after {change_type}"},
+            {"step": 6, "action": "plan-rollback-ready", "description": "Would prepare rollback plan for immediate revert"},
+        ]
+        notes = f"DRY-RUN: Would {change_type} on {target_service} (CRITICAL + dedicated approval required). No real service action."
+    else:
+        return None
+
+    all_steps = base_steps + action_steps
+    return {
+        "action": action,
+        "workorder_id": entry.get("workorder_id", ""),
+        "steps": all_steps,
+        "total_steps": len(all_steps),
+        "estimated_duration": "<1s (dry-run)",
+        "reversible": True,
+        "real_execution": False,
+        "registry_only": True,
+        "dry_run_only": True,
+        "risk_level": entry.get("risk_level", "low"),
+        "dedicated_approval": entry.get("dedicated_approval", False),
+        "notes": notes,
+    }
+
+
 if __name__ == "__main__":
     sys.exit(main())
