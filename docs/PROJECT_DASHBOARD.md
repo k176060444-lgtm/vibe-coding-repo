@@ -2,7 +2,8 @@
 
 **Last Updated**: 2026-06-24
 **Baseline**: `github/main = c4b351e520acef39eb7061b8bcd3f2e8f999d715`
-**Total PRs Merged**: 217
+**Latest Merged PR**: #217
+**Merged PR Count**: 210 (range #1–#217, 6 closed without merge, 2 open)
 **Router Version**: v2.17.0
 
 ---
@@ -12,8 +13,9 @@
 | Metric | Status |
 |--------|--------|
 | **Main Sync** | ✅ YES (local github/main = remote) |
-| **Test Suite** | ✅ 1135 passed / 6 pre-existing failures / 2 xfailed (1149 collected) |
+| **Test Suite** | ✅ 1135 passed / 6 pre-existing failures / 2 xfailed (1149 collected = 1135 + 6 + 2 + 6 errors) |
 | **Pre-existing Failures** | `scripts/test_ledger_gate_integration.py` (5), `scripts/test_repair_concurrency.py` (1) |
+| **Pre-existing Errors** | `scripts/test_batch_plan_e2e.py` (6 collection/setup errors — never ran) |
 | **Known Flake** | `tests/test_v1172.py::test_corruption_latch_blocks` (ordering-dependent, passes standalone) |
 
 ---
