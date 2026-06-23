@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # V1.20.7: Report status gate integration
 try:
@@ -171,7 +171,48 @@ def _determine_next_action(quality_gate, audit_lock):
     return "UNKNOWN: Unable to determine status."
 
 
-def run_report(repo_root=None, jobs_dir=None):
+def _collect_action_specific(eag_result):
+    """Extract action-specific audit fields from EAG check result.
+
+    Args:
+        eag_result: dict returned by check_execution_approval() (V1.21.15+)
+
+    Returns:
+        dict with action_specific_approval section, or None if no eag_result.
+    """
+    if not eag_result:
+        return None
+
+    action = eag_result.get("action", "unknown")
+    action_category = eag_result.get("action_category", "ordinary")
+
+    section = {
+        "action": action,
+        "action_category": action_category,
+        "verdict": eag_result.get("verdict", "UNKNOWN"),
+    }
+
+    # Only include detailed fields for action_specific actions
+    if action_category == "action_specific":
+        section["action_specific_required_fields"] = eag_result.get(
+            "action_specific_required_fields", []
+        )
+        section["missing_fields"] = eag_result.get("missing_fields", [])
+        section["invalid_fields"] = eag_result.get("invalid_fields", [])
+        section["dedicated_approval_required"] = eag_result.get(
+            "dedicated_approval_required", False
+        )
+        section["service_admin_critical_required"] = eag_result.get(
+            "service_admin_critical_required", False
+        )
+        blocked_code = eag_result.get("blocked_reason_code")
+        if blocked_code:
+            section["blocked_reason_code"] = blocked_code
+
+    return section
+
+
+def run_report(repo_root=None, jobs_dir=None, eag_result=None):
     """Generate run report."""
     if repo_root is None:
         repo_root = Path.cwd()
@@ -253,6 +294,11 @@ def run_report(repo_root=None, jobs_dir=None):
     elif not _REPORT_STATUS_GATE_AVAILABLE:
         result['ledger_gate'] = {'result': 'GATE_UNAVAILABLE', 'warning': 'vibe_report_status_gate not importable'}
 
+    # V1.21.16: Collect action-specific audit fields from EAG result
+    action_specific = _collect_action_specific(eag_result)
+    if action_specific:
+        result['action_specific_approval'] = action_specific
+
     return result
 
 
@@ -292,6 +338,29 @@ def _format_markdown(result):
         if ledger.get("errors"):
             for e in ledger["errors"][:3]:
                 lines.append("  - %s" % e)
+        lines.append("")
+
+    # V1.21.16: Action-Specific Approval
+    asa = result.get("action_specific_approval")
+    if asa:
+        lines.append("## Action-Specific Approval")
+        asa_action = asa.get("action", "unknown")
+        asa_category = asa.get("action_category", "unknown")
+        asa_verdict = asa.get("verdict", "UNKNOWN")
+        asa_icon = "✅" if "PASS" in asa_verdict or "APPROVAL_BOUND" == asa_verdict else "❌"
+        lines.append("- %s **%s** [%s]" % (asa_icon, asa_verdict, asa_category))
+        lines.append("- Action: `%s`" % asa_action)
+        if asa_category == "action_specific":
+            if asa.get("blocked_reason_code"):
+                lines.append("- Blocked reason: `%s`" % asa["blocked_reason_code"])
+            if asa.get("missing_fields"):
+                lines.append("- Missing fields: %s" % ", ".join("`%s`" % f for f in asa["missing_fields"]))
+            if asa.get("invalid_fields"):
+                lines.append("- Invalid fields: %s" % "; ".join(asa["invalid_fields"]))
+            if asa.get("dedicated_approval_required"):
+                lines.append("- ⚠️ Dedicated approval required")
+            if asa.get("service_admin_critical_required"):
+                lines.append("- ⚠️ CRITICAL risk level required")
         lines.append("")
 
     # Baseline
@@ -364,8 +433,18 @@ def _format_compact(result):
     pr = result.get("pr_summary", {})
     pr_str = "#%s" % pr.get("number", "?") if pr.get("number") else "none"
     v1f = result.get("v1_freeze", {}).get("verdict", "?")
-    return "QG:%s Smoke:%s Audit:%s Baseline:%s PR:%s V1:%s | %s" % (
+    base = "QG:%s Smoke:%s Audit:%s Baseline:%s PR:%s V1:%s | %s" % (
         qg, smoke, audit, baseline, pr_str, v1f, result.get("operator_summary", "")[:60])
+    # V1.21.16: Append ASA info if present
+    asa = result.get("action_specific_approval")
+    if asa:
+        asa_cat = asa.get("action_category", "?")
+        asa_code = asa.get("blocked_reason_code")
+        asa_part = "ASA:%s" % asa_cat
+        if asa_code:
+            asa_part += "(%s)" % asa_code
+        base += " | " + asa_part
+    return base
 
 
 def build_parser():
@@ -379,6 +458,7 @@ def build_parser():
     parser.add_argument("--compact", action="store_true", help="Compact one-liner output")
     parser.add_argument("--repo-root", help="Repository root (default: cwd)")
     parser.add_argument("--jobs-dir", help="Jobs directory (default: ~/vibedev/jobs)")
+    parser.add_argument("--eag-result", dest="eag_result_file", help="Path to EAG result JSON (optional, for action-specific audit)")
     return parser
 
 
@@ -387,9 +467,15 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    eag_result = None
+    if args.eag_result_file:
+        with open(args.eag_result_file, encoding="utf-8") as f:
+            eag_result = json.load(f)
+
     result = run_report(
         repo_root=args.repo_root or Path(__file__).parent.parent,
         jobs_dir=args.jobs_dir,
+        eag_result=eag_result,
     )
 
     if args.json:
