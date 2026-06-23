@@ -58,6 +58,7 @@ OPTIONAL_SECTIONS = [
     "execution_approval",
     "action_specific_approval",
     "deferred_action_registry",
+    "verifier_deferred_result",
 ]
 
 

@@ -66,6 +66,28 @@ def _export_kind(script_dir, kind):
                     stdout += "".join(_lines)
             except Exception:
                 pass  # Graceful fallback — deferred section not appended
+        # V1.21.24: Append verifier deferred result section to snapshot
+        if rc == 0 and stdout and _run_report is not None:
+            try:
+                _rr2 = _run_report(repo_root=script_dir.parent)
+                _vdr = _rr2.get("verifier_deferred_result") if _rr2 else None
+                if _vdr:
+                    _vdr_result = _vdr.get("result", "UNKNOWN")
+                    _vdr_detail = _vdr.get("detail", "")
+                    _vlines = ["\n## Verifier Deferred Registry\n"]
+                    if _vdr_result == "PASS":
+                        _vlines.append("- ✅ %s\n" % _vdr_detail)
+                    elif _vdr_result == "WARN":
+                        _vlines.append("- ⚠️ %s\n" % _vdr_detail)
+                        for _w in _vdr.get("warnings", []):
+                            _vlines.append("  - %s\n" % _w)
+                    elif _vdr_result == "FAIL":
+                        _vlines.append("- ❌ %s\n" % _vdr_detail)
+                        for _e2 in _vdr.get("errors", []):
+                            _vlines.append("  - %s\n" % _e2)
+                    stdout += "".join(_vlines)
+            except Exception:
+                pass  # Graceful fallback — verifier deferred section not appended
         filename = "snapshot_%s.md" % timestamp
     elif kind == "release-notes":
         rc, stdout, stderr = _run_script(script_dir / "vibe_release_notes.py", ["--compact"])

@@ -249,6 +249,55 @@ def _collect_deferred_registry(repo_root):
     return entries
 
 
+def _collect_verifier_deferred_result(repo_root):
+    """Collect deferred_action_registry_consistency check from evidence verifier.
+
+    Returns dict with check result (name/result/detail/errors/warnings) or None.
+    Consumes verifier output only — does NOT re-parse .vibe/deferred_registry.
+    Graceful fallback: verifier unavailable, no evidence, no check → None.
+    """
+    verifier_script = Path(repo_root) / "scripts" / "vibe_evidence_verifier.py"
+    if not verifier_script.is_file():
+        return None
+
+    evidence_dir = Path(repo_root) / ".vibe" / "evidence"
+    registry_dir = Path(repo_root) / ".vibe" / "registry"
+    if not evidence_dir.is_dir() or not registry_dir.is_dir():
+        return None
+
+    # Find latest evidence file
+    evidence_files = sorted(evidence_dir.glob("ev-*.json"))
+    if not evidence_files:
+        return None
+    latest_evidence_id = evidence_files[-1].stem  # e.g. "ev-001"
+
+    try:
+        import subprocess as _sp
+        result = _sp.run(
+            [sys.executable, str(verifier_script), "verify",
+             "--evidence-dir", str(evidence_dir),
+             "--registry-dir", str(registry_dir),
+             "--evidence-id", latest_evidence_id,
+             "--json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode not in (0, 1):
+            return None
+        data = json.loads(result.stdout)
+        for check in data.get("checks", []):
+            if check.get("name") == "deferred_action_registry_consistency":
+                return {
+                    "name": check["name"],
+                    "result": check["result"],
+                    "detail": check.get("detail", ""),
+                    "errors": check.get("errors", []),
+                    "warnings": check.get("warnings", []),
+                }
+    except Exception:
+        pass
+    return None
+
+
 def run_report(repo_root=None, jobs_dir=None, eag_result=None):
     """Generate run report."""
     if repo_root is None:
@@ -351,6 +400,11 @@ def run_report(repo_root=None, jobs_dir=None, eag_result=None):
     if deferred_entries:
         result['deferred_action_registry'] = deferred_entries
 
+    # V1.21.24: Collect verifier deferred result
+    verifier_deferred = _collect_verifier_deferred_result(repo_root)
+    if verifier_deferred:
+        result['verifier_deferred_result'] = verifier_deferred
+
     return result
 
 
@@ -427,6 +481,24 @@ def _format_markdown(result):
             dedicated = entry.get("dedicated_approval", False)
             warn = " ⚠️ dedicated/critical" if dedicated and action == "service_admin_uac" else ""
             lines.append("- `%s` | approval: `%s` | risk: %s%s" % (action, approval_id, risk, warn))
+        lines.append("")
+
+    # V1.21.24: Verifier Deferred Registry Result
+    vdr = result.get("verifier_deferred_result")
+    if vdr:
+        lines.append("## Verifier Deferred Registry")
+        vdr_result = vdr.get("result", "UNKNOWN")
+        vdr_detail = vdr.get("detail", "")
+        if vdr_result == "PASS":
+            lines.append("- ✅ %s" % vdr_detail)
+        elif vdr_result == "WARN":
+            lines.append("- ⚠️ %s" % vdr_detail)
+            for w in vdr.get("warnings", []):
+                lines.append("  - %s" % w)
+        elif vdr_result == "FAIL":
+            lines.append("- ❌ %s" % vdr_detail)
+            for e in vdr.get("errors", []):
+                lines.append("  - %s" % e)
         lines.append("")
 
     # Baseline
@@ -515,6 +587,10 @@ def _format_compact(result):
     if dar:
         actions = sorted(set(e.get("action", "?") for e in dar))
         base += " | DAR:%d (%s)" % (len(dar), ", ".join(actions))
+    # V1.21.24: Append VDR info if present
+    vdr = result.get("verifier_deferred_result")
+    if vdr:
+        base += " | VDR:%s" % vdr.get("result", "?")
     return base
 
 
