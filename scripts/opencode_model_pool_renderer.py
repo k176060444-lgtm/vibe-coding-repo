@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from opencode_config_renderer import render_config
 from opencode_model_pool import KNOWN_QUARANTINE, KNOWN_MODELS_SEED, ModelPool
+from credential_status_resolver import resolve_credential, validate_secret_ref
 
 # --- Constants ---
 
@@ -54,11 +55,14 @@ DANGEROUS_KEY_PATTERNS = [
 # --- Enrichment ---
 
 
-def enrich_model_entry(entry: dict) -> dict:
+def enrich_model_entry(entry: dict, resolver_backend: str = None,
+                       resolver_fixture: dict = None,
+                       resolver_fixture_path: str = None) -> dict:
     """Enrich a pool model entry with fields required by the renderer.
 
     Conservative approach:
-    - credential_status: use existing if present; otherwise infer cautiously
+    - credential_status: use existing if present and valid/expired;
+      otherwise try resolver if available; fallback to heuristic
     - quarantine_status: map from KNOWN_QUARANTINE; default "none"
     - secret_ref: generate placeholder from provider+alias
     - protocol: default "openai-compatible"
@@ -78,28 +82,43 @@ def enrich_model_entry(entry: dict) -> dict:
         else:
             enriched["quarantine_status"] = "none"
 
-    # credential_status: conservative
-    if "credential_status" not in enriched:
-        source_flags = set(enriched.get("source_flags", []))
-        cost_tag = enriched.get("cost_tag", "unknown")
-
-        if "opencode-free" in source_flags or "opencode_discovered" in source_flags:
-            # Free/discovered models don't need credentials
-            enriched["credential_status"] = "not-configured"
-        elif cost_tag == "free":
-            # Free models generally don't need credentials
-            enriched["credential_status"] = "not-configured"
-        else:
-            # Paid/user_configured: we don't know if credentials are valid
-            # Conservative: mark as missing so it goes to non_available_summary
-            # unless the entry explicitly says otherwise
-            enriched["credential_status"] = "missing"
-
     # secret_ref: generate placeholder if not present
     if "secret_ref" not in enriched:
         provider = enriched.get("provider", "unknown")
         alias = enriched.get("alias", enriched.get("model_id", "unknown"))
         enriched["secret_ref"] = f"secret:{provider}:{alias}"
+
+    # credential_status: use resolver if available, fallback to heuristic
+    current_cred = enriched.get("credential_status")
+    needs_resolution = current_cred is None or current_cred in ("missing", "unknown")
+
+    if needs_resolution and resolver_backend and enriched.get("secret_ref"):
+        # Try resolver
+        try:
+            resolved = resolve_credential(
+                enriched["secret_ref"],
+                backend=resolver_backend,
+                fixture_data=resolver_fixture,
+                fixture_path=resolver_fixture_path,
+            )
+            resolved_status = resolved.get("credential_status", "unknown")
+            if resolved_status != "unknown":
+                enriched["credential_status"] = resolved_status
+                enriched["credential_metadata"] = resolved.get("metadata", {})
+        except (ValueError, RuntimeError):
+            pass  # Resolver failed, fall through to heuristic
+
+    # Fallback heuristic if still no credential_status
+    if "credential_status" not in enriched or enriched["credential_status"] is None:
+        source_flags = set(enriched.get("source_flags", []))
+        cost_tag = enriched.get("cost_tag", "unknown")
+
+        if "opencode-free" in source_flags or "opencode_discovered" in source_flags:
+            enriched["credential_status"] = "not-configured"
+        elif cost_tag == "free":
+            enriched["credential_status"] = "not-configured"
+        else:
+            enriched["credential_status"] = "missing"
 
     # protocol: default
     if "protocol" not in enriched:
@@ -116,14 +135,21 @@ def enrich_model_entry(entry: dict) -> dict:
     return enriched
 
 
-def enrich_model_list(models: list[dict]) -> tuple[list[dict], list[str]]:
+def enrich_model_list(models: list[dict], resolver_backend: str = None,
+                      resolver_fixture: dict = None,
+                      resolver_fixture_path: str = None) -> tuple[list[dict], list[str]]:
     """Enrich a list of model entries. Returns (enriched_models, enrichment_applied)."""
     enrichment_applied = set()
     enriched = []
 
     for entry in models:
         original_keys = set(entry.keys())
-        enriched_entry = enrich_model_entry(entry)
+        enriched_entry = enrich_model_entry(
+            entry,
+            resolver_backend=resolver_backend,
+            resolver_fixture=resolver_fixture,
+            resolver_fixture_path=resolver_fixture_path,
+        )
         new_keys = set(enriched_entry.keys()) - original_keys
         enrichment_applied.update(new_keys)
         enriched.append(enriched_entry)
@@ -175,6 +201,9 @@ def render_from_pool(
     role_assignment: Optional[dict] = None,
     approval_id: Optional[str] = None,
     dry_run: bool = True,
+    resolver_backend: Optional[str] = None,
+    resolver_fixture: Optional[dict] = None,
+    resolver_fixture_path: Optional[str] = None,
 ) -> dict:
     """Render per-node config draft from model pool data.
 
@@ -186,6 +215,9 @@ def render_from_pool(
         role_assignment: Optional role→model mapping
         approval_id: Optional approval identifier
         dry_run: Must be True
+        resolver_backend: Credential resolver backend ("fixture", "file", "env-status")
+        resolver_fixture: Inline fixture data for resolver
+        resolver_fixture_path: Path to fixture file for resolver
 
     Returns:
         Integration output with renderer_output embedded
@@ -218,7 +250,12 @@ def render_from_pool(
         raw_models, pool_snapshot_sha256 = load_from_file(pool_path)
 
     # --- Enrich models ---
-    enriched_models, enrichment_applied = enrich_model_list(raw_models)
+    enriched_models, enrichment_applied = enrich_model_list(
+        raw_models,
+        resolver_backend=resolver_backend,
+        resolver_fixture=resolver_fixture,
+        resolver_fixture_path=resolver_fixture_path,
+    )
 
     # --- Build renderer input ---
     renderer_input = {

@@ -5,6 +5,7 @@ Unified governance entry point for all model pool mutations:
 add / delete / enable / disable / retire.
 
 Enforces approval boundary: no state-changing mutation without valid approval_id.
+Integrates credential status resolver for add/enable actions.
 
 Usage:
     python scripts/opencode_model_governance.py --self-check
@@ -26,6 +27,7 @@ from typing import Any, Optional
 sys.path.insert(0, os.path.dirname(__file__))
 
 from opencode_model_pool import ModelPool, DANGEROUS_FIELD_NAMES, DANGEROUS_KEY_PATTERNS
+from credential_status_resolver import resolve_credential, validate_secret_ref
 
 # --- Constants ---
 
@@ -58,6 +60,111 @@ def validate_approval_id(approval_id: str) -> tuple[bool, str]:
     if len(approval_id) < 5:
         return False, "approval_id too short"
     return True, ""
+
+
+# --- Credential Validation ---
+
+
+def validate_credential_for_action(
+    action: str,
+    model_entry: Optional[dict] = None,
+    secret_ref: str = "",
+    resolver_backend: str = "fixture",
+    resolver_fixture: Optional[dict] = None,
+    resolver_fixture_path: Optional[str] = None,
+) -> dict:
+    """Validate credential status for governance action.
+
+    Args:
+        action: Governance action (add/enable/disable/retire/delete)
+        model_entry: Existing model entry (for enable/disable/retire/delete)
+        secret_ref: Secret reference to validate (for add)
+        resolver_backend: Backend for resolver
+        resolver_fixture: Inline fixture data
+        resolver_fixture_path: Path to fixture file
+
+    Returns:
+        {
+            "valid": bool,
+            "credential_status": str,
+            "metadata": dict or None,
+            "warning": str or None,
+            "effective_available": bool,
+        }
+    """
+    # Determine which secret_ref to check
+    ref_to_check = secret_ref
+    if not ref_to_check and model_entry:
+        ref_to_check = model_entry.get("secret_ref", "")
+
+    # If no secret_ref, nothing to validate
+    if not ref_to_check:
+        return {
+            "valid": True,
+            "credential_status": "unknown",
+            "metadata": None,
+            "warning": "no secret_ref to validate",
+            "effective_available": False,
+        }
+
+    # Validate secret_ref format
+    valid, err = validate_secret_ref(ref_to_check)
+    if not valid:
+        return {
+            "valid": False,
+            "credential_status": "unknown",
+            "metadata": None,
+            "warning": f"invalid secret_ref: {err}",
+            "effective_available": False,
+        }
+
+    # Resolve credential
+    try:
+        result = resolve_credential(
+            ref_to_check,
+            backend=resolver_backend,
+            fixture_data=resolver_fixture,
+            fixture_path=resolver_fixture_path,
+        )
+    except (ValueError, RuntimeError) as e:
+        return {
+            "valid": False,
+            "credential_status": "unknown",
+            "metadata": None,
+            "warning": f"resolver error: {str(e)[:100]}",
+            "effective_available": False,
+        }
+
+    cred_status = result.get("credential_status", "unknown")
+    metadata = result.get("metadata", {})
+
+    # Safe metadata subset (no sensitive fields)
+    safe_metadata = {
+        "provider": metadata.get("provider", "unknown"),
+        "alias": metadata.get("alias", "unknown"),
+        "source": metadata.get("source", "unknown"),
+        "last_checked": metadata.get("last_checked", ""),
+        "status_reason": metadata.get("status_reason", ""),
+        "resolver_version": metadata.get("resolver_version", ""),
+    }
+
+    # Determine effective_available
+    effective_available = cred_status in ("valid", "not-configured")
+
+    # Generate warning for non-available statuses
+    warning = None
+    if cred_status in ("missing", "expired", "unknown"):
+        warning = f"credential_status={cred_status}; model will not be available for execution"
+        if action == "enable":
+            warning += "; effective_available=false"
+
+    return {
+        "valid": True,  # resolver succeeded (even if status is missing/expired)
+        "credential_status": cred_status,
+        "metadata": safe_metadata,
+        "warning": warning,
+        "effective_available": effective_available,
+    }
 
 
 # --- Action Plan ---
@@ -129,7 +236,10 @@ def execute_governance(action: str, model_id: str,
                        pool: ModelPool,
                        approval_id: str = None,
                        model_params: dict = None,
-                       active_model_ids: set = None) -> dict:
+                       active_model_ids: set = None,
+                       resolver_backend: str = "fixture",
+                       resolver_fixture: dict = None,
+                       resolver_fixture_path: str = None) -> dict:
     """Execute governance action with approval boundary.
 
     Args:
@@ -140,6 +250,9 @@ def execute_governance(action: str, model_id: str,
         approval_id: Approval ID (required for delete)
         model_params: Parameters for add_model (endpoint, protocol, etc.)
         active_model_ids: Set of model IDs in active jobs (blocks delete)
+        resolver_backend: Backend for credential resolver
+        resolver_fixture: Inline fixture data for resolver
+        resolver_fixture_path: Path to fixture file for resolver
 
     Returns:
         Governance result with action_plan, result, and audit
@@ -172,10 +285,40 @@ def execute_governance(action: str, model_id: str,
             "audit": _build_audit(action, model_id, operator_id, None, pool),
         }
 
-    # Execute mutation
-    result = _execute_action(action, model_id, pool, model_params, active_model_ids, approval_context={"approval_id": approval_id, "operator_id": operator_id})
+    # --- Credential validation for add/enable ---
+    credential_validation = None
+    if action in ("add", "enable"):
+        params = model_params or {}
+        secret_ref = params.get("secret_ref", "")
+        model_entry = pool.models.get(model_id) if action == "enable" else None
 
-    return {
+        credential_validation = validate_credential_for_action(
+            action=action,
+            model_entry=model_entry,
+            secret_ref=secret_ref,
+            resolver_backend=resolver_backend,
+            resolver_fixture=resolver_fixture,
+            resolver_fixture_path=resolver_fixture_path,
+        )
+
+        # If secret_ref validation failed (format/safety), block
+        if not credential_validation["valid"]:
+            return {
+                "action": action,
+                "model_id": model_id,
+                "status": "blocked",
+                "action_plan": plan,
+                "result": {"error": credential_validation["warning"], "status": "blocked"},
+                "credential_validation": credential_validation,
+                "audit": _build_audit(action, model_id, operator_id, approval_id, pool),
+            }
+
+    # Execute mutation
+    result = _execute_action(action, model_id, pool, model_params, active_model_ids,
+                             approval_context={"approval_id": approval_id, "operator_id": operator_id})
+
+    # Build response
+    response = {
         "action": action,
         "model_id": model_id,
         "status": result.get("status", "executed"),
@@ -183,6 +326,24 @@ def execute_governance(action: str, model_id: str,
         "result": result,
         "audit": _build_audit(action, model_id, operator_id, approval_id, pool),
     }
+
+    # Attach credential validation if performed
+    if credential_validation is not None:
+        response["credential_validation"] = {
+            "credential_status": credential_validation["credential_status"],
+            "metadata": credential_validation["metadata"],
+            "warning": credential_validation["warning"],
+            "effective_available": credential_validation["effective_available"],
+        }
+
+        # For add: update the model entry's credential_status
+        if action == "add" and "exact_model_id" in result:
+            added_id = result["exact_model_id"]
+            if added_id in pool.models:
+                pool.models[added_id]["credential_status"] = credential_validation["credential_status"]
+                pool.save()
+
+    return response
 
 
 def _execute_action(action: str, model_id: str, pool: ModelPool,
