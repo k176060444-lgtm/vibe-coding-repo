@@ -40,6 +40,7 @@ from opencode_model_governance import (
     generate_action_plan,
     self_check,
     validate_action,
+    validate_credential_for_action,
 )
 
 
@@ -438,3 +439,217 @@ class TestSelfCheck:
         assert result["status"] == "ok"
         assert "valid_actions" in result
         assert "risk_levels" in result
+
+
+# --- Credential Validation Tests ---
+
+
+@pytest.fixture
+def credential_fixture():
+    """Fixture data for credential resolver."""
+    return {
+        "credentials": {
+            "secret:deepseek-plan:deepseek-v4-pro": {
+                "credential_status": "valid",
+                "status_reason": "key configured",
+            },
+            "secret:volcengine-plan:ark-code-latest": {
+                "credential_status": "missing",
+                "status_reason": "no key found",
+            },
+            "secret:xiaomi-plan:mimo-v2.5": {
+                "credential_status": "expired",
+                "status_reason": "key expired",
+            },
+            "secret:opencode:mimo-v2.5-free": {
+                "credential_status": "not-configured",
+                "status_reason": "free model",
+            },
+        }
+    }
+
+
+class TestGovernanceCredentialValidation:
+    """Test validate_credential_for_action function."""
+
+    def test_valid_secret_ref(self, credential_fixture):
+        result = validate_credential_for_action(
+            "add", secret_ref="secret:deepseek-plan:deepseek-v4-pro",
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["valid"] is True
+        assert result["credential_status"] == "valid"
+        assert result["effective_available"] is True
+        assert result["warning"] is None
+
+    def test_missing_secret_ref(self, credential_fixture):
+        result = validate_credential_for_action(
+            "add", secret_ref="secret:volcengine-plan:ark-code-latest",
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["valid"] is True
+        assert result["credential_status"] == "missing"
+        assert result["effective_available"] is False
+        assert result["warning"] is not None
+        assert "missing" in result["warning"]
+
+    def test_expired_secret_ref(self, credential_fixture):
+        result = validate_credential_for_action(
+            "add", secret_ref="secret:xiaomi-plan:mimo-v2.5",
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["valid"] is True
+        assert result["credential_status"] == "expired"
+        assert result["effective_available"] is False
+        assert result["warning"] is not None
+
+    def test_not_configured(self, credential_fixture):
+        result = validate_credential_for_action(
+            "add", secret_ref="secret:opencode:mimo-v2.5-free",
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["valid"] is True
+        assert result["credential_status"] == "not-configured"
+        assert result["effective_available"] is True
+        assert result["warning"] is None
+
+    def test_no_secret_ref(self):
+        result = validate_credential_for_action("add", secret_ref="")
+        assert result["valid"] is True
+        assert result["warning"] == "no secret_ref to validate"
+
+    def test_invalid_secret_ref_format(self):
+        result = validate_credential_for_action(
+            "add", secret_ref="sk-abc...mnop",
+        )
+        assert result["valid"] is False
+        assert "invalid secret_ref" in result["warning"]
+
+    def test_reject_real_key_in_ref(self):
+        result = validate_credential_for_action(
+            "add", secret_ref="secret:test:sk-abcdefghijklmnop",
+        )
+        assert result["valid"] is False
+
+    def test_metadata_subset(self, credential_fixture):
+        result = validate_credential_for_action(
+            "add", secret_ref="secret:deepseek-plan:deepseek-v4-pro",
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        meta = result["metadata"]
+        assert "provider" in meta
+        assert "alias" in meta
+        assert "source" in meta
+        assert "last_checked" in meta
+        assert "status_reason" in meta
+        assert "resolver_version" in meta
+        # No sensitive fields
+        for key in meta:
+            assert key.lower() not in ("api_key", "token", "password", "secret_value", "key")
+
+    def test_enable_expired_warning(self, credential_fixture):
+        """Enable with expired credential should warn with effective_available=false."""
+        result = validate_credential_for_action(
+            "enable",
+            model_entry={"secret_ref": "secret:xiaomi-plan:mimo-v2.5"},
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["valid"] is True
+        assert result["effective_available"] is False
+        assert "effective_available=false" in result["warning"]
+
+
+class TestGovernanceCredentialIntegration:
+    """Test governance integration with credential resolver."""
+
+    def test_governance_add_valid_credential(self, tmp_pool, credential_fixture):
+        """Governance add with valid secret_ref writes credential_status to pool."""
+        result = execute_governance(
+            "add", "test/new-model", "operator-1", tmp_pool,
+            approval_id="approval-001",
+            model_params={
+                "secret_ref": "secret:deepseek-plan:deepseek-v4-pro",
+                "cost_tag": "paid",
+            },
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["status"] == "executed"
+        assert result["credential_validation"]["credential_status"] == "valid"
+        assert result["credential_validation"]["effective_available"] is True
+        # Pool entry should have updated credential_status
+        assert tmp_pool.models["test/new-model"]["credential_status"] == "valid"
+
+    def test_governance_add_missing_credential(self, tmp_pool, credential_fixture):
+        """Governance add with missing credential executes but warns."""
+        result = execute_governance(
+            "add", "test/new-model", "operator-1", tmp_pool,
+            approval_id="approval-001",
+            model_params={
+                "secret_ref": "secret:volcengine-plan:ark-code-latest",
+                "cost_tag": "paid",
+            },
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["status"] == "executed"
+        assert result["credential_validation"]["credential_status"] == "missing"
+        assert result["credential_validation"]["warning"] is not None
+
+    def test_governance_add_expired_credential(self, tmp_pool, credential_fixture):
+        """Governance add with expired credential executes but warns."""
+        result = execute_governance(
+            "add", "test/expired-model", "operator-1", tmp_pool,
+            approval_id="approval-001",
+            model_params={
+                "secret_ref": "secret:xiaomi-plan:mimo-v2.5",
+                "cost_tag": "paid",
+            },
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["status"] == "executed"
+        assert result["credential_validation"]["credential_status"] == "expired"
+
+    def test_governance_enable_with_credential_check(self, tmp_pool, credential_fixture):
+        """Governance enable checks credential status."""
+        # First add a model
+        tmp_pool.add_model("test/model", secret_ref="secret:volcengine-plan:ark-code-latest")
+        tmp_pool.disable_model("test/model")
+
+        result = execute_governance(
+            "enable", "test/model", "operator-1", tmp_pool,
+            approval_id="approval-002",
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["status"] == "executed"
+        assert result["credential_validation"]["credential_status"] == "missing"
+        assert result["credential_validation"]["effective_available"] is False
+
+    def test_governance_add_blocked_by_invalid_ref(self, tmp_pool):
+        """Governance add blocked when secret_ref fails safety check."""
+        result = execute_governance(
+            "add", "test/bad-model", "operator-1", tmp_pool,
+            approval_id="approval-001",
+            model_params={"secret_ref": "sk-abc...mnop"},
+        )
+        assert result["status"] == "blocked"
+
+    def test_governance_no_credential_check_for_disable(self, tmp_pool, credential_fixture):
+        """Disable action doesn't require credential validation."""
+        tmp_pool.add_model("test/model", secret_ref="secret:deepseek-plan:deepseek-v4-pro")
+        result = execute_governance(
+            "disable", "test/model", "operator-1", tmp_pool,
+            approval_id="approval-003",
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["status"] == "executed"
+        assert "credential_validation" not in result
+
+    def test_governance_no_credential_check_for_delete(self, tmp_pool, credential_fixture):
+        """Delete action doesn't require credential validation."""
+        tmp_pool.add_model("test/model", secret_ref="secret:deepseek-plan:deepseek-v4-pro")
+        result = execute_governance(
+            "delete", "test/model", "operator-1", tmp_pool,
+            approval_id="approval-004",
+            resolver_backend="fixture", resolver_fixture=credential_fixture,
+        )
+        assert result["status"] == "executed"
+        assert "credential_validation" not in result
