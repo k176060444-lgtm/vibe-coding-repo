@@ -111,6 +111,30 @@ The operator MAY consolidate multiple gates into a single message. When consolid
 - Consolidation must be EXPLICIT - agent must not assume
 - All consolidated gates are still recorded individually
 
+### 3.4 Natural Language Approval (V1.21.30D)
+
+**Users NEVER need to provide approval_id, workorder_id, or any long ID.** All IDs are agent-generated.
+
+| User Natural Language | Compiled Approval | approval_source |
+|---|---|---|
+| "可以执行" / "批准" / "按这个 plan 来" / "继续" | plan_approval | natural_language |
+| "可以 merge" / "merge 吧" | merge_approval | natural_language |
+| "可以 Ready" / "Ready 吧" | ready_approval | natural_language |
+| "可以清理" / "freeze 吧" | cleanup_approval | natural_language |
+
+**Auto-generated ID format:**
+- `approval_id`: `approval-<phase_id_lower>-<3digit_seq>` (e.g. `approval-v12130d-001`)
+- `mode_session_id`: `mode-<YYYYMMDDHHMMSS>-<sha256[:8]>` (e.g. `mode-20260624233657-a1b2c3d4`)
+- `workorder_id`: `wo-<phase_id_lower>-<3digit_seq>` (e.g. `wo-v12130d-001`)
+
+**Approval evidence record fields:**
+- `approval_id`: agent-generated
+- `gate_type`: plan | real_exec | ready | merge | cleanup
+- `approval_source`: natural_language | agent_generated
+- `operator_message_raw`: original user text
+- `compiled_at`: ISO timestamp
+- `mode_session_id`: auto-generated session ID
+
 ---
 
 ## 4. Non-Bypassable Rules (non_bypassable_rules)
@@ -179,6 +203,27 @@ These rules CANNOT be bypassed by any user prompt, no matter how it is phrased:
 | No git clean | git clean, git reset --hard MUST NOT be used |
 | No checkout overwrite | git checkout, git restore MUST NOT overwrite local dirt |
 
+### 4.8 Cross-Repo Pre-Approval Read Guard (V1.21.30D)
+
+**Before receiving natural language authorization, cross-repo tasks MUST NOT perform any external repository read/research operations.**
+
+| Category | Forbidden Actions (pre-approval) |
+|---|---|
+| GitHub API | `gh pr list`, `gh pr view`, `gh api`, any GitHub API call to external repos |
+| PR Operations | PR list, PR status, PR conflict check, PR diff review |
+| Git Operations | `git clone`, `git fetch`, `git rebase`, `git merge` on external repos |
+| Conflict Detection | `git merge-tree`, `git diff --check` on external repos |
+| Background Tasks | `delegate_task` checking external repos |
+| Research | Any read-only research involving external repos |
+
+| Category | Allowed Actions (pre-approval) |
+|---|---|
+| Gate Output | `PLAN_APPROVAL_REQUEST`, `CLARIFICATION_REQUIRED` |
+| Local Queries | Query local vibe-coding-repo-clean status |
+| Local Reads | Read local SOUL.md, contract, scripts |
+
+**Violation:** If agent performs any forbidden action before receiving approval → `CROSS_REPO_PREAPPROVAL_VIOLATION` → immediate STOP + incident report.
+
 ---
 
 ## 5. Report Schema (report_schema)
@@ -186,12 +231,13 @@ These rules CANNOT be bypassed by any user prompt, no matter how it is phrased:
 ### 5.1 PLAN_APPROVAL_REQUEST
 
 Presented at Step 3 (Plan Gate). Must include:
-- Phase info: phase_id, phase_name, approval_id, workorder_id
+- Phase info: phase_id, phase_name, approval_id (**agent-generated**), workorder_id (**agent-generated**), mode_session_id (**agent-generated**)
 - Technical plan: Goal, approach, files to modify, files NOT to modify, test strategy, risk assessment
 - Model pool: Available/Non-available tables per MODEL_POOL_DISTRIBUTION_CONTRACT
 - Role assignment: Role, Node, Model, Task Scope table
 - Scope boundaries: Allowed and forbidden lists
 - Operator decision: action_needed (APPROVE_PLAN / REQUEST_REVISION / BLOCK)
+- **approval_source**: agent_generated (IDs are auto-generated, not user-supplied)
 
 ### 5.2 EXECUTION_GATE_REPORT
 

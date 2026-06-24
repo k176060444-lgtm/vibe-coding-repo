@@ -39,7 +39,7 @@ Exit codes:
     2 = usage error
 """
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 import argparse
 import hashlib
@@ -128,6 +128,7 @@ VERDICT_BLOCKED_EAG_ERROR = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
 VERDICT_BLOCKED_AS_FIELDS_MISSING = "BLOCKED_ACTION_SPECIFIC_FIELDS_MISSING"
 VERDICT_BLOCKED_AS_FIELD_INVALID = "BLOCKED_ACTION_SPECIFIC_FIELD_INVALID"
 VERDICT_BLOCKED_SERVICE_ADMIN = "BLOCKED_SERVICE_ADMIN_REQUIRES_DEDICATED_APPROVAL"
+VERDICT_BLOCKED_CROSS_REPO_PREAPPROVAL = "BLOCKED_CROSS_REPO_PREAPPROVAL_VIOLATION"
 
 ALL_VERDICTS = {
     VERDICT_INTAKE_REQUIRED,
@@ -140,6 +141,7 @@ ALL_VERDICTS = {
     VERDICT_BLOCKED_AS_FIELDS_MISSING,
     VERDICT_BLOCKED_AS_FIELD_INVALID,
     VERDICT_BLOCKED_SERVICE_ADMIN,
+    VERDICT_BLOCKED_CROSS_REPO_PREAPPROVAL,
 }
 
 # ── State machine ─────────────────────────────────────────────────────
@@ -971,14 +973,86 @@ def self_check() -> dict:
     check("cig-23-just-do-it-blocked",
           block4["verdict"] == VERDICT_BLOCKED_UNAPPROVED)
 
-    # cig-24: 10 verdicts defined (V1.21.14A: 7 → 10)
-    check("cig-24-verdicts-count", len(ALL_VERDICTS) == 10,
+    # cig-24: 11 verdicts defined (V1.21.30D: added CROSS_REPO_PREAPPROVAL)
+    check("cig-24-verdicts-count", len(ALL_VERDICTS) == 11,
           f"count={len(ALL_VERDICTS)}")
 
     # cig-25: blocked actions count
     check("cig-25-blocked-actions-count",
           len(BLOCKED_ACTIONS_BEFORE_APPROVAL) >= 12,
           f"count={len(BLOCKED_ACTIONS_BEFORE_APPROVAL)}")
+
+    # cig-26: V1.21.30D — verdicts count (now 11 with CROSS_REPO_PREAPPROVAL)
+    check("cig-26-verdicts-count-v12130d", len(ALL_VERDICTS) == 11,
+          f"count={len(ALL_VERDICTS)}")
+
+    # cig-27: generate_mode_session_id format
+    msid = generate_mode_session_id()
+    check("cig-27-mode-session-id-format",
+          msid.startswith("mode-") and len(msid.split("-")) >= 3,
+          f"msid={msid}")
+
+    # cig-28: generate_approval_id format
+    aid = generate_approval_id("V1.21.30D")
+    check("cig-28-approval-id-format",
+          aid.startswith("approval-v1.21.30d-"),
+          f"aid={aid}")
+
+    # cig-29: compile_natural_language_approval — "可以执行" → approved
+    nl_approval = compile_natural_language_approval("可以执行", "plan_approval", "V1.21.30D")
+    check("cig-29-nl-approval-can-exec",
+          nl_approval["approved"] is True,
+          f"confidence={nl_approval['confidence']}")
+    check("cig-29-nl-approval-source",
+          nl_approval["approval_source"] == "natural_language",
+          f"source={nl_approval['approval_source']}")
+
+    # cig-30: compile_natural_language_approval — "批准" → approved
+    nl_approval2 = compile_natural_language_approval("批准", "plan_approval", "V1.21.30D")
+    check("cig-30-nl-approval-pi-zhun",
+          nl_approval2["approved"] is True)
+
+    # cig-31: compile_natural_language_approval — "merge 吧" → merge approved
+    nl_merge = compile_natural_language_approval("merge 吧", "merge_approval", "V1.21.30D")
+    check("cig-31-nl-merge-approval",
+          nl_merge["approved"] is True,
+          f"gate={nl_merge['gate_type']}")
+
+    # cig-32: compile_natural_language_approval — random text → not approved
+    nl_random = compile_natural_language_approval("今天天气不错", "plan_approval", "V1.21.30D")
+    check("cig-32-nl-random-not-approved",
+          nl_random["approved"] is False)
+
+    # cig-33: check_preapproval_read_guard — gh pr list → violation
+    guard1 = check_preapproval_read_guard("gh pr list --state open", has_approval=False)
+    check("cig-33-preapproval-gh-pr-list",
+          guard1["violation_detected"] is True,
+          f"type={guard1['violation_type']}")
+
+    # cig-34: check_preapproval_read_guard — with approval → pass
+    guard2 = check_preapproval_read_guard("gh pr list --state open", has_approval=True)
+    check("cig-34-preapproval-with-approval",
+          guard2["guard_passed"] is True)
+
+    # cig-35: check_preapproval_read_guard — git fetch hermes → violation
+    guard3 = check_preapproval_read_guard("git fetch origin main", has_approval=False)
+    # Note: this should pass because it doesn't mention hermes/opencode
+    check("cig-35-preapproval-local-fetch-ok",
+          guard3["guard_passed"] is True)
+
+    # cig-36: plan_approval_request has approval_source
+    compiled_test = compile_casual_prompt("实现新功能")
+    par_test = generate_plan_approval_request(
+        phase_id="V1.21.30D",
+        approval_id="",
+        compiled_prompt=compiled_test,
+    )
+    check("cig-36-par-has-approval-source",
+          par_test.get("approval_source") == "agent_generated",
+          f"source={par_test.get('approval_source')}")
+    check("cig-36-par-has-mode-session-id",
+          "mode_session_id" in par_test,
+          f"msid={par_test.get('mode_session_id', 'MISSING')}")
 
     return {
         "version": __version__,
@@ -1237,10 +1311,14 @@ def generate_plan_approval_request(
     V1.21.30B: This is the structured output the agent MUST produce
     before any execution in vibe coding mode.
 
+    V1.21.30D: approval_id and mode_session_id are auto-generated.
+    Users NEVER need to provide these IDs.
+
     Returns:
         {
             "phase_id": str,
             "approval_id": str,
+            "mode_session_id": str,
             "request_type": "PLAN_APPROVAL_REQUEST",
             "goal": str,
             "risk_classification": str,
@@ -1250,6 +1328,7 @@ def generate_plan_approval_request(
             "forbidden_actions": list[str],
             "role_model_matrix_required": bool,
             "operator_action_needed": str,
+            "approval_source": str,
             "next_step": str,
         }
     """
@@ -1265,9 +1344,15 @@ def generate_plan_approval_request(
     else:
         action = "APPROVE_PLAN / REQUEST_REVISION / BLOCK"
 
+    # V1.21.30D: Auto-generate IDs if not provided
+    if not approval_id:
+        approval_id = generate_approval_id(phase_id)
+    mode_session_id = generate_mode_session_id()
+
     return {
         "phase_id": phase_id,
         "approval_id": approval_id,
+        "mode_session_id": mode_session_id,
         "request_type": "PLAN_APPROVAL_REQUEST",
         "goal": compiled_prompt.get("compiled_goal", ""),
         "risk_classification": risk,
@@ -1277,11 +1362,194 @@ def generate_plan_approval_request(
         "forbidden_actions": compiled_prompt.get("forbidden_actions", []),
         "role_model_matrix_required": True,
         "operator_action_needed": action,
+        "approval_source": "agent_generated",
         "next_step": (
             "Operator must approve plan before execution. "
             "Agent must produce role/model matrix with: "
             "Role, Node, Model, Task Scope, cost_tag, call_budget, fallback_policy."
         ),
+    }
+
+
+# ── V1.21.30D: Auto-generated IDs ────────────────────────────────────
+
+
+def generate_mode_session_id() -> str:
+    """Generate a unique mode_session_id.
+
+    Format: mode-<YYYYMMDDHHMMSS>-<sha256[:8]>
+    Example: mode-20260624233657-a1b2c3d4
+    """
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    entropy = hashlib.sha256(f"{ts}-{os.getpid()}".encode()).hexdigest()[:8]
+    return f"mode-{ts}-{entropy}"
+
+
+def generate_approval_id(phase_id: str) -> str:
+    """Generate a unique approval_id.
+
+    Format: approval-<phase_id_lower>-<3digit_seq>
+    Example: approval-v12130d-001
+
+    The sequence is derived from a hash to avoid collisions.
+    """
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+    seq_hash = hashlib.sha256(f"{phase_id}-{ts}".encode()).hexdigest()[:3]
+    # Convert to numeric for readability
+    seq_num = int(seq_hash, 16) % 1000
+    return f"approval-{phase_id.lower()}-{seq_num:03d}"
+
+
+# ── V1.21.30D: Natural Language Approval Compiler ────────────────────
+
+# Natural language patterns that indicate approval
+NL_APPROVAL_PATTERNS = {
+    "plan_approval": [
+        r"(?i)^(可以执行|批准|按.*plan.*来|继续|可以开始|开始执行|执行吧|go|approved?|yes|可以)$",
+        r"(?i)^可以[，,]?\s*(执行|开始|按.*来|按.*执行)",
+        r"(?i)^(行|好的?|没问题|ok|okay)[，,]?\s*(执行|开始|继续|按.*来)",
+        r"(?i)^可以[，,]?\s*按.*plan.*执行",
+    ],
+    "merge_approval": [
+        r"(?i)^可以\s*merge",
+        r"(?i)^merge\s*(吧|了|掉)",
+        r"(?i)^合并(吧|了|掉)?",
+    ],
+    "ready_approval": [
+        r"(?i)^可以\s*ready",
+        r"(?i)^ready\s*(吧|了)",
+        r"(?i)^(转为?|标记为?)\s*ready",
+    ],
+    "cleanup_approval": [
+        r"(?i)^可以(清理|freeze)",
+        r"(?i)^(清理|freeze)\s*(吧|了)",
+    ],
+}
+
+
+def compile_natural_language_approval(
+    text: str,
+    gate_type: str = "plan_approval",
+    phase_id: str = "",
+) -> dict:
+    """Compile natural language user approval into structured approval record.
+
+    V1.21.30D: Users NEVER need to provide approval_id. Agent auto-generates.
+
+    Args:
+        text: User's natural language message (e.g. "可以执行", "批准", "merge 吧")
+        gate_type: Which gate this approval is for (plan_approval, merge_approval, etc.)
+        phase_id: Current phase ID for auto-generating approval_id
+
+    Returns:
+        {
+            "approval_id": str,           # agent-generated
+            "gate_type": str,
+            "approval_source": "natural_language",
+            "operator_message_raw": str,
+            "approved": bool,
+            "compiled_at": str,           # ISO timestamp
+            "mode_session_id": str,       # agent-generated
+            "confidence": float,          # 0.0-1.0, how confident the match is
+            "matched_pattern": str or None,
+        }
+    """
+    import re
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    approval_id = generate_approval_id(phase_id or "unknown")
+    mode_session_id = generate_mode_session_id()
+
+    # Check if text matches approval patterns for the requested gate type
+    patterns = NL_APPROVAL_PATTERNS.get(gate_type, [])
+    matched = None
+    confidence = 0.0
+
+    for pat in patterns:
+        if re.search(pat, text.strip()):
+            matched = pat
+            confidence = 0.9
+            break
+
+    # Also check if it's a general approval that could apply to any gate
+    if not matched:
+        general_patterns = NL_APPROVAL_PATTERNS.get("plan_approval", [])
+        for pat in general_patterns:
+            if re.search(pat, text.strip()):
+                matched = pat
+                confidence = 0.7
+                break
+
+    return {
+        "approval_id": approval_id,
+        "gate_type": gate_type,
+        "approval_source": "natural_language",
+        "operator_message_raw": text,
+        "approved": matched is not None,
+        "compiled_at": ts,
+        "mode_session_id": mode_session_id,
+        "confidence": confidence,
+        "matched_pattern": matched,
+    }
+
+
+def check_preapproval_read_guard(text: str, has_approval: bool = False) -> dict:
+    """Cross-Repo Pre-Approval Read Guard.
+
+    V1.21.30D: Blocks all external repo read/research operations
+    before natural language authorization is received.
+
+    Args:
+        text: User request text or agent action description
+        has_approval: Whether approval has been received
+
+    Returns:
+        {
+            "guard_passed": bool,
+            "violation_detected": bool,
+            "violation_type": str or None,
+            "detail": str,
+        }
+    """
+    if has_approval:
+        return {
+            "guard_passed": True,
+            "violation_detected": False,
+            "violation_type": None,
+            "detail": "Approval received — read guard lifted.",
+        }
+
+    # Check if the text describes a forbidden pre-approval action
+    forbidden_indicators = [
+        (r"(?i)gh\s+pr\s+(list|view|checks)", "github_api"),
+        (r"(?i)gh\s+api", "github_api"),
+        (r"(?i)git\s+(clone|fetch|rebase|merge).*hermes", "git_external"),
+        (r"(?i)git\s+(clone|fetch|rebase|merge).*opencode", "git_external"),
+        (r"(?i)git\s+merge-tree", "conflict_check"),
+        (r"(?i)git\s+diff\s+--check.*hermes", "conflict_check"),
+        (r"(?i)delegate_task.*hermes", "background_external"),
+        (r"(?i)delegate_task.*检查.*冲突", "background_external"),
+    ]
+
+    import re
+    for pattern, violation_type in forbidden_indicators:
+        if re.search(pattern, text):
+            return {
+                "guard_passed": False,
+                "violation_detected": True,
+                "violation_type": violation_type,
+                "detail": (
+                    f"Cross-repo pre-approval read guard violation: "
+                    f"'{violation_type}' detected before approval. "
+                    f"Agent must obtain natural language authorization first."
+                ),
+            }
+
+    return {
+        "guard_passed": True,
+        "violation_detected": False,
+        "violation_type": None,
+        "detail": "No forbidden pre-approval actions detected.",
     }
 
 

@@ -318,7 +318,7 @@ class TestVerdicts:
         assert v["verdict"] == VERDICT_PROPOSAL_READY
 
     def test_seven_verdicts_defined(self):
-        assert len(ALL_VERDICTS) == 10
+        assert len(ALL_VERDICTS) == 11
 
 
 class TestFailClosed:
@@ -438,7 +438,7 @@ class TestFailClosed:
 
 class TestVersion:
     def test_version(self):
-        assert __version__ == "1.3.0"
+        assert __version__ == "1.4.0"
 
 
 class TestExceptionCleanBlock:
@@ -701,4 +701,4 @@ class TestActionSpecificIntakeRouting:
 
 class TestVersionV130:
     def test_version(self):
-        assert __version__ == "1.3.0"
+        assert __version__ == "1.4.0"
