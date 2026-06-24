@@ -253,6 +253,12 @@ NO_INTAKE_PATTERNS = [
     r"(?i)^(help|usage|docs)",
     r"(?i)^research\b",
     r"(?i)^调研",
+    # Chinese informational / read-only patterns
+    r"^什么是",
+    r"^帮我(看看|查看|检查|看下|查下)",
+    r"^告诉我",
+    r"^解释(一下|下)?",
+    r"^说明(一下|下)?",
 ]
 
 

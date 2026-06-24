@@ -2,6 +2,21 @@
 
 > 手机 QQ 操作速查表 — 短命令 + 判断标准
 
+## ⚠️ 标准作业流程
+
+进入 Vibe Coding 后，**必须按标准流程执行**。详见 [VIBE_CODING_WORKFLOW_CONTRACT.md](VIBE_CODING_WORKFLOW_CONTRACT.md)。
+
+```
+Step 0: 进入角色 → Step 1: 需求对齐 → Step 2: Plan + 模型池
+→ Step 3: Operator 批准 → Step 4: 执行 → Step 5: Draft PR
+→ Step 6: Ready → Step 7: Merge → Step 8: Cleanup → Step 9: 完成
+```
+
+**关键规则：**
+- PR 默认 Draft，严禁自动 Ready
+- Ready / Merge / Cleanup 均需 Operator 单独授权
+- 小集群作业前必须有 operator 批准的 plan + 角色/node/model 分配
+
 ## 每轮开始
 
 ```
