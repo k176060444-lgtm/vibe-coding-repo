@@ -204,6 +204,65 @@ class TestCodingSignalNotExempted:
         assert result["intake_required"] is False
 
 
+# ── V1.21.28B Correction: 告诉我/说明/解释...是什么 ──────────────────────
+
+class TestTellMeWhatIsCorrection:
+    """'告诉我/说明/解释 X 是什么' = informational, not intake.
+
+    Corrects V1.21.28A deviation where '告诉我 Vibe Coding workflow 是什么'
+    was incorrectly flagged as intake because 'workflow' triggered coding signal
+    before '告诉我' exemption was reached.
+    """
+
+    def test_tell_me_workflow_is_what(self):
+        """'告诉我 Vibe Coding workflow 是什么' → no intake."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("告诉我 Vibe Coding workflow 是什么")
+        assert result["intake_required"] is False
+
+    def test_tell_me_intake_is_what(self):
+        """'告诉我 intake 是什么' → no intake."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("告诉我 intake 是什么")
+        assert result["intake_required"] is False
+
+    def test_explain_workflow_is_what(self):
+        """'说明 Vibe Coding workflow 是什么' → no intake."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("说明 Vibe Coding workflow 是什么")
+        assert result["intake_required"] is False
+
+    def test_explain_intake_is_what(self):
+        """'解释 Vibe Coding workflow 是什么' → no intake."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("解释 Vibe Coding workflow 是什么")
+        assert result["intake_required"] is False
+
+    def test_tell_me_how_to_fix_pr(self):
+        """'告诉我这个 PR 怎么修' → intake required (actionable)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("告诉我这个 PR 怎么修")
+        assert result["intake_required"] is True
+
+    def test_tell_me_how_to_fix_bug_with_pr(self):
+        """'告诉我这个 bug 怎么修并提 PR' → intake required (actionable)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("告诉我这个 bug 怎么修并提 PR")
+        assert result["intake_required"] is True
+
+    def test_tell_me_why_repo_tests_fail(self):
+        """'告诉我这个仓库测试为什么失败' → intake required (actionable)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("告诉我这个仓库测试为什么失败")
+        assert result["intake_required"] is True
+
+    def test_tell_me_can_branch_merge(self):
+        """'告诉我这个分支能不能 merge' → intake required (actionable)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("告诉我这个分支能不能 merge")
+        assert result["intake_required"] is True
+
+
 # ── Intake record structure ─────────────────────────────────────────────────
 
 class TestIntakeRecordStructure:
@@ -341,6 +400,101 @@ class TestPrPolicy:
             "自动 Ready", "auto-Ready", "Automatic Ready", "自动Ready",
             "FORBIDDEN", "严禁", "禁止"
         ])
+
+
+# ── V1.21.28B: Dynamic model pool contract tests ─────────────────────────
+
+class TestDynamicModelPool:
+    """Contract must define dynamic model pool, not hardcoded list."""
+
+    def _contract_content(self):
+        contract_path = Path(__file__).parent.parent / "docs" / "VIBE_CODING_WORKFLOW_CONTRACT.md"
+        return contract_path.read_text(encoding="utf-8")
+
+    def test_contract_says_dynamic(self):
+        """Contract explicitly states model pool is dynamic."""
+        content = self._contract_content()
+        assert "dynamic" in content.lower() or "动态" in content
+
+    def test_contract_no_fixed_model_count(self):
+        """Contract does NOT require a fixed number of models."""
+        content = self._contract_content()
+        # Must state "no fixed model count" or equivalent
+        assert "no fixed model count" in content.lower() or "not a fixed list" in content.lower()
+
+    def test_contract_has_available_pool_section(self):
+        """Contract defines Available Model Pool section."""
+        content = self._contract_content()
+        assert "Available Model Pool" in content
+
+    def test_contract_has_non_available_section(self):
+        """Contract defines Non-available Status Summary section."""
+        content = self._contract_content()
+        assert "Non-available" in content
+
+    def test_contract_requires_provider_field(self):
+        """Contract requires provider field in model pool."""
+        content = self._contract_content()
+        assert "provider" in content
+
+    def test_contract_requires_model_id_field(self):
+        """Contract requires model_id field in model pool."""
+        content = self._contract_content()
+        assert "model_id" in content
+
+    def test_contract_requires_credential_status(self):
+        """Contract requires credential_status field (never plaintext)."""
+        content = self._contract_content()
+        assert "credential_status" in content
+        assert "NEVER expose" in content or "never expose" in content.lower()
+
+    def test_contract_requires_enabled_field(self):
+        """Contract requires enabled field in model pool."""
+        content = self._contract_content()
+        assert "enabled" in content
+
+    def test_contract_requires_quarantine_status(self):
+        """Contract requires quarantine_status field."""
+        content = self._contract_content()
+        assert "quarantine_status" in content
+
+    def test_contract_opencode_go_conditional(self):
+        """Contract states OpenCode Go enters Available only if enabled/detected."""
+        content = self._contract_content()
+        assert "OpenCode Go" in content
+        # Must indicate conditional availability
+        assert any(word in content.lower() for word in [
+            "subscribed", "enabled", "detected", "only if"
+        ])
+
+    def test_contract_opencode_free_conditional(self):
+        """Contract states OpenCode free models enter Available based on discovery."""
+        content = self._contract_content()
+        assert "OpenCode free" in content or "opencode-free" in content.lower()
+
+    def test_contract_user_changes_affect_pool(self):
+        """Contract states user add/delete/enable/disable affects pool."""
+        content = self._contract_content()
+        assert any(phrase in content for phrase in [
+            "User-deleted", "user-deleted", "disabled/quarantined",
+            "User-deleted/disabled/quarantined"
+        ])
+
+    def test_contract_recommendation_from_available_only(self):
+        """Contract requires recommendations from Available pool only."""
+        content = self._contract_content()
+        assert "Available pool only" in content
+
+    def test_contract_no_auto_substitute(self):
+        """Contract blocks auto-substitution when recommended model unavailable."""
+        content = self._contract_content()
+        assert "auto-substitute" in content.lower() or "auto-substitut" in content.lower() or "BLOCK" in content
+
+    def test_role_matrix_requires_all_fields(self):
+        """Contract role matrix requires role/node/model/task_scope/stop_point."""
+        content = self._contract_content()
+        for field in ["Role", "Node", "Model/Provider", "Task scope", "Stop point"]:
+            assert field in content, f"Missing role matrix field: {field}"
 
 
 if __name__ == "__main__":
