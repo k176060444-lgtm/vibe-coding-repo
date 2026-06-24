@@ -231,8 +231,16 @@ class TestModelPoolSanitize:
     def test_sanitize_no_secrets(self, populated_pool):
         sanitized = exported = populated_pool.export_sanitized()
         text = json.dumps(sanitized)
-        for kw in ["TOKEN", "SECRET", "KEY", "PASSWORD", "PRIVATE"]:
+        # Allow SECRET_REF (it's a placeholder field), but block actual secrets
+        for kw in ["TOKEN", "KEY", "PASSWORD", "PRIVATE"]:
             assert kw not in text.upper()
+        # SECRET is allowed only as part of SECRET_REF
+        upper_text = text.upper()
+        # Check that SECRET doesn't appear except in "SECRET_REF" context
+        secret_positions = [i for i in range(len(upper_text)) if upper_text[i:i+6] == "SECRET"]
+        for pos in secret_positions:
+            # Must be followed by "_REF" to be allowed (SECRET_REF = 10 chars)
+            assert upper_text[pos:pos+10] == "SECRET_REF", f"Unexpected SECRET at position {pos}"
 
     def test_sanitize_has_model_fields(self, populated_pool):
         sanitized = populated_pool.export_sanitized()
