@@ -399,4 +399,31 @@ This contract is enforced by:
 
 ---
 
+## 10. Runtime Enforcement (runtime_enforcement)
+
+### 10.1 Implementation Reference
+
+The runtime enforcement functions are implemented in `scripts/conversational_intake_gate.py` and documented in [VIBE_CODING_MODE_RUNTIME_INTEGRATION.md](./VIBE_CODING_MODE_RUNTIME_INTEGRATION.md).
+
+### 10.2 Mandatory Function Calls
+
+| Function | When to Call | Purpose |
+|---|---|---|
+| `detect_mode_entry(text)` | Every incoming message | Detect vibe coding mode entry triggers |
+| `check_cross_repo_guard(text)` | Before external repo operations | Block cross-repo without PLAN_APPROVAL_REQUEST |
+| `compile_casual_prompt(text)` | Every casual/voice request | Convert to structured intake |
+| `generate_plan_approval_request(...)` | Before any execution action | Produce operator gate request |
+
+### 10.3 Non-Bypassable Enforcement
+
+The agent MUST call `detect_mode_entry()` before processing any message. If `mode_active=True`, the agent MUST enter the mandatory workflow (Step 0 → Step 1 → ... → Step 9). No exceptions.
+
+The agent MUST NOT:
+- Skip `detect_mode_entry()` for any message
+- Proceed with research/implementation without PLAN_APPROVAL_REQUEST
+- Execute actions in `FORBIDDEN_ACTIONS` set
+- Bypass cross-repo guard for external repo operations
+
+---
+
 *This contract is the single source of truth for Vibe Coding mode workflow. If any other document conflicts, this document wins.*
