@@ -251,7 +251,8 @@ This contract is enforced by:
 1. `conversational_intake_gate.py` — detects when intake is required
 2. `execution_approval_gate.py` — blocks execution without approval
 3. `git_pr_approval_gate.py` — enforces PR state transitions
-4. This document — the authoritative workflow definition
+4. `MODEL_POOL_DISTRIBUTION_CONTRACT.md` — model pool governance, schema, and distribution rules
+5. This document — the authoritative workflow definition
 
 ---
 
