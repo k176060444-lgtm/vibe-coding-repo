@@ -85,18 +85,6 @@ class TestInformationalExemption:
         result = detect_intake_required("什么是 Vibe Coding")
         assert result["intake_required"] is False
 
-    def test_help_me_look_at_file(self):
-        """'帮我看看这个文件' → no intake."""
-        from conversational_intake_gate import detect_intake_required
-        result = detect_intake_required("帮我看看这个文件")
-        assert result["intake_required"] is False
-
-    def test_help_me_check_code(self):
-        """'帮我检查一下代码' → no intake."""
-        from conversational_intake_gate import detect_intake_required
-        result = detect_intake_required("帮我检查一下代码")
-        assert result["intake_required"] is False
-
     def test_tell_me_status(self):
         """'告诉我当前状态' → no intake."""
         from conversational_intake_gate import detect_intake_required
@@ -131,6 +119,88 @@ class TestInformationalExemption:
         """'调研一下' → no intake."""
         from conversational_intake_gate import detect_intake_required
         result = detect_intake_required("调研一下")
+        assert result["intake_required"] is False
+
+    def test_help_me_look_at_file(self):
+        """'帮我看看这个文件' → no intake (no coding signal)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("帮我看看这个文件")
+        assert result["intake_required"] is False
+
+    def test_help_me_look_at_concept(self):
+        """'帮我看看这个概念是什么意思' → no intake (informational)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("帮我看看这个概念是什么意思")
+        assert result["intake_required"] is False
+
+
+# ── V1.21.28A Correction: coding signal must NOT be exempted ────────────
+
+class TestCodingSignalNotExempted:
+    """Coding/workflow signals must trigger intake even with '帮我' prefix.
+
+    This corrects the overly broad NO_INTAKE_PATTERNS from initial V1.21.28A
+    that exempted '帮我(看看|查看|检查|看下|查下)' globally.
+    """
+
+    def test_check_pr_requires_intake(self):
+        """'帮我检查这个 PR' → intake required (PR = coding signal)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("帮我检查这个 PR")
+        assert result["intake_required"] is True
+
+    def test_check_code_requires_intake(self):
+        """'帮我检查这段代码' → intake required (代码 = coding keyword)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("帮我检查这段代码")
+        assert result["intake_required"] is True
+
+    def test_look_at_bug_requires_intake(self):
+        """'帮我看看这个 bug' → intake required (bug = coding signal)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("帮我看看这个 bug")
+        assert result["intake_required"] is True
+
+    def test_check_repo_test_failure(self):
+        """'帮我查看这个仓库为什么测试失败' → intake required (仓库+测试)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("帮我查看这个仓库为什么测试失败")
+        assert result["intake_required"] is True
+
+    def test_check_branch_merge(self):
+        """'帮我查下这个分支能不能 merge' → intake required (分支+merge)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("帮我查下这个分支能不能 merge")
+        assert result["intake_required"] is True
+
+    def test_look_at_test_file(self):
+        """'帮我看下 tests/test_vibe_coding_workflow.py' → intake required (test file)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("帮我看下 tests/test_vibe_coding_workflow.py")
+        assert result["intake_required"] is True
+
+    def test_check_code_requires_intake_cn(self):
+        """'帮我检查一下代码' → intake required (代码 = coding keyword)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("帮我检查一下代码")
+        assert result["intake_required"] is True
+
+    def test_what_is_vibe_coding_no_intake(self):
+        """'什么是 Vibe Coding' → no intake (informational)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("什么是 Vibe Coding")
+        assert result["intake_required"] is False
+
+    def test_explain_intake_meaning(self):
+        """'解释一下 intake 是什么意思' → no intake (是什么意思 override)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("解释一下 intake 是什么意思")
+        assert result["intake_required"] is False
+
+    def test_look_at_concept_meaning(self):
+        """'帮我看看这个概念是什么意思' → no intake (是什么意思 override)."""
+        from conversational_intake_gate import detect_intake_required
+        result = detect_intake_required("帮我看看这个概念是什么意思")
         assert result["intake_required"] is False
 
 

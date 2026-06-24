@@ -241,9 +241,14 @@ INTAKE_REQUIRED_PATTERNS = [
     r"(?i)\b(test|verify|validate|check|audit)\b.*\b(code|change|modify|new)\b",
     # Any mention of code changes
     r"(?i)\b(refactor|migrate|upgrade|update|extend|expand)\b",
+    # V1.21.28A: Test file paths (e.g. tests/test_xxx.py)
+    r"(?i)tests?[/\w]*\.(py|js|ts)",
 ]
 
 # Patterns that do NOT require intake (read-only / informational)
+# V1.21.28A correction: removed overly broad ^帮我(看看|查看|检查|看下|查下)
+# which incorrectly exempted coding requests like "帮我检查这个 PR".
+# Coding signals are now checked BEFORE exemptions (see detect_intake_required).
 NO_INTAKE_PATTERNS = [
     r"(?i)^what\s+(is|are|was|were|do|does)",
     r"(?i)^how\s+(does|do|did|is|are)",
@@ -252,14 +257,21 @@ NO_INTAKE_PATTERNS = [
     r"(?i)^explain",
     r"(?i)^(help|usage|docs)",
     r"(?i)^research\b",
-    r"(?i)^调研",
+    r"^调研",
     # Chinese informational / read-only patterns
     r"^什么是",
-    r"^帮我(看看|查看|检查|看下|查下)",
     r"^告诉我",
     r"^解释(一下|下)?",
     r"^说明(一下|下)?",
+    # "是什么意思" = pure informational question ("what does X mean")
+    r"(帮我)?(看看|查看|检查|查下|看下)?是什么意思",
+    # "帮我看看/查看/看下 + object" = informational (coding signals already filtered)
+    r"^帮我(看看|查看|看下)\s*(这个|那个)?\s*\S+",
 ]
+
+# V1.21.28A: Chinese coding keywords — checked as substring before exemptions.
+# Note: \b does NOT work for Chinese characters (they are non-word chars).
+CN_CODING_KEYWORDS = ["代码", "测试", "仓库", "分支", "功能"]
 
 
 # ── Core functions ────────────────────────────────────────────────────
@@ -267,6 +279,17 @@ NO_INTAKE_PATTERNS = [
 
 def detect_intake_required(text: str) -> dict:
     """Detect whether user input requires conversational intake.
+
+    V1.21.28A correction: coding signals are checked BEFORE informational
+    exemptions. This prevents coding requests like "帮我检查这个 PR" from
+    being incorrectly exempted.
+
+    Detection order:
+        0. "是什么意思" → always informational (overrides all signals)
+        1. English coding signals (regex with \\b)
+        2. Chinese coding keywords (substring, since \\b doesn't work for CJK)
+        3. Informational exemptions (NO_INTAKE_PATTERNS)
+        4. Default: require intake for safety
 
     Returns:
         {
@@ -278,17 +301,39 @@ def detect_intake_required(text: str) -> dict:
     """
     import re
 
-    # Check exemptions first (read-only / informational)
-    for pat in NO_INTAKE_PATTERNS:
-        if re.search(pat, text):
+    # Step 0: Pure informational patterns — overrides ALL coding signals
+    # Chinese: "是什么意思"
+    # English: "what is/are/was/were/do/does", "how does/do/did/is/are",
+    #          "show/list/display/print/get/fetch/read/check", "status",
+    #          "explain", "help/usage/docs", "research"
+    if "是什么意思" in text:
+        return {
+            "intake_required": False,
+            "reason": "Informational question ('是什么意思') — intake not required",
+            "matched_pattern": None,
+            "exempt_pattern": "是什么意思",
+        }
+    _info_prefixes = [
+        r"(?i)^what\s+(is|are|was|were|do|does)",
+        r"(?i)^how\s+(does|do|did|is|are)",
+        r"(?i)^(show|list|display|print|get|fetch|read|check)\s",
+        r"(?i)^status",
+        r"(?i)^explain",
+        r"(?i)^(help|usage|docs)",
+        r"(?i)^research\b",
+        r"^调研",
+    ]
+    import re as _re
+    for _ip in _info_prefixes:
+        if _re.search(_ip, text):
             return {
                 "intake_required": False,
-                "reason": "Read-only or informational request — intake not required",
+                "reason": "Informational prefix detected — intake not required",
                 "matched_pattern": None,
-                "exempt_pattern": pat,
+                "exempt_pattern": _ip,
             }
 
-    # Check intake-required patterns
+    # Step 1: Check English coding signals (regex with \b)
     for pat in INTAKE_REQUIRED_PATTERNS:
         if re.search(pat, text):
             return {
@@ -298,7 +343,27 @@ def detect_intake_required(text: str) -> dict:
                 "exempt_pattern": None,
             }
 
-    # Default: if uncertain, require intake for safety
+    # Step 2: Check Chinese coding keywords (substring match)
+    for kw in CN_CODING_KEYWORDS:
+        if kw in text:
+            return {
+                "intake_required": True,
+                "reason": f"Chinese coding keyword '{kw}' detected — intake required",
+                "matched_pattern": kw,
+                "exempt_pattern": None,
+            }
+
+    # Step 3: Check informational exemptions (read-only / informational)
+    for pat in NO_INTAKE_PATTERNS:
+        if re.search(pat, text):
+            return {
+                "intake_required": False,
+                "reason": "Read-only or informational request — intake not required",
+                "matched_pattern": None,
+                "exempt_pattern": pat,
+            }
+
+    # Step 4: Default — if uncertain, require intake for safety
     return {
         "intake_required": True,
         "reason": "Request type uncertain — intake required for safety",
