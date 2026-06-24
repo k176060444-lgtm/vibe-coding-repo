@@ -991,6 +991,300 @@ def self_check() -> dict:
     }
 
 
+# ── V1.21.30B: Mode Entry Detection ─────────────────────────────────
+
+# Mode entry triggers — when ANY of these match, agent enters MODE_ACTIVE
+MODE_ENTRY_TRIGGERS = [
+    # Chinese explicit entry
+    r"进入.*vibe.?coding",
+    r"进入.*vibe\s*coding",
+    r"启动.*vibe.?coding",
+    r"开始.*vibe.?coding",
+    r"vibe.?coding.*模式",
+    r"vibe\s*coding\s*模式",
+    # English explicit entry
+    r"(?i)enter\s+vibe\s*coding\s*mode",
+    r"(?i)start\s+vibe\s*coding",
+    r"(?i)activate\s+vibe\s*coding",
+    r"(?i)vibe\s*coding\s*mode",
+    # Version execution triggers
+    r"(?i)run\s+V\d+\.\d+",
+    r"(?i)execute\s+version",
+]
+
+# Cross-repo indicators — when request involves repos other than vibe-coding-repo-clean
+CROSS_REPO_INDICATORS = [
+    r"(?i)hermes[-_]?agent",
+    r"(?i)NousResearch/hermes",
+    r"(?i)k176060444-lgtm/hermes",
+    r"(?i)\bupstream\b.*\bhermes\b",
+    r"(?i)\bhermes\b.*\b(upstream|official|PR|merge)\b",
+    r"(?i)\bopencode\b.*\b(config|env|wrapper)\b",
+    # Add more cross-repo patterns as needed
+]
+
+# Local repos that are always safe (no gate needed)
+SAFE_LOCAL_REPOS = [
+    "vibe-coding-repo-clean",
+    "vibe-coding-repo",
+]
+
+# Forbidden actions that must NEVER execute
+FORBIDDEN_ACTIONS = {
+    "debug_config_raw_output",
+    "output_key_value",
+    "output_token",
+    "clean_malicious_payload_evidence",
+    "commit_malicious_payload_evidence",
+    "clean_pilot_prompts",
+    "commit_pilot_prompts",
+}
+
+
+def detect_mode_entry(text: str) -> dict:
+    """Detect whether user input triggers Vibe Coding mode entry.
+
+    V1.21.30B: This function detects explicit mode entry triggers like
+    "进入vibe coding模式" and returns mode state + next required action.
+
+    Detection order:
+        1. Mode entry triggers (keyword/regex match)
+        2. Cross-repo indicators (if mode active)
+        3. Default: not a mode entry
+
+    Returns:
+        {
+            "mode_active": bool,          # True if mode entry detected
+            "trigger": str or None,       # Matched trigger pattern
+            "cross_repo_detected": bool,  # True if request involves external repo
+            "cross_repo_target": str or None,  # Which external repo
+            "next_action": str,           # What agent must do next
+            "verdict": str,               # MODE_ACTIVE or NOT_MODE_ENTRY
+        }
+    """
+    import re
+
+    # Step 1: Check mode entry triggers
+    for trigger in MODE_ENTRY_TRIGGERS:
+        if re.search(trigger, text):
+            # Step 2: Check if request also involves cross-repo
+            cross_repo = _detect_cross_repo(text)
+            return {
+                "mode_active": True,
+                "trigger": trigger,
+                "cross_repo_detected": cross_repo["detected"],
+                "cross_repo_target": cross_repo.get("target"),
+                "next_action": "INTAKE_REQUIRED",
+                "verdict": "MODE_ACTIVE",
+            }
+
+    return {
+        "mode_active": False,
+        "trigger": None,
+        "cross_repo_detected": False,
+        "cross_repo_target": None,
+        "next_action": "NONE",
+        "verdict": "NOT_MODE_ENTRY",
+    }
+
+
+def _detect_cross_repo(text: str) -> dict:
+    """Detect if a request involves non-local repos.
+
+    Returns:
+        {
+            "detected": bool,
+            "target": str or None,  # e.g. "hermes-agent"
+        }
+    """
+    import re
+    for pattern in CROSS_REPO_INDICATORS:
+        if re.search(pattern, text):
+            # Determine target
+            if "hermes" in pattern.lower() or "hermes" in text.lower():
+                return {"detected": True, "target": "hermes-agent"}
+            return {"detected": True, "target": "unknown"}
+    return {"detected": False, "target": None}
+
+
+def check_cross_repo_guard(text: str, current_repo: str = "vibe-coding-repo-clean") -> dict:
+    """Cross-Repo Grey-Use Guard.
+
+    When a request involves repos other than the current safe repo,
+    the agent must first output PLAN_APPROVAL_REQUEST before doing
+    ANY research, clone, install, or modification.
+
+    Returns:
+        {
+            "guard_passed": bool,      # True if request is within safe scope
+            "cross_repo_detected": bool,
+            "cross_repo_target": str or None,
+            "risk_classification": str,  # "local_safe" | "cross_repo_grey_use" | "cross_repo_real_grey_use"
+            "operator_action_needed": str,
+            "detail": str,
+        }
+    """
+    cross = _detect_cross_repo(text)
+    if cross["detected"]:
+        # Determine risk level
+        target = cross.get("target", "unknown")
+        if target == "hermes-agent":
+            risk = "cross_repo_real_grey_use"
+            action = "APPROVE_REAL_EXEC / REQUEST_REVISION / BLOCK"
+        else:
+            risk = "cross_repo_grey_use"
+            action = "APPROVE_CROSS_REPO / REQUEST_REVISION / BLOCK"
+        return {
+            "guard_passed": False,
+            "cross_repo_detected": True,
+            "cross_repo_target": target,
+            "risk_classification": risk,
+            "operator_action_needed": action,
+            "detail": (
+                f"Request involves external repo '{target}'. "
+                f"Agent must output PLAN_APPROVAL_REQUEST before any research, "
+                f"clone, install, or modification."
+            ),
+        }
+    return {
+        "guard_passed": True,
+        "cross_repo_detected": False,
+        "cross_repo_target": None,
+        "risk_classification": "local_safe",
+        "operator_action_needed": "NONE",
+        "detail": "Request is within safe local repo scope.",
+    }
+
+
+def compile_casual_prompt(text: str) -> dict:
+    """Compile a casual/voice user prompt into structured intake fields.
+
+    V1.21.30B: Converts informal Chinese/voice into structured intake.
+    The agent MUST use this output as the basis for PLAN_APPROVAL_REQUEST,
+    NOT execute the casual prompt directly.
+
+    Returns:
+        {
+            "original": str,
+            "compiled_goal": str,
+            "scope_guess": list[str],
+            "risk_classification": str,
+            "cross_repo_detected": bool,
+            "cross_repo_target": str or None,
+            "gate_required": bool,
+            "forbidden_actions": list[str],
+        }
+    """
+    import re
+
+    # Detect cross-repo
+    cross = _detect_cross_repo(text)
+    risk = "local_safe"
+    if cross["detected"]:
+        risk = "cross_repo_real_grey_use" if cross["target"] == "hermes-agent" else "cross_repo_grey_use"
+
+    # Extract goal from casual text
+    goal = text.strip()
+    # Strip common prefixes
+    for prefix in ["帮我", "帮我来", "你来", "我们来", "请", "麻烦", "能不能"]:
+        if goal.startswith(prefix):
+            goal = goal[len(prefix):].lstrip()
+    # Strip mode entry text
+    goal = re.sub(r"(?i)(进入|启动|开始)?\s*vibe\s*coding\s*(模式)?\s*[，,]?\s*", "", goal).strip()
+    if not goal:
+        goal = text[:200]
+
+    return {
+        "original": text,
+        "compiled_goal": goal,
+        "scope_guess": _guess_scope(text),
+        "risk_classification": risk,
+        "cross_repo_detected": cross["detected"],
+        "cross_repo_target": cross.get("target"),
+        "gate_required": True,  # Always true in vibe coding mode
+        "forbidden_actions": sorted(FORBIDDEN_ACTIONS),
+    }
+
+
+def _guess_scope(text: str) -> list:
+    """Guess scope from casual text. Returns list of area hints."""
+    import re
+    scopes = []
+    scope_patterns = [
+        (r"(?i)(slash\s*command|斜杠|bot-ping|bot-version|bot-help)", "qqbot-slash-commands"),
+        (r"(?i)(PR|pull\s*request|merge|push)", "git-workflow"),
+        (r"(?i)(test|测试|verify|验证)", "testing"),
+        (r"(?i)(config|配置|setup)", "configuration"),
+        (r"(?i)(model|模型|provider)", "model-routing"),
+        (r"(?i)(gateway|网关|messaging)", "gateway"),
+    ]
+    for pat, area in scope_patterns:
+        if re.search(pat, text):
+            scopes.append(area)
+    if not scopes:
+        scopes.append("general")
+    return scopes
+
+
+def generate_plan_approval_request(
+    phase_id: str,
+    approval_id: str,
+    compiled_prompt: dict,
+    intake_record: dict = None,
+) -> dict:
+    """Generate a PLAN_APPROVAL_REQUEST structure.
+
+    V1.21.30B: This is the structured output the agent MUST produce
+    before any execution in vibe coding mode.
+
+    Returns:
+        {
+            "phase_id": str,
+            "approval_id": str,
+            "request_type": "PLAN_APPROVAL_REQUEST",
+            "goal": str,
+            "risk_classification": str,
+            "cross_repo_detected": bool,
+            "cross_repo_target": str or None,
+            "scope": list[str],
+            "forbidden_actions": list[str],
+            "role_model_matrix_required": bool,
+            "operator_action_needed": str,
+            "next_step": str,
+        }
+    """
+    risk = compiled_prompt.get("risk_classification", "local_safe")
+    cross_repo = compiled_prompt.get("cross_repo_detected", False)
+    cross_target = compiled_prompt.get("cross_repo_target")
+
+    # Determine operator action based on risk
+    if risk == "cross_repo_real_grey_use":
+        action = "APPROVE_REAL_EXEC / REQUEST_REVISION / BLOCK"
+    elif risk == "cross_repo_grey_use":
+        action = "APPROVE_CROSS_REPO / REQUEST_REVISION / BLOCK"
+    else:
+        action = "APPROVE_PLAN / REQUEST_REVISION / BLOCK"
+
+    return {
+        "phase_id": phase_id,
+        "approval_id": approval_id,
+        "request_type": "PLAN_APPROVAL_REQUEST",
+        "goal": compiled_prompt.get("compiled_goal", ""),
+        "risk_classification": risk,
+        "cross_repo_detected": cross_repo,
+        "cross_repo_target": cross_target,
+        "scope": compiled_prompt.get("scope_guess", []),
+        "forbidden_actions": compiled_prompt.get("forbidden_actions", []),
+        "role_model_matrix_required": True,
+        "operator_action_needed": action,
+        "next_step": (
+            "Operator must approve plan before execution. "
+            "Agent must produce role/model matrix with: "
+            "Role, Node, Model, Task Scope, cost_tag, call_budget, fallback_policy."
+        ),
+    }
+
+
 # ── CLI ───────────────────────────────────────────────────────────────
 
 
@@ -1030,6 +1324,20 @@ def main():
     va.add_argument("--intake-json", default=None, help="Intake record JSON")
     va.add_argument("--proposal-json", default=None, help="Proposal JSON")
     va.add_argument("--matrix-json", default=None, help="Role/model matrix JSON")
+
+    # detect-mode (V1.21.30B)
+    dm = sub.add_parser("detect-mode", help="Detect vibe coding mode entry")
+    dm.add_argument("--text", required=True, help="User input text")
+
+    # compile-prompt (V1.21.30B)
+    cp = sub.add_parser("compile-prompt", help="Compile casual prompt to structured intake")
+    cp.add_argument("--text", required=True, help="User input text")
+
+    # plan-approval-request (V1.21.30B)
+    par = sub.add_parser("plan-approval-request", help="Generate PLAN_APPROVAL_REQUEST")
+    par.add_argument("--text", required=True, help="User input text")
+    par.add_argument("--phase-id", default="V1.21.30B", help="Phase ID")
+    par.add_argument("--approval-id", default="", help="Approval ID")
 
     args = parser.parse_args()
 
@@ -1128,6 +1436,49 @@ def main():
                 for e in errors:
                     print(f"  - {e}")
         sys.exit(0 if result["valid"] else 1)
+
+    if args.command == "detect-mode":
+        result = detect_mode_entry(args.text)
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print(f"Mode Active: {result['mode_active']}")
+            print(f"  Trigger: {result['trigger']}")
+            print(f"  Next Action: {result['next_action']}")
+            print(f"  Verdict: {result['verdict']}")
+            if result['cross_repo_detected']:
+                print(f"  Cross-Repo: {result['cross_repo_target']}")
+        sys.exit(0 if result["mode_active"] else 1)
+
+    if args.command == "compile-prompt":
+        result = compile_casual_prompt(args.text)
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print(f"Goal: {result['compiled_goal']}")
+            print(f"  Risk: {result['risk_classification']}")
+            print(f"  Scope: {result['scope_guess']}")
+            print(f"  Gate Required: {result['gate_required']}")
+        sys.exit(0)
+
+    if args.command == "plan-approval-request":
+        compiled = compile_casual_prompt(args.text)
+        aid = args.approval_id or f"approval-{args.phase_id.lower()}-001"
+        result = generate_plan_approval_request(
+            phase_id=args.phase_id,
+            approval_id=aid,
+            compiled_prompt=compiled,
+        )
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print(f"PLAN_APPROVAL_REQUEST")
+            print(f"  Phase: {result['phase_id']}")
+            print(f"  Approval: {result['approval_id']}")
+            print(f"  Goal: {result['goal']}")
+            print(f"  Risk: {result['risk_classification']}")
+            print(f"  Action: {result['operator_action_needed']}")
+        sys.exit(0)
 
     parser.print_help()
     sys.exit(2)
