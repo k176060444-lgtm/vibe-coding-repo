@@ -274,10 +274,19 @@ NODE_TRANSPORT = {
 
 def new_model_entry(exact_model_id: str, alias: str = "", cost_tag: str = "unknown",
                     roles: list = None, capability_tags: list = None, priority: int = 10,
-                    source_flags: list = None) -> dict:
+                    source_flags: list = None,
+                    endpoint: str = "", protocol: str = "openai-compatible",
+                    secret_ref: str = "", credential_status: str = "missing",
+                    quarantine_status: str = "none") -> dict:
     """Create a new model pool entry."""
     if not alias:
         alias = exact_model_id.split("/")[-1] if "/" in exact_model_id else exact_model_id
+    # Validate endpoint doesn't contain secrets
+    if endpoint:
+        _validate_endpoint_no_secrets(endpoint)
+    # Validate secret_ref is a placeholder, not a real key
+    if secret_ref:
+        _validate_secret_ref_placeholder(secret_ref)
     return {
         "model_id": exact_model_id,
         "alias": alias,
@@ -303,7 +312,59 @@ def new_model_entry(exact_model_id: str, alias: str = "", cost_tag: str = "unkno
             "last_verdict": None,
             "last_verdict_timestamp": None,
         },
+        "endpoint": endpoint,
+        "protocol": protocol,
+        "secret_ref": secret_ref,
+        "credential_status": credential_status,
+        "quarantine_status": quarantine_status,
     }
+
+
+# --- Security Validation ---
+
+DANGEROUS_FIELD_NAMES = {
+    "key", "api_key", "token", "secret_value", "password", "access_token",
+    "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "VOLCENGINE_API_KEY", "XIAOMI_API_KEY",
+    "MINIMAX_API_KEY", "secret_key", "private_key", "auth_token",
+}
+
+DANGEROUS_KEY_PATTERNS = [
+    r"sk-[a-zA-Z0-9]{10,}",
+    r"AKIA[A-Z0-9]{16}",
+    r"Bearer [a-zA-Z0-9]{10,}",
+    r"-----BEGIN\s+(RSA|EC|DSA|OPENSSH)\s+PRIVATE\s+KEY-----",
+]
+
+ENDPOINT_SECRET_PATTERNS = [
+    r"[?&](api_key|token|secret|password|key|access_token)=",
+    r"://[^:]+:[^@]+@",  # userinfo with password
+]
+
+
+def _validate_endpoint_no_secrets(endpoint: str) -> None:
+    """Validate endpoint URL doesn't contain secrets. Raises ValueError if found."""
+    import re as _re
+    for pattern in ENDPOINT_SECRET_PATTERNS:
+        if _re.search(pattern, endpoint, _re.IGNORECASE):
+            raise ValueError(f"endpoint contains suspected secret: {endpoint[:50]}...")
+
+
+def _validate_secret_ref_placeholder(secret_ref: str) -> None:
+    """Validate secret_ref is a placeholder, not a real key. Raises ValueError if found."""
+    import re as _re
+    for pattern in DANGEROUS_KEY_PATTERNS:
+        if _re.search(pattern, secret_ref, _re.IGNORECASE):
+            raise ValueError(f"secret_ref contains suspected real key")
+    # Must start with secret: or be empty
+    if secret_ref and not secret_ref.startswith("secret:"):
+        raise ValueError(f"secret_ref must start with 'secret:' or be empty")
+
+
+def _validate_no_dangerous_fields(kwargs: dict) -> None:
+    """Validate no dangerous field names are passed. Raises ValueError if found."""
+    for key in kwargs:
+        if key.lower() in {f.lower() for f in DANGEROUS_FIELD_NAMES}:
+            raise ValueError(f"dangerous field name rejected: {key}")
 
 
 def auto_tag_cost(model_id: str) -> str:
@@ -668,6 +729,11 @@ class ModelPool:
                     "fallback_allowed": e["fallback_allowed"],
                     "live_validation": e.get("live_validation", {}),
                     "display_name": e.get("display_name", ""),
+                    "endpoint": e.get("endpoint", ""),
+                    "protocol": e.get("protocol", "openai-compatible"),
+                    "secret_ref": e.get("secret_ref", ""),
+                    "credential_status": e.get("credential_status", "missing"),
+                    "quarantine_status": e.get("quarantine_status", "none"),
                 }
                 for mid, e in self.models.items()
             },
@@ -688,8 +754,16 @@ class ModelPool:
 
     def add_model(self, exact_model_id: str, alias: str = "", cost_tag: str = "unknown",
                   roles: list = None, capability_tags: list = None,
-                  source_flags: list = None) -> dict:
-        """Add a model entry to the pool. Returns the new entry."""
+                  source_flags: list = None,
+                  endpoint: str = "", protocol: str = "openai-compatible",
+                  secret_ref: str = "", credential_status: str = "missing",
+                  **kwargs) -> dict:
+        """Add a model entry to the pool. Returns the new entry.
+
+        Security: rejects dangerous field names and real key patterns.
+        """
+        # Reject dangerous field names
+        _validate_no_dangerous_fields(kwargs)
         if exact_model_id in self.models:
             return {"error": f"model already exists: {exact_model_id}",
                     "action": "use update or disable instead"}
@@ -697,6 +771,8 @@ class ModelPool:
             exact_model_id, alias=alias, cost_tag=cost_tag,
             roles=roles, capability_tags=capability_tags,
             source_flags=source_flags or ["manual_candidate"],
+            endpoint=endpoint, protocol=protocol,
+            secret_ref=secret_ref, credential_status=credential_status,
         )
         self.models[exact_model_id] = entry
         self.save()
@@ -734,6 +810,46 @@ class ModelPool:
         entry["lifecycle_status"] = "retired"
         self.save()
         return {"action": "retired", "exact_model_id": exact_model_id,
+                "snapshot_sha256": self.snapshot_sha256}
+
+    def delete_model(self, exact_model_id: str, force: bool = False,
+                     active_model_ids: set = None,
+                     approval_context: dict = None) -> dict:
+        """Delete a model from the pool. Conservative: blocks if active references exist.
+
+        Args:
+            exact_model_id: Model to delete
+            force: Bypass recent/inactive usage warning (NOT active reference check)
+            active_model_ids: Set of model IDs currently in active jobs (blocks delete)
+            approval_context: Approval record (required for high-risk delete)
+
+        Returns:
+            dict with action, status, and audit info
+        """
+        if exact_model_id not in self.models:
+            return {"error": f"model not found: {exact_model_id}",
+                    "status": "blocked"}
+
+        # Active reference check — cannot be bypassed even with force
+        if active_model_ids and exact_model_id in active_model_ids:
+            return {"error": f"model has active job reference: {exact_model_id}",
+                    "status": "blocked",
+                    "blocked_reason": "active_job_reference"}
+
+        # High risk — requires approval
+        if not approval_context:
+            return {"action": "delete",
+                    "model_id": exact_model_id,
+                    "status": "approval_required",
+                    "risk_level": "high",
+                    "requires_approval": True}
+
+        # Remove from pool
+        del self.models[exact_model_id]
+        self.save()
+        return {"action": "deleted",
+                "exact_model_id": exact_model_id,
+                "status": "executed",
                 "snapshot_sha256": self.snapshot_sha256}
 
     def sync_plan(self, nodes: list = None) -> dict:
