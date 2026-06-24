@@ -65,16 +65,48 @@ A structured plan covering:
 
 #### 2b. Model Pool Listing
 
-A complete table of available models:
+The Orchestrator MUST produce a **dynamic model pool** at runtime by querying actual
+configuration. The model pool is NOT a fixed list — it reflects what is currently
+available, enabled, and healthy.
 
-| Provider | Model ID | Alias | Available Nodes | Suitable Roles | Health | Free | Limits/Risks | Recommended Use |
-|----------|----------|-------|-----------------|----------------|--------|------|-------------|-----------------|
-| deepseek-plan | deepseek-v4-flash | v4-flash | Windows/9bao/5bao | Implementer | ✅ | ❌ | — | General coding |
-| deepseek-plan | deepseek-v4-pro | v4-pro | Windows/9bao/5bao | Implementer/Reviewer | ✅ | ❌ | — | Complex coding, review |
-| volcengine-plan | ark-code-latest | ark-code | Windows/9bao/5bao | Implementer | ✅ | ❌ | — | General coding |
-| xiaomi-plan | mimo-v2.5 | mimo | Windows/9bao/5bao | Reporter/Verifier | ✅ | ✅ | — | Light tasks, reporting |
-| xiaomi-plan | mimo-v2.5-pro | mimo-pro | Windows/9bao/5bao | Implementer/Reviewer | ✅ | ✅ | — | All roles |
-| minimax-plan | MiniMax-M3 | M3 | Windows/9bao/5bao | Implementer | ✅ | ❌ | — | General coding |
+**Discovery sources (at runtime):**
+1. User-configured models (opencode.jsonc, env files, manual additions)
+2. OpenCode free models (discovered at runtime, availability varies)
+3. OpenCode Go models (only if subscribed/enabled/detected)
+4. Provider-configured models with valid credentials
+
+**Required output — two sections:**
+
+**A. Available Model Pool** — models currently selectable for execution:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| provider | Yes | Provider name (e.g. xiaomi, deepseek, volcengine, minimax) |
+| model_id | Yes | Full model identifier |
+| alias | Yes | Short name / display name |
+| source | Yes | How discovered: user-config / opencode-free / opencode-go / provider |
+| plan_type | Yes | deepseek-plan / xiaomi-plan / volcengine-plan / minimax-plan / opencode-free / opencode-go |
+| cost_status | Yes | free / paid / mixed |
+| node_availability | Yes | Windows / 9bao / 5bao (which nodes can run this model) |
+| enabled | Yes | true (must be enabled to be in Available pool) |
+| health_status | Yes | healthy / degraded / unknown |
+| quarantine_status | Yes | none / quarantined (quarantined models NOT in Available pool) |
+| credential_status | Yes | available / redacted / unknown (NEVER expose plaintext) |
+| suitable_roles | Yes | Orchestrator / Implementer / Reviewer / Verifier / Reporter |
+| limits_or_risks | Yes | Known limitations, rate limits, context window, etc. |
+| recommendation_reason | Yes | Why this model is recommended for this task |
+
+**B. Non-available Status Summary** — disabled / unavailable / quarantine / not detected.
+For reference only, NOT execution candidates.
+
+**Rules:**
+- No fixed model count — the pool reflects actual runtime state
+- OpenCode free models enter Available only if discovered and healthy
+- OpenCode Go enters Available only if subscribed/enabled/detected; otherwise in Non-available
+- User-deleted/disabled/quarantined models go to Non-available, NOT Available
+- Orchestrator recommendations MUST come from Available pool only
+- If a recommended model is unavailable, BLOCK — do NOT auto-substitute
+- Credential values are NEVER exposed (credential_status=available/redacted/unknown only)
 
 #### 2c. Role Assignment Matrix
 

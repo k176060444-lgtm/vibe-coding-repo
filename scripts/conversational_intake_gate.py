@@ -302,7 +302,7 @@ def detect_intake_required(text: str) -> dict:
     import re
 
     # Step 0: Pure informational patterns — overrides ALL coding signals
-    # Chinese: "是什么意思"
+    # Chinese: "是什么意思", "告诉我/说明/解释...是什么"
     # English: "what is/are/was/were/do/does", "how does/do/did/is/are",
     #          "show/list/display/print/get/fetch/read/check", "status",
     #          "explain", "help/usage/docs", "research"
@@ -312,6 +312,17 @@ def detect_intake_required(text: str) -> dict:
             "reason": "Informational question ('是什么意思') — intake not required",
             "matched_pattern": None,
             "exempt_pattern": "是什么意思",
+        }
+    # V1.21.28B: "告诉我/说明/解释 X 是什么" = informational question
+    # e.g. "告诉我 Vibe Coding workflow 是什么" / "说明 intake 是什么"
+    # Does NOT match actionable: "告诉我这个 PR 怎么修" / "告诉我这个 bug 怎么修"
+    import re as _re2
+    if _re2.search(r"(告诉我|说明|解释).{0,30}是什么$", text):
+        return {
+            "intake_required": False,
+            "reason": "Informational question (告诉我/说明/解释...是什么) — intake not required",
+            "matched_pattern": None,
+            "exempt_pattern": "(告诉我|说明|解释).{0,30}是什么$",
         }
     _info_prefixes = [
         r"(?i)^what\s+(is|are|was|were|do|does)",
