@@ -253,6 +253,7 @@ This contract is enforced by:
 3. `git_pr_approval_gate.py` — enforces PR state transitions
 4. `MODEL_POOL_DISTRIBUTION_CONTRACT.md` — model pool governance, schema, and distribution rules
 5. This document — the authoritative workflow definition
+6. `VIBE_CODING_MODE_CONTRACT.md` — mandatory mode workflow, non-bypassable rules, operator gates, deviation policy, cross-repo grey-use policy
 
 ---
 
