@@ -18,30 +18,50 @@ VERSION = "1.0.0"
 # ── Model Role Definitions ───────────────────────────────────────────
 
 ROLES = {
+    "orchestrator": {
+        "purpose": "Pure flow control — stage transitions, gate checks, worker dispatch",
+        "requirements": ["stage_control", "gate_enforcement", "worker_dispatch"],
+        "risk_constraint": "low — read-only flow control, no mutation",
+    },
+    "explorer": {
+        "purpose": "Read-only evidence collection in PLAN-DISCOVERY",
+        "requirements": ["codebase_reading", "git_history", "file_search"],
+        "risk_constraint": "low — read-only exploration, no mutation",
+    },
     "planner": {
-        "purpose": "Decompose requirements into auditable WO plans",
-        "requirements": ["instruction_following", "structured_output", "planning"],
+        "purpose": "Generate plan, risk assessment, test strategy, and recommendation matrix",
+        "requirements": ["planning", "structured_output", "risk_analysis"],
         "risk_constraint": "low — read-only planning, no mutation",
     },
     "implementer": {
-        "purpose": "Write code, fix bugs, resolve conflicts",
+        "purpose": "Write code, fix bugs, resolve conflicts in isolated worktree",
         "requirements": ["coding", "testing", "git_operations"],
         "risk_constraint": "medium — writes to worktree only, reviewed before merge",
     },
-    "reviewer": {
-        "purpose": "Blind review of diffs, security checks, quality gates",
-        "requirements": ["code_review", "security_awareness", "attention_to_detail"],
+    "tester-a": {
+        "purpose": "Run test suite A and output PASS/FAIL with evidence",
+        "requirements": ["testing", "pytest", "result_classification"],
+        "risk_constraint": "low — read-only test execution, no mutation",
+    },
+    "tester-b": {
+        "purpose": "Run independent test suite B or different environment, output independent verdict",
+        "requirements": ["testing", "pytest", "result_classification"],
+        "risk_constraint": "low — read-only test execution, no mutation",
+    },
+    "reviewer-a": {
+        "purpose": "Blind review of base_sha..result_sha diff, output PASS/REQUEST_CHANGES/BLOCKED",
+        "requirements": ["code_review", "security_awareness", "diff_analysis"],
         "risk_constraint": "low — read-only review, no mutation",
     },
-    "summarizer": {
-        "purpose": "Generate operator reports, daily briefings, batch summaries",
-        "requirements": ["summarization", "chinese_output", "structured_output"],
-        "risk_constraint": "low — no mutation, no token access",
+    "reviewer-b": {
+        "purpose": "Independent blind review of same diff, output independent verdict",
+        "requirements": ["code_review", "security_awareness", "diff_analysis"],
+        "risk_constraint": "low — read-only review, no mutation",
     },
-    "recovery": {
-        "purpose": "Diagnose and recover from failures (gateway, worker, batch)",
-        "requirements": ["debugging", "system_knowledge", "careful_execution"],
-        "risk_constraint": "high — may restart services, requires human approval for destructive ops",
+    "git-integrator": {
+        "purpose": "Push, create draft PR, Ready, merge, cleanup — only after operator approval",
+        "requirements": ["git_operations", "gh_cli", "audit_trail"],
+        "risk_constraint": "high — writes to remote, requires explicit operator approval for each action",
     },
 }
 
@@ -51,22 +71,34 @@ MODELS = {
     "deepseek-v4-pro": {
         "provider": "deepseek",
         "strengths": ["coding", "instruction_following", "structured_output"],
-        "role_fit": {"planner": 0.8, "implementer": 0.9, "reviewer": 0.8, "summarizer": 0.7, "recovery": 0.7},
+        "role_fit": {"orchestrator": 0.6, "explorer": 0.7, "planner": 0.8, "implementer": 0.9, "tester-a": 0.8, "tester-b": 0.8, "reviewer-a": 0.8, "reviewer-b": 0.8, "git-integrator": 0.5},
+        "allowed_nodes": ["5bao", "9bao"],
+        "operator_selection_required": True,
+        "guarded_blocked": True,
+        "block_reason": "deepseek-v4-pro requires explicit operator approval; not default recommended",
     },
     "mimo-v2.5-pro": {
         "provider": "xiaomi",
         "strengths": ["chinese_output", "instruction_following", "planning"],
-        "role_fit": {"planner": 0.9, "implementer": 0.7, "reviewer": 0.7, "summarizer": 0.9, "recovery": 0.6},
+        "role_fit": {"orchestrator": 0.7, "explorer": 0.7, "planner": 0.9, "implementer": 0.7, "tester-a": 0.6, "tester-b": 0.6, "reviewer-a": 0.7, "reviewer-b": 0.7, "git-integrator": 0.4},
+        "allowed_nodes": ["5bao", "9bao", "win"],
+        "operator_selection_required": True,
+        "blocked": True,
+        "block_reason": "mimo/xiaomi models are temporary_unavailable",
     },
     "minimax-m3": {
         "provider": "minimax",
         "strengths": ["coding", "testing", "structured_output"],
-        "role_fit": {"planner": 0.7, "implementer": 0.8, "reviewer": 0.8, "summarizer": 0.7, "recovery": 0.7},
+        "role_fit": {"orchestrator": 0.6, "explorer": 0.7, "planner": 0.7, "implementer": 0.8, "tester-a": 0.8, "tester-b": 0.8, "reviewer-a": 0.8, "reviewer-b": 0.8, "git-integrator": 0.5},
+        "allowed_nodes": ["5bao", "9bao"],
+        "operator_selection_required": True,
     },
     "volcengine-doubao": {
         "provider": "volcengine",
         "strengths": ["chinese_output", "summarization", "planning"],
-        "role_fit": {"planner": 0.8, "implementer": 0.6, "reviewer": 0.7, "summarizer": 0.9, "recovery": 0.5},
+        "role_fit": {"orchestrator": 0.8, "explorer": 0.7, "planner": 0.8, "implementer": 0.6, "tester-a": 0.6, "tester-b": 0.6, "reviewer-a": 0.7, "reviewer-b": 0.7, "git-integrator": 0.5},
+        "allowed_nodes": ["5bao", "9bao"],
+        "operator_selection_required": True,
     },
 }
 
@@ -114,7 +146,7 @@ def recommend(role, risk_level="low", node_id=None, enforce_guards=True):
 
     # Build routing-name to YAML model-id mapping
     _ROUTING_TO_YAML = {
-        "deepseek-v4-pro": None,
+        "deepseek-v4-pro": "deepseek-deepseek-chat",
         "mimo-v2.5-pro": "xiaomi-mimo-v2-5-pro",
         "minimax-m3": "minimax-minimax-m2-5",
         "volcengine-doubao": "volcengine-doubao-1-5-pro-256k",
@@ -145,6 +177,9 @@ def recommend(role, risk_level="low", node_id=None, enforce_guards=True):
                 # Block models with no YAML entry (they are unverified)
                 if yaml_id is None:
                     continue
+            # Respect guarded_blocked flag (e.g. deepseek-v4-pro requires operator approval)
+            if model_info.get("guarded_blocked"):
+                continue
         fit = model_info["role_fit"].get(role, 0)
         candidates.append({
             "model": model_name,
@@ -175,10 +210,21 @@ def recommend(role, risk_level="low", node_id=None, enforce_guards=True):
 
 
 def route_all():
-    """Route all roles."""
+    """Route all 9 roles with node attribution and operator selection requirement."""
     results = {}
     for role in ROLES:
-        results[role] = recommend(role)
+        rec = recommend(role)
+        # Add VibeDev 9-role metadata
+        rec["planned_node"] = "LOGICAL_NODE_ONLY"
+        rec["planned_alias"] = rec.get("recommended", "")
+        rec["planned_provider_model"] = ""
+        rec["allowed_nodes_check"] = "5bao and 9bao share same physical node (KK-5bao); LOGICAL_NODE_ONLY"
+        rec["node_isolation"] = "logical_only"
+        rec["physical_isolation_claimed"] = False
+        rec["operator_selection_required"] = True
+        rec["fallback_count"] = 0
+        rec["node_degradation_requires_operator_approval"] = True
+        results[role] = rec
     return results
 
 
