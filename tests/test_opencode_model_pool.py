@@ -231,8 +231,16 @@ class TestModelPoolSanitize:
     def test_sanitize_no_secrets(self, populated_pool):
         sanitized = exported = populated_pool.export_sanitized()
         text = json.dumps(sanitized)
-        for kw in ["TOKEN", "SECRET", "KEY", "PASSWORD", "PRIVATE"]:
+        # Allow SECRET_REF (it's a placeholder field), but block actual secrets
+        for kw in ["TOKEN", "KEY", "PASSWORD", "PRIVATE"]:
             assert kw not in text.upper()
+        # SECRET is allowed only as part of SECRET_REF
+        upper_text = text.upper()
+        # Check that SECRET doesn't appear except in "SECRET_REF" context
+        secret_positions = [i for i in range(len(upper_text)) if upper_text[i:i+6] == "SECRET"]
+        for pos in secret_positions:
+            # Must be followed by "_REF" to be allowed (SECRET_REF = 10 chars)
+            assert upper_text[pos:pos+10] == "SECRET_REF", f"Unexpected SECRET at position {pos}"
 
     def test_sanitize_has_model_fields(self, populated_pool):
         sanitized = populated_pool.export_sanitized()
@@ -598,3 +606,323 @@ class TestRecommendationGateNative(unittest.TestCase):
         pool = ModelPool.from_yaml(os.path.join(os.path.dirname(__file__), "../scripts/model_pool.yaml"))
         
         # Get models that dont allow 9bao
+# --- Dynamic Model Pool Tests (V1.20.60.2) ---
+
+
+@pytest.fixture
+def sample_config(tmp_path):
+    """Create a sample opencode.jsonc config file."""
+    config = {
+        "$schema": "https://opencode.ai/config.json",
+        "provider": {
+            "deepseek-plan": {
+                "npm": "@ai-sdk/openai-compatible",
+                "options": {"baseURL": "https://api.deepseek.com/v1", "apiKey": "sk-secret-123"},
+                "models": {
+                    "deepseek-v4-flash": {"name": "DeepSeek V4 Flash"},
+                    "deepseek-v4-pro": {"name": "DeepSeek V4 Pro"},
+                },
+            },
+            "xiaomi-plan": {
+                "npm": "@ai-sdk/openai-compatible",
+                "options": {"baseURL": "https://example.com", "apiKey": "sk-xiaomi-secret"},
+                "models": {"mimo-v2.5": {}, "mimo-v2.5-pro": {}},
+            },
+        },
+    }
+    p = tmp_path / "opencode.jsonc"
+    p.write_text(json.dumps(config), encoding="utf-8")
+    return str(p)
+
+
+class TestParseConfiguredModels:
+    """Tests for parse_configured_models()."""
+
+    def test_parse_returns_list(self, sample_config):
+        from opencode_model_pool import parse_configured_models
+        result = parse_configured_models(sample_config)
+        assert isinstance(result, list)
+
+    def test_parse_count(self, sample_config):
+        from opencode_model_pool import parse_configured_models
+        result = parse_configured_models(sample_config)
+        assert len(result) == 4  # 2 deepseek + 2 xiaomi
+
+    def test_parse_exact_model_id(self, sample_config):
+        from opencode_model_pool import parse_configured_models
+        result = parse_configured_models(sample_config)
+        ids = [e["exact_model_id"] for e in result]
+        assert "deepseek-plan/deepseek-v4-flash" in ids
+        assert "xiaomi-plan/mimo-v2.5" in ids
+
+    def test_parse_source_flags(self, sample_config):
+        from opencode_model_pool import parse_configured_models
+        result = parse_configured_models(sample_config)
+        for entry in result:
+            assert "user_configured" in entry["source_flags"]
+
+    def test_parse_cost_tag_paid(self, sample_config):
+        from opencode_model_pool import parse_configured_models
+        result = parse_configured_models(sample_config)
+        for entry in result:
+            if "free" not in entry["exact_model_id"].lower():
+                assert entry["cost_tag"] == "paid"
+
+    def test_parse_secrets_redacted(self, sample_config):
+        from opencode_model_pool import parse_configured_models
+        result = parse_configured_models(sample_config)
+        result_str = json.dumps(result)
+        assert "sk-secret-123" not in result_str
+        assert "sk-xiaomi-secret" not in result_str
+
+    def test_parse_nonexistent_file(self):
+        from opencode_model_pool import parse_configured_models
+        result = parse_configured_models("/nonexistent/path.json")
+        assert result == []
+
+    def test_parse_invalid_json(self, tmp_path):
+        from opencode_model_pool import parse_configured_models
+        p = tmp_path / "bad.json"
+        p.write_text("{invalid json", encoding="utf-8")
+        result = parse_configured_models(str(p))
+        assert result == []
+
+
+class TestDiscoverConfigured:
+    """Tests for ModelPool.discover_configured()."""
+
+    def test_adds_configured_models(self, sample_config, tmp_pool):
+        result = tmp_pool.discover_configured(sample_config, node_id="test-node")
+        assert len(result["added"]) == 4
+        assert "deepseek-plan/deepseek-v4-flash" in tmp_pool.models
+
+    def test_node_availability_set(self, sample_config, tmp_pool):
+        tmp_pool.discover_configured(sample_config, node_id="test-node")
+        entry = tmp_pool.models["deepseek-plan/deepseek-v4-flash"]
+        assert entry["node_availability"]["test-node"]["available"] is True
+
+    def test_all_nodes_when_node_all(self, sample_config, tmp_pool):
+        tmp_pool.discover_configured(sample_config, node_id="all")
+        entry = tmp_pool.models["deepseek-plan/deepseek-v4-flash"]
+        assert entry["node_availability"]["5bao"]["available"] is True
+        assert entry["node_availability"]["9bao"]["available"] is True
+        assert entry["node_availability"]["21bao"]["available"] is True
+
+
+class TestSourceFlagsMerging:
+    """Tests for source_flags merging between configured and discovered."""
+
+    def test_discover_adds_opencode_discovered_flag(self, tmp_pool):
+        tmp_pool.discover_node("test-node", ["opencode/model-a"])
+        assert "opencode_discovered" in tmp_pool.models["opencode/model-a"]["source_flags"]
+
+    def test_config_and_discover_merge_flags(self, sample_config, tmp_pool):
+        tmp_pool.discover_configured(sample_config, node_id="test-node")
+        # Now discover a model that's also in the config
+        tmp_pool.discover_node("test-node", ["deepseek-plan/deepseek-v4-flash"])
+        flags = tmp_pool.models["deepseek-plan/deepseek-v4-flash"]["source_flags"]
+        assert "user_configured" in flags
+        assert "opencode_discovered" in flags
+
+    def test_no_duplicate_models(self, sample_config, tmp_pool):
+        tmp_pool.discover_configured(sample_config, node_id="test-node")
+        tmp_pool.discover_node("test-node", ["deepseek-plan/deepseek-v4-flash"])
+        count = sum(1 for k in tmp_pool.models if k == "deepseek-plan/deepseek-v4-flash")
+        assert count == 1
+
+    def test_discovered_only_model_has_flag(self, tmp_pool):
+        tmp_pool.discover_node("test-node", ["opencode/new-model"])
+        assert "opencode_discovered" in tmp_pool.models["opencode/new-model"]["source_flags"]
+        assert "user_configured" not in tmp_pool.models["opencode/new-model"]["source_flags"]
+
+
+class TestLifecycleStatus:
+    """Tests for lifecycle_status field."""
+
+    def test_default_lifecycle_enabled(self, tmp_pool):
+        tmp_pool.discover_node("test-node", ["opencode/model-a"])
+        assert tmp_pool.models["opencode/model-a"]["lifecycle_status"] == "enabled"
+
+    def test_disabled_model_not_recommended(self, tmp_pool):
+        tmp_pool.discover_node("test-node", ["opencode/model-a", "opencode/model-b"])
+        tmp_pool.models["opencode/model-a"]["enabled"] = False
+        tmp_pool.models["opencode/model-a"]["lifecycle_status"] = "disabled"
+        rec = tmp_pool.recommend("implementer", "test-node")
+        assert rec.get("recommended") != "opencode/model-a"
+
+    def test_disabled_model_still_in_pool(self, tmp_pool):
+        tmp_pool.discover_node("test-node", ["opencode/model-a"])
+        tmp_pool.models["opencode/model-a"]["enabled"] = False
+        tmp_pool.models["opencode/model-a"]["lifecycle_status"] = "disabled"
+        assert "opencode/model-a" in tmp_pool.models
+
+
+class TestLiveValidation:
+    """Tests for live_validation field."""
+
+    def test_live_validation_default(self, tmp_pool):
+        tmp_pool.discover_node("test-node", ["opencode/model-a"])
+        lv = tmp_pool.models["opencode/model-a"]["live_validation"]
+        assert lv["validated"] is False
+        assert lv["call_count"] == 0
+        assert lv["roles_validated"] == []
+
+    def test_live_validation_in_export(self, tmp_pool):
+        tmp_pool.discover_node("test-node", ["opencode/model-a"])
+        exported = tmp_pool.export_sanitized()
+        assert "live_validation" in exported["models"]["opencode/model-a"]
+
+
+class TestUnknownCostNotDefault:
+    """Tests that unknown-cost models are not default when free models exist."""
+
+    def test_free_preferred_over_unknown(self, tmp_pool):
+        tmp_pool.discover_node("test-node", ["opencode/free-model", "opencode/unknown-model"])
+        tmp_pool.models["opencode/free-model"]["cost_tag"] = "free"
+        tmp_pool.models["opencode/free-model"]["capability_tags"] = ["code", "free"]
+        tmp_pool.models["opencode/unknown-model"]["cost_tag"] = "unknown"
+        rec = tmp_pool.recommend("implementer", "test-node")
+        assert rec.get("recommended") == "opencode/free-model"
+
+
+# --- Central Model Management Tests (V1.20.60.5) ---
+
+
+class TestAddModel:
+    """Tests for ModelPool.add_model()."""
+
+    def test_add_new_model(self, tmp_pool):
+        result = tmp_pool.add_model("test/model-1", cost_tag="paid")
+        assert result["action"] == "added"
+        assert "test/model-1" in tmp_pool.models
+
+    def test_add_duplicate_returns_error(self, tmp_pool):
+        tmp_pool.add_model("test/model-1")
+        result = tmp_pool.add_model("test/model-1")
+        assert "error" in result
+
+    def test_add_sets_source_flags(self, tmp_pool):
+        tmp_pool.add_model("test/model-1", source_flags=["manual_candidate"])
+        assert "manual_candidate" in tmp_pool.models["test/model-1"]["source_flags"]
+
+    def test_add_sets_cost_tag(self, tmp_pool):
+        tmp_pool.add_model("test/model-1", cost_tag="paid")
+        assert tmp_pool.models["test/model-1"]["cost_tag"] == "paid"
+
+    def test_add_default_lifecycle(self, tmp_pool):
+        tmp_pool.add_model("test/model-1")
+        assert tmp_pool.models["test/model-1"]["lifecycle_status"] == "enabled"
+
+
+class TestDisableModel:
+    """Tests for ModelPool.disable_model()."""
+
+    def test_disable_existing(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a"])
+        result = tmp_pool.disable_model("opencode/model-a")
+        assert result["action"] == "disabled"
+        assert tmp_pool.models["opencode/model-a"]["enabled"] is False
+        assert tmp_pool.models["opencode/model-a"]["lifecycle_status"] == "disabled"
+
+    def test_disable_nonexistent(self, tmp_pool):
+        result = tmp_pool.disable_model("nonexistent/model")
+        assert "error" in result
+
+    def test_disabled_not_recommended(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a", "opencode/model-b"])
+        tmp_pool.disable_model("opencode/model-a")
+        rec = tmp_pool.recommend("implementer", "n")
+        assert rec.get("recommended") != "opencode/model-a"
+
+    def test_disabled_still_in_pool(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a"])
+        tmp_pool.disable_model("opencode/model-a")
+        assert "opencode/model-a" in tmp_pool.models
+
+
+class TestEnableModel:
+    """Tests for ModelPool.enable_model()."""
+
+    def test_enable_disabled(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a"])
+        tmp_pool.disable_model("opencode/model-a")
+        result = tmp_pool.enable_model("opencode/model-a")
+        assert result["action"] == "enabled"
+        assert tmp_pool.models["opencode/model-a"]["enabled"] is True
+
+    def test_enable_nonexistent(self, tmp_pool):
+        result = tmp_pool.enable_model("nonexistent/model")
+        assert "error" in result
+
+
+class TestRetireModel:
+    """Tests for ModelPool.retire_model()."""
+
+    def test_retire_existing(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a"])
+        result = tmp_pool.retire_model("opencode/model-a")
+        assert result["action"] == "retired"
+        assert tmp_pool.models["opencode/model-a"]["lifecycle_status"] == "retired"
+        assert tmp_pool.models["opencode/model-a"]["enabled"] is False
+
+    def test_retired_still_auditable(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a"])
+        tmp_pool.retire_model("opencode/model-a")
+        assert "opencode/model-a" in tmp_pool.models
+
+    def test_retired_not_recommended(self, tmp_pool):
+        tmp_pool.discover_node("n", ["opencode/model-a", "opencode/model-b"])
+        tmp_pool.retire_model("opencode/model-a")
+        rec = tmp_pool.recommend("implementer", "n")
+        assert rec.get("recommended") != "opencode/model-a"
+
+    def test_retire_nonexistent(self, tmp_pool):
+        result = tmp_pool.retire_model("nonexistent/model")
+        assert "error" in result
+
+
+class TestSyncPlan:
+    """Tests for ModelPool.sync_plan()."""
+
+    def test_sync_plan_has_plan(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        plan = tmp_pool.sync_plan(nodes=["node-a"])
+        assert "plan" in plan
+        assert "node-a" in plan["plan"]
+
+    def test_sync_plan_dry_run(self, tmp_pool):
+        plan = tmp_pool.sync_plan()
+        assert plan["dry_run"] is True
+
+    def test_sync_plan_detects_missing(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        tmp_pool.discover_node("node-b", ["opencode/model-x", "opencode/model-y"])
+        plan = tmp_pool.sync_plan(nodes=["node-a", "node-b"])
+        assert "opencode/model-y" in plan["plan"]["node-a"]["add"]
+
+    def test_sync_plan_retired_remove(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        tmp_pool.retire_model("opencode/model-x")
+        plan = tmp_pool.sync_plan(nodes=["node-a"])
+        assert "opencode/model-x" in plan["plan"]["node-a"]["remove"]
+
+
+class TestDriftReport:
+    """Tests for ModelPool.node_drift_report()."""
+
+    def test_drift_report_structure(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        drift = tmp_pool.node_drift_report(nodes=["node-a"])
+        assert "drift_report" in drift
+        assert "node-a" in drift["drift_report"]
+
+    def test_drift_detects_missing(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        tmp_pool.discover_node("node-b", ["opencode/model-x", "opencode/model-y"])
+        drift = tmp_pool.node_drift_report(nodes=["node-a", "node-b"])
+        assert "opencode/model-y" in drift["drift_report"]["node-a"]["missing_from_node"]
+
+    def test_drift_no_extra(self, tmp_pool):
+        tmp_pool.discover_node("node-a", ["opencode/model-x"])
+        drift = tmp_pool.node_drift_report(nodes=["node-a"])
+        assert drift["drift_report"]["node-a"]["extra_on_node"] == []

@@ -7,3 +7,5 @@ index.lock
 logs/
 __pycache__/
 *.pyc
+.opencode_model_pool.json
+.vibe/

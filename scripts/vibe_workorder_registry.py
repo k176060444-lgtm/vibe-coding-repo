@@ -66,7 +66,7 @@ def _save_entry(registry_dir, entry):
     with open(tmp_file, "w", encoding="utf-8") as f:
         json.dump(entry, f, indent=2, ensure_ascii=False)
         f.write("\n")
-    tmp_file.rename(entry_file)
+    os.replace(str(tmp_file), str(entry_file))
 
 def _list_entries(registry_dir):
     """List all registry entries."""
@@ -377,6 +377,131 @@ def main(argv=None):
     else:
         parser.print_help()
         return 0
+
+# ── V1.21.19: Deferred action registry glue ─────────────────────────
+
+# Deferred action types that can be registered
+DEFERRED_ACTION_TYPES = {
+    "delegate_task_dispatch",
+    "live_model_call",
+    "service_admin_uac",
+}
+
+
+def register_deferred_action(action, eag_result, approval=None, repo_root=None):
+    """Register a deferred action as a Work Order registry entry.
+
+    Called after APPROVED_FOR_EXECUTION for deferred actions.
+    Creates a registry entry with status 'approved' and registry_only flag.
+    Graceful: returns None on any error; never raises.
+
+    Args:
+        action: Deferred action type (delegate_task_dispatch, live_model_call, service_admin_uac)
+        eag_result: EAG check result dict
+        approval: Approval record dict (optional)
+        repo_root: Repository root path (defaults to cwd)
+
+    Returns:
+        Registry entry dict if successful, None otherwise.
+    """
+    try:
+        if action not in DEFERRED_ACTION_TYPES:
+            return None
+        if eag_result is None:
+            return None
+
+        if repo_root is None:
+            repo_root = os.getcwd()
+
+        registry_dir = Path(repo_root) / ".vibe" / "deferred_registry"
+        registry_dir.mkdir(parents=True, exist_ok=True)
+
+        # Extract approval info (needed for dedup check)
+        approval_id = (eag_result.get("approval_id")
+                       or (approval or {}).get("approval_id", ""))
+
+        # V1.21.20: Dedup — if same (approval_id, action) already exists, return it
+        if approval_id:
+            for existing_file in registry_dir.glob("*.json"):
+                try:
+                    with open(existing_file, "r", encoding="utf-8") as fh:
+                        existing = json.load(fh)
+                    if (existing.get("approval_id") == approval_id
+                            and existing.get("action") == action):
+                        return existing
+                except (json.JSONDecodeError, IOError):
+                    continue
+
+        now = datetime.now(timezone.utc).isoformat()
+        # V1.21.20: Include microseconds + random suffix to prevent any collision
+        ts = now.replace(':', '').replace('-', '').replace('.', '')[:21]
+        rand_suffix = os.urandom(4).hex()
+        workorder_id = f"deferred-{action}-{ts}-{rand_suffix}"
+
+        risk_level = (eag_result.get("risk_level")
+                      or (approval or {}).get("risk_level", "low"))
+
+        # service_admin_uac always CRITICAL
+        if action == "service_admin_uac":
+            risk_level = "critical"
+
+        is_dedicated = False
+        if action == "service_admin_uac" and approval:
+            approved_actions = approval.get("approved_actions", [])
+            is_dedicated = (len(approved_actions) == 1
+                            and "service_admin_uac" in approved_actions)
+
+        history = [{
+            "from": None,
+            "to": "approved",
+            "reason": f"auto-registered from deferred action '{action}'",
+            "timestamp": now,
+        }]
+
+        entry = {
+            "workorder_id": workorder_id,
+            "title": f"Deferred action: {action}",
+            "action": action,
+            "action_category": "deferred",
+            "risk_level": risk_level,
+            "status": "approved",
+            "base_sha": "",
+            "created_at": now,
+            "updated_at": now,
+            "source": "conversational_intake_gate",
+            "requires_human_approval": True,
+            "registry_only": True,
+            "dry_run_only": True,
+            "approval_id": approval_id,
+            "eag_verdict": eag_result.get("verdict", ""),
+            "eag_detail": eag_result.get("detail", ""),
+            "dedicated_approval": is_dedicated,
+            "changed_paths": [],
+            "forbidden_actions": [],
+            "acceptance_tests": [],
+            "stop_conditions": [],
+            "status_history": history,
+            "history_digest": _compute_history_digest(history),
+        }
+
+        # Add action-specific fields from eag_result
+        if action == "delegate_task_dispatch":
+            entry["target_node"] = eag_result.get("target_node", "")
+            entry["target_role"] = eag_result.get("target_role", "")
+            entry["model_plan"] = eag_result.get("model_plan", "")
+        elif action == "live_model_call":
+            entry["provider"] = eag_result.get("provider", "")
+            entry["model"] = eag_result.get("model", "")
+            entry["budget_policy"] = eag_result.get("budget_policy", "")
+        elif action == "service_admin_uac":
+            entry["target_service"] = eag_result.get("target_service", "")
+            entry["change_type"] = eag_result.get("change_type", "")
+
+        _save_entry(registry_dir, entry)
+        return entry
+    except Exception:
+        return None
+
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -110,6 +110,42 @@ def _select_template(task_spec):
     return "self-repo-low-risk"
 
 
+def _build_role_assignment_template(task_spec: dict) -> dict:
+    """Build a role assignment template based on task spec risk level and tags.
+
+    V1.21.3: Every coding WO gets a template that can be filled by the
+    orchestrator and validated by vibe_role_assignment_gate.
+    """
+    risk = task_spec.get("risk_level", "low")
+    tags = task_spec.get("tags", [])
+
+    # Import role assignment gate if available
+    try:
+        from vibe_role_assignment_gate import get_required_roles, create_assignment_matrix
+        required = get_required_roles(risk, tags)
+        matrix = create_assignment_matrix(
+            risk_level=risk,
+            tags=tags,
+            task_id=task_spec.get("task_id", ""),
+            task_type=task_spec.get("operation_type", "coding"),
+        )
+        return {
+            "available": True,
+            "required_roles": required["required_roles"],
+            "optional_roles": required["optional_roles"],
+            "requires_dual_reviewer": required["requires_dual_reviewer"],
+            "matrix_template": matrix,
+        }
+    except ImportError:
+        return {
+            "available": False,
+            "required_roles": ["implementer", "reviewer"],
+            "optional_roles": [],
+            "requires_dual_reviewer": False,
+            "matrix_template": None,
+        }
+
+
 def compile_wo(task_spec):
     """Compile a task spec into a WO plan."""
     template_name = _select_template(task_spec)
@@ -164,6 +200,9 @@ def compile_wo(task_spec):
             "profile": "standard", "steps": 300, "auto_approve": True,
             "source": "default",
         }
+
+    # V1.21.3: Add role assignment template for coding tasks
+    plan["role_assignment_template"] = _build_role_assignment_template(task_spec)
 
     return plan
 
@@ -257,6 +296,33 @@ def self_check(output_json=False):
         "name": "dual_node_scheduling",
         "passed": plan_dual.get("template") == "dual-node-task",
         "message": f"template={plan_dual.get('template')} node={plan_dual.get('execution_node')}",
+    })
+
+    # V1.21.3: Has role assignment template
+    checks.append({
+        "name": "role_assignment_template_present",
+        "passed": "role_assignment_template" in plan,
+        "message": "present" if "role_assignment_template" in plan else "missing",
+    })
+
+    # V1.21.3: Role assignment template has required roles
+    rat = plan.get("role_assignment_template", {})
+    checks.append({
+        "name": "role_assignment_template_has_roles",
+        "passed": len(rat.get("required_roles", [])) >= 2,
+        "message": f"required_roles={rat.get('required_roles', [])}",
+    })
+
+    # V1.21.3: High-risk template has dual reviewer
+    spec_high = {"task_id": "task-high", "summary": "admin permission fix",
+                 "repo_scope": "trusted-self", "operation_type": "write-local",
+                 "risk_level": "high", "tags": ["admin", "permission"]}
+    plan_high = compile_wo(spec_high)
+    rat_high = plan_high.get("role_assignment_template", {})
+    checks.append({
+        "name": "high_risk_dual_reviewer_template",
+        "passed": rat_high.get("requires_dual_reviewer", False),
+        "message": f"dual_reviewer={rat_high.get('requires_dual_reviewer')}",
     })
 
     passed = sum(1 for c in checks if c["passed"])

@@ -22,6 +22,17 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# V1.21.22: Import run_report for deferred registry export
+# V1.21.25A: Import render functions for unified DAR/VDR rendering
+try:
+    from vibe_run_report import run_report as _run_report
+    from vibe_run_report import render_dar_section as _render_dar
+    from vibe_run_report import render_vdr_section as _render_vdr
+except ImportError:
+    _run_report = None
+    _render_dar = None
+    _render_vdr = None
+
 
 def _run_script(script_path, args, timeout=30):
     """Run a script and return (returncode, stdout, stderr)."""
@@ -41,20 +52,40 @@ def _export_kind(script_dir, kind):
 
     if kind == "snapshot":
         rc, stdout, stderr = _run_script(script_dir / "vibe_operator_snapshot.py", ["--compact"])
+        # V1.21.25A: Single run_report() call — SSOT for deferred/verifier
+        _rr = None
+        if rc == 0 and stdout and _run_report is not None:
+            try:
+                _rr = _run_report(repo_root=script_dir.parent)
+            except Exception:
+                _rr = None  # Graceful fallback — no deferred/verifier sections
+        # V1.21.25A master: Reuse render functions from run_report
+        if _rr:
+            if _render_dar:
+                _dar_md = _render_dar(_rr)
+                if _dar_md:
+                    stdout += "\n" + _dar_md
+            if _render_vdr:
+                _vdr_md = _render_vdr(_rr)
+                if _vdr_md:
+                    stdout += "\n" + _vdr_md
         filename = "snapshot_%s.md" % timestamp
     elif kind == "release-notes":
         rc, stdout, stderr = _run_script(script_dir / "vibe_release_notes.py", ["--compact"])
         filename = "release_notes_%s.md" % timestamp
     elif kind == "dashboard":
-        rc, stdout, stderr = _run_script(script_dir / "vibe_operator_snapshot.py", ["--compact"])
-        # Also read the dashboard doc
+        # V1.21.25A master: Read dashboard doc first, fallback to operator_snapshot
         dashboard_path = script_dir.parent / "docs" / "PROJECT_DASHBOARD.md"
         if dashboard_path.exists():
+            rc = 0
+            stderr = ""
             try:
                 with open(dashboard_path, "r") as f:
                     stdout = f.read()
             except (OSError, IOError):
-                pass
+                rc, stdout, stderr = _run_script(script_dir / "vibe_operator_snapshot.py", ["--compact"])
+        else:
+            rc, stdout, stderr = _run_script(script_dir / "vibe_operator_snapshot.py", ["--compact"])
         filename = "dashboard_%s.md" % timestamp
     else:
         return None

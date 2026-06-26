@@ -106,6 +106,119 @@ ADAPTERS = {
     },
 }
 
+# V1.21.19: Deferred action dry-run adapters
+DEFERRED_ACTION_ADAPTERS = {
+    "delegate_task_dispatch": {
+        "adapter_name": "delegate_task_dispatch_dry_run",
+        "description": "Dry-run plan for delegate_task_dispatch. Shows what would happen without dispatching.",
+        "modes": ["dry-run"],
+        "accepted_inputs": {
+            "workorder_id": "required",
+            "target_node": "required (windows/debian/any)",
+            "target_role": "required (leaf/orchestrator)",
+            "model_plan": "required",
+        },
+        "refused_actions": [
+            "model_call", "shell_exec", "repo_write", "git_push",
+            "git_merge", "deploy", "tag", "file_delete",
+            "worker_dispatch", "ssh_remote",
+        ],
+        "required_approval": True,
+        "execution_plan": {
+            "steps": [
+                {"step": 1, "action": "validate-registry", "description": "Verify registry entry status is 'approved'"},
+                {"step": 2, "action": "validate-approval", "description": "Verify approval binding and EAG verdict"},
+                {"step": 3, "action": "plan-worktree", "description": "Would create isolated worktree for target worker"},
+                {"step": 4, "action": "plan-dispatch", "description": "Would dispatch task to target node/role"},
+                {"step": 5, "action": "plan-monitor", "description": "Would monitor worker progress"},
+            ],
+            "total_steps": 5,
+            "estimated_duration": "<1s (dry-run)",
+            "reversible": True,
+        },
+        "evidence_expectations": {
+            "transcript_created": True,
+            "evidence_bundle": False,
+            "gate_verdict": "ALLOW",
+            "approval_receipt": "required",
+        },
+    },
+    "live_model_call": {
+        "adapter_name": "live_model_call_dry_run",
+        "description": "Dry-run plan for live_model_call. Shows what would happen without calling the model.",
+        "modes": ["dry-run"],
+        "accepted_inputs": {
+            "workorder_id": "required",
+            "provider": "required",
+            "model": "required",
+            "budget_policy": "required",
+        },
+        "refused_actions": [
+            "model_call", "shell_exec", "repo_write", "git_push",
+            "git_merge", "deploy", "tag", "file_delete",
+            "api_request",
+        ],
+        "required_approval": True,
+        "execution_plan": {
+            "steps": [
+                {"step": 1, "action": "validate-registry", "description": "Verify registry entry status is 'approved'"},
+                {"step": 2, "action": "validate-approval", "description": "Verify approval binding and EAG verdict"},
+                {"step": 3, "action": "plan-budget-check", "description": "Would verify budget policy allows call"},
+                {"step": 4, "action": "plan-model-call", "description": "Would call provider/model with approved parameters"},
+                {"step": 5, "action": "plan-response-capture", "description": "Would capture model response"},
+            ],
+            "total_steps": 5,
+            "estimated_duration": "<1s (dry-run)",
+            "reversible": True,
+        },
+        "evidence_expectations": {
+            "transcript_created": True,
+            "evidence_bundle": False,
+            "gate_verdict": "ALLOW",
+            "approval_receipt": "required",
+        },
+    },
+    "service_admin_uac": {
+        "adapter_name": "service_admin_uac_dry_run",
+        "description": "Dry-run plan for service_admin_uac. Shows what would happen without touching services.",
+        "modes": ["dry-run"],
+        "accepted_inputs": {
+            "workorder_id": "required",
+            "target_service": "required (gateway/production/admin/uac)",
+            "change_type": "required (config/restart/permission/credential)",
+        },
+        "refused_actions": [
+            "model_call", "shell_exec", "repo_write", "git_push",
+            "git_merge", "deploy", "tag", "file_delete",
+            "service_restart", "credential_change", "permission_change",
+            "gateway_modify", "production_modify", "admin_modify", "uac_execute",
+        ],
+        "required_approval": True,
+        "execution_plan": {
+            "steps": [
+                {"step": 1, "action": "validate-registry", "description": "Verify registry entry status is 'approved'"},
+                {"step": 2, "action": "validate-approval", "description": "Verify CRITICAL + dedicated approval binding"},
+                {"step": 3, "action": "plan-pre-check", "description": "Would verify target service health"},
+                {"step": 4, "action": "plan-service-change", "description": "Would execute change on target service (CRITICAL)"},
+                {"step": 5, "action": "plan-post-check", "description": "Would verify target service health after change"},
+                {"step": 6, "action": "plan-rollback-ready", "description": "Would prepare rollback plan"},
+            ],
+            "total_steps": 6,
+            "estimated_duration": "<1s (dry-run)",
+            "reversible": True,
+        },
+        "evidence_expectations": {
+            "transcript_created": True,
+            "evidence_bundle": False,
+            "gate_verdict": "ALLOW",
+            "approval_receipt": "required (dedicated)",
+        },
+    },
+}
+
+# Merge deferred adapters into main ADAPTERS
+ADAPTERS.update(DEFERRED_ACTION_ADAPTERS)
+
 FORBIDDEN_ACTIONS = sorted({
     action
     for adapter in ADAPTERS.values()

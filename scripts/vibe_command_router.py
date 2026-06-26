@@ -48,7 +48,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.15.0"
+VERSION = "2.17.0"
 
 # Command to script mapping
 COMMAND_SCRIPTS = {
@@ -80,6 +80,7 @@ COMMAND_SCRIPTS = {
     "quality-gate": "vibe_quality_gate.py",
     "run-report": "vibe_run_report.py",
     "v1-freeze": "vibe_v1_freeze_check.py",
+    "role-gate": "vibe_role_assignment_gate.py",
     "priv-approval": "vibe_privileged_approval.py",
     "priv-push": "vibe_privileged_push.py",
     "trusted-loop": "vibe_trusted_self_loop.py",
@@ -91,6 +92,16 @@ COMMAND_SCRIPTS = {
     "batch-cancel": "vibe_batch_runner.py",
     "batch-abort": "vibe_batch_runner.py",
     "worker-resilience": "vibe_worker_resilience.py",
+    "remote-verify": "remote_verification_gate.py",
+    "model-ledger-check": "delegate_capability_gate.py",
+    "delegate-capability-check": "delegate_capability_gate.py",
+    "intake-check": "conversational_intake_gate.py",
+    "intake-proposal": "conversational_intake_gate.py",
+    "intake-approve-check": "conversational_intake_gate.py",
+    "git-pr-approval-check": "git_pr_approval_gate.py",
+    "pr-state-check": "git_pr_approval_gate.py",
+    "execution-approval-check": "execution_approval_gate.py",
+    "approval-bind-check": "execution_approval_gate.py",
 }
 
 # Short aliases
@@ -162,6 +173,19 @@ ALIASES = {
     "wr": "worker-resilience",
     "worker": "worker-resilience",
     "resilience": "worker-resilience",
+    "rg": "role-gate",
+    "rag": "role-gate",
+    "rv": "remote-verify",
+    "pr-verify": "remote-verify",
+    "mlc": "model-ledger-check",
+    "dcc": "delegate-capability-check",
+    "ic": "intake-check",
+    "ip": "intake-proposal",
+    "iac": "intake-approve-check",
+    "gpac": "git-pr-approval-check",
+    "psc": "pr-state-check",
+    "eac": "execution-approval-check",
+    "abc": "approval-bind-check",
     "?": "help",
     "v": "version",
 }
@@ -196,6 +220,17 @@ COMMAND_DESCRIPTIONS = {
     "quality-gate": "Workflow Quality Gate - aggregated pre/post-execution health check",
     "run-report": "Run Report / Session Handoff - execution summary for QQ/mobile",
     "v1-freeze": "V1 Freeze Check - verify operational freeze is healthy",
+    "role-gate": "Role Assignment Gate - enforce role plans before coding execution",
+    "remote-verify": "Remote Verification Gate - verify GitHub PR source-of-truth",
+    "model-ledger-check": "Planned/Actual Model Ledger + Capability Declaration Gate",
+    "delegate-capability-check": "Delegate Capability Declaration - executor capability audit",
+    "intake-check": "Conversational Intake Check - detect if intake is required",
+    "intake-proposal": "Intake Proposal - generate structured proposal for operator",
+    "intake-approve-check": "Intake Approval Check - verify approval before execution",
+    "git-pr-approval-check": "Git/PR State Approval Gate - enforce PR state transition policy",
+    "pr-state-check": "PR State Check - verify Git/PR action is allowed",
+    "execution-approval-check": "Execution Approval Binding Gate - enforce approval binding for execution actions",
+    "approval-bind-check": "Approval Bind Check - alias for execution-approval-check",
     "priv-approval": "Privileged Approval - controlled approval for high-privilege actions",
     "priv-push": "Privileged Push Wrapper - dry-run controlled push for approved actions",
     "help": "Show this help message",
@@ -225,6 +260,29 @@ COMMAND_FLAGS = {
     "transcript": ["--json", "--transcript-dir"],
     "quality-gate": ["--json", "--compact", "--repo-root", "--jobs-dir"],
     "priv-approval": ["--json", "--approval-dir"],
+    "remote-verify": ["--json", "--pr", "--repo", "--expected-head", "--expected-base",
+                      "--expected-files", "--expected-body-contains", "--expected-is-draft",
+                      "--current-main-oid", "--local-diff-files",
+                      "--report-claims-merged", "--pr-data-file"],
+    "model-ledger-check": ["--json", "--entry", "--entries", "--executor"],
+    "delegate-capability-check": ["--json", "--executor", "--model-override",
+                                   "--node-override", "--model-receipt",
+                                   "--node-receipt", "--token-receipt", "--notes"],
+    "intake-check": ["--json", "--text"],
+    "intake-proposal": ["--json", "--text", "--goal", "--risk", "--op", "--area"],
+    "intake-approve-check": ["--json", "--action", "--state", "--approval-json"],
+    "git-pr-approval-check": ["--json", "--self-check", "--action", "--target-branch", "--source-branch",
+                              "--pr-number", "--desired-pr-state", "--current-pr-state", "--is-draft",
+                              "--operator-approval-id", "--operator-approved-actions", "--force-push",
+                              "--changed-files", "--risk-level", "--checks-passed", "--intake-approved",
+                              "--remote-verified", "--merge-check-passed"],
+    "pr-state-check": ["--json", "--action", "--target-branch", "--operator-approval-id"],
+    "execution-approval-check": ["--json", "--self-check", "--action", "--approval-json",
+                                 "--proposal-hash", "--proposal-exists", "--operator-message",
+                                 "--changed-files", "--max-age"],
+    "approval-bind-check": ["--json", "--self-check", "--action", "--approval-json",
+                            "--proposal-hash", "--proposal-exists", "--operator-message",
+                            "--changed-files", "--max-age"],
     "priv-push": ["--json", "--compact", "--approval-dir", "--action-id", "--list-approved"],
     "trusted-loop": ["--json", "--compact", "--check", "--contract"],
     "batch-runner": ["--json", "--compact", "--batch", "--status", "--dry-run"],
@@ -233,6 +291,7 @@ COMMAND_FLAGS = {
     "batch-pause": ["--json", "--compact", "--checkpoint"],
     "batch-resume": ["--json", "--compact", "--checkpoint"],
     "worker-resilience": ["--json", "--compact", "--check", "--checkpoint", "--resume", "--status-report"],
+    "role-gate": ["--json", "--self-check"],
 }
 
 

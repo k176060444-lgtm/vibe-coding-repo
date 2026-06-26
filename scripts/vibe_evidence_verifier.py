@@ -243,6 +243,64 @@ def cmd_verify(args):
     else:
         checks.append({"name": "changed_paths", "result": "WARN", "detail": "No changed paths recorded"})
 
+    # V1.21.23 Check 10: deferred_action_registry_consistency
+    # Optional check — skipped if section absent or empty
+    _DAR_REQUIRED_FIELDS = {
+        "action", "approval_id", "workorder_id", "risk_level",
+        "dedicated_approval", "registry_only", "dry_run_only",
+        "real_execution", "created_at", "history_digest",
+    }
+    dar_entries = evidence.get("deferred_action_registry")
+    if dar_entries:  # non-empty list
+        dar_errors = []
+        dar_warnings = []
+        for idx, entry in enumerate(dar_entries):
+            # Check required fields
+            missing = _DAR_REQUIRED_FIELDS - set(entry.keys())
+            if missing:
+                dar_errors.append("entry[%d]: missing fields %s" % (idx, sorted(missing)))
+                continue
+            # Invariant: real_execution must be False
+            if entry.get("real_execution") is not False:
+                dar_errors.append("entry[%d]: real_execution=%s (must be False)" % (
+                    idx, entry.get("real_execution")))
+            # Invariant: registry_only must be True
+            if entry.get("registry_only") is not True:
+                dar_errors.append("entry[%d]: registry_only=%s (must be True)" % (
+                    idx, entry.get("registry_only")))
+            # Invariant: dry_run_only must be True
+            if entry.get("dry_run_only") is not True:
+                dar_errors.append("entry[%d]: dry_run_only=%s (must be True)" % (
+                    idx, entry.get("dry_run_only")))
+            # service_admin_uac + dedicated_approval -> WARN visibility annotation
+            if (entry.get("action") == "service_admin_uac"
+                    and entry.get("dedicated_approval") is True):
+                dar_warnings.append(
+                    "entry[%d]: service_admin_uac + dedicated_approval=True "
+                    "→ ⚠️ dedicated/critical visibility only" % idx)
+
+        if dar_errors:
+            checks.append({
+                "name": "deferred_action_registry_consistency",
+                "result": "FAIL",
+                "detail": "; ".join(dar_errors),
+                "errors": dar_errors,
+            })
+        elif dar_warnings:
+            checks.append({
+                "name": "deferred_action_registry_consistency",
+                "result": "WARN",
+                "detail": "; ".join(dar_warnings),
+                "warnings": dar_warnings,
+            })
+        else:
+            checks.append({
+                "name": "deferred_action_registry_consistency",
+                "result": "PASS",
+                "detail": "%d entries, all invariants valid" % len(dar_entries),
+            })
+    # else: section absent or empty — no check appended, verdict unaffected
+
     # Determine verdict
     has_fail = any(c["result"] == "FAIL" for c in checks)
     has_warn = any(c["result"] == "WARN" for c in checks)

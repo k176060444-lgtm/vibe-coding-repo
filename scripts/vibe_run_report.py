@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # V1.20.7: Report status gate integration
 try:
@@ -171,7 +171,134 @@ def _determine_next_action(quality_gate, audit_lock):
     return "UNKNOWN: Unable to determine status."
 
 
-def run_report(repo_root=None, jobs_dir=None):
+def _collect_action_specific(eag_result):
+    """Extract action-specific audit fields from EAG check result.
+
+    Args:
+        eag_result: dict returned by check_execution_approval() (V1.21.15+)
+
+    Returns:
+        dict with action_specific_approval section, or None if no eag_result.
+    """
+    if not eag_result:
+        return None
+
+    action = eag_result.get("action", "unknown")
+    action_category = eag_result.get("action_category", "ordinary")
+
+    section = {
+        "action": action,
+        "action_category": action_category,
+        "verdict": eag_result.get("verdict", "UNKNOWN"),
+    }
+
+    # Only include detailed fields for action_specific actions
+    if action_category == "action_specific":
+        section["action_specific_required_fields"] = eag_result.get(
+            "action_specific_required_fields", []
+        )
+        section["missing_fields"] = eag_result.get("missing_fields", [])
+        section["invalid_fields"] = eag_result.get("invalid_fields", [])
+        section["dedicated_approval_required"] = eag_result.get(
+            "dedicated_approval_required", False
+        )
+        section["service_admin_critical_required"] = eag_result.get(
+            "service_admin_critical_required", False
+        )
+        blocked_code = eag_result.get("blocked_reason_code")
+        if blocked_code:
+            section["blocked_reason_code"] = blocked_code
+
+    return section
+
+
+def _collect_deferred_registry(repo_root):
+    """Collect deferred registry summary from .vibe/deferred_registry/*.json.
+
+    Returns list of summary dicts, or empty list if no entries / dir missing.
+    Graceful fallback: bad JSON, missing fields, IO errors are skipped.
+    """
+    registry_dir = Path(repo_root) / ".vibe" / "deferred_registry"
+    if not registry_dir.is_dir():
+        return []
+
+    entries = []
+    for f in sorted(registry_dir.glob("*.json")):
+        if f.name.startswith("."):
+            continue
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (json.JSONDecodeError, IOError, OSError):
+            continue
+
+        entry = {
+            "action": raw.get("action", "unknown"),
+            "approval_id": raw.get("approval_id", ""),
+            "workorder_id": raw.get("workorder_id", ""),
+            "risk_level": raw.get("risk_level", "low"),
+            "dedicated_approval": raw.get("dedicated_approval", False),
+            "registry_only": raw.get("registry_only", True),
+            "dry_run_only": raw.get("dry_run_only", True),
+            "real_execution": False,
+            "created_at": raw.get("created_at", ""),
+            "history_digest": raw.get("history_digest", ""),
+        }
+        entries.append(entry)
+
+    return entries
+
+
+def _collect_verifier_deferred_result(repo_root):
+    """Collect deferred_action_registry_consistency check from evidence verifier.
+
+    Returns dict with check result (name/result/detail/errors/warnings) or None.
+    Consumes verifier output only — does NOT re-parse .vibe/deferred_registry.
+    Graceful fallback: verifier unavailable, no evidence, no check → None.
+    """
+    verifier_script = Path(repo_root) / "scripts" / "vibe_evidence_verifier.py"
+    if not verifier_script.is_file():
+        return None
+
+    evidence_dir = Path(repo_root) / ".vibe" / "evidence"
+    registry_dir = Path(repo_root) / ".vibe" / "registry"
+    if not evidence_dir.is_dir() or not registry_dir.is_dir():
+        return None
+
+    # Find latest evidence file
+    evidence_files = sorted(evidence_dir.glob("ev-*.json"))
+    if not evidence_files:
+        return None
+    latest_evidence_id = evidence_files[-1].stem  # e.g. "ev-001"
+
+    try:
+        import subprocess as _sp
+        result = _sp.run(
+            [sys.executable, str(verifier_script), "verify",
+             "--evidence-dir", str(evidence_dir),
+             "--registry-dir", str(registry_dir),
+             "--evidence-id", latest_evidence_id,
+             "--json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode not in (0, 1):
+            return None
+        data = json.loads(result.stdout)
+        for check in data.get("checks", []):
+            if check.get("name") == "deferred_action_registry_consistency":
+                return {
+                    "name": check["name"],
+                    "result": check["result"],
+                    "detail": check.get("detail", ""),
+                    "errors": check.get("errors", []),
+                    "warnings": check.get("warnings", []),
+                }
+    except Exception:
+        pass
+    return None
+
+
+def run_report(repo_root=None, jobs_dir=None, eag_result=None):
     """Generate run report."""
     if repo_root is None:
         repo_root = Path.cwd()
@@ -181,6 +308,16 @@ def run_report(repo_root=None, jobs_dir=None):
     script_dir = repo_root / "scripts"
     if jobs_dir is None:
         jobs_dir = os.path.expanduser("~/vibedev/jobs")
+
+    # V1.21.17: Auto-discover EAG result from .vibe/eag_result.json
+    if eag_result is None:
+        eag_result_path = repo_root / ".vibe" / "eag_result.json"
+        try:
+            if eag_result_path.is_file():
+                with open(eag_result_path, encoding="utf-8") as _f:
+                    eag_result = json.load(_f)
+        except (json.JSONDecodeError, OSError):
+            pass  # Graceful fallback — no section injected
 
     timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -219,9 +356,15 @@ def run_report(repo_root=None, jobs_dir=None):
             "overall_health": loop_summary.get("overall_health"),
         },
         "operator_snapshot": {
-            "overall": operator_snapshot.get("overall_status", "unknown"),
+            "repo": operator_snapshot.get("repo", {}),
+            "jobs_summary": operator_snapshot.get("jobs_summary", {}),
+            "locks": operator_snapshot.get("locks", []),
+            "recommended_next_action": operator_snapshot.get("recommended_next_action", "unknown"),
+            "warnings": operator_snapshot.get("warnings", []),
         },
-        "evidence_verifier": {"status": "available"},
+        "evidence_verifier": {
+            "status": "available" if (Path(repo_root) / "scripts" / "vibe_evidence_verifier.py").is_file() else "unavailable",
+        },
         "audit_lock": audit_lock,
         "pr_summary": pr_summary,
         "new_freeze_baseline": origin_main.get("sha", "unknown"),
@@ -253,7 +396,73 @@ def run_report(repo_root=None, jobs_dir=None):
     elif not _REPORT_STATUS_GATE_AVAILABLE:
         result['ledger_gate'] = {'result': 'GATE_UNAVAILABLE', 'warning': 'vibe_report_status_gate not importable'}
 
+    # V1.21.16: Collect action-specific audit fields from EAG result
+    action_specific = _collect_action_specific(eag_result)
+    if action_specific:
+        result['action_specific_approval'] = action_specific
+
+    # V1.21.21: Collect deferred registry entries
+    deferred_entries = _collect_deferred_registry(repo_root)
+    if deferred_entries:
+        result['deferred_action_registry'] = deferred_entries
+
+    # V1.21.24: Collect verifier deferred result
+    verifier_deferred = _collect_verifier_deferred_result(repo_root)
+    if verifier_deferred:
+        result['verifier_deferred_result'] = verifier_deferred
+
     return result
+
+
+def render_dar_section(result):
+    """Render Deferred Action Registry markdown section.
+
+    Unified rendering for run_report markdown and export snapshot.
+    Returns empty string if no deferred_action_registry present.
+    """
+    dar = result.get("deferred_action_registry")
+    if not dar:
+        return ""
+    lines = ["## Deferred Action Registry"]
+    lines.append("- %d deferred action(s) registered" % len(dar))
+    for entry in dar:
+        action = entry.get("action", "?")
+        wid = entry.get("workorder_id", "?")
+        approval_id = entry.get("approval_id", "")
+        risk = entry.get("risk_level", "low")
+        dedicated = entry.get("dedicated_approval", False)
+        real = "yes" if entry.get("real_execution") else "no"
+        warn = " ⚠️ dedicated/critical visibility only" if dedicated else ""
+        lines.append("- `%s` | wo=`%s` | approval=`%s` | risk=%s | real_exec=%s%s" % (
+            action, wid, approval_id, risk, real, warn))
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_vdr_section(result):
+    """Render Verifier Deferred Registry markdown section.
+
+    Unified rendering for run_report markdown and export snapshot.
+    Returns empty string if no verifier_deferred_result present.
+    """
+    vdr = result.get("verifier_deferred_result")
+    if not vdr:
+        return ""
+    lines = ["## Verifier Deferred Registry"]
+    vdr_result = vdr.get("result", "UNKNOWN")
+    vdr_detail = vdr.get("detail", "")
+    if vdr_result == "PASS":
+        lines.append("- ✅ %s" % vdr_detail)
+    elif vdr_result == "WARN":
+        lines.append("- ⚠️ %s" % vdr_detail)
+        for w in vdr.get("warnings", []):
+            lines.append("  - %s" % w)
+    elif vdr_result == "FAIL":
+        lines.append("- ❌ %s" % vdr_detail)
+        for e in vdr.get("errors", []):
+            lines.append("  - %s" % e)
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _format_markdown(result):
@@ -292,6 +501,41 @@ def _format_markdown(result):
         if ledger.get("errors"):
             for e in ledger["errors"][:3]:
                 lines.append("  - %s" % e)
+        lines.append("")
+
+    # V1.21.16: Action-Specific Approval
+    asa = result.get("action_specific_approval")
+    if asa:
+        lines.append("## Action-Specific Approval")
+        asa_action = asa.get("action", "unknown")
+        asa_category = asa.get("action_category", "unknown")
+        asa_verdict = asa.get("verdict", "UNKNOWN")
+        asa_icon = "✅" if "PASS" in asa_verdict or "APPROVAL_BOUND" == asa_verdict else "❌"
+        lines.append("- %s **%s** [%s]" % (asa_icon, asa_verdict, asa_category))
+        lines.append("- Action: `%s`" % asa_action)
+        if asa_category == "action_specific":
+            if asa.get("blocked_reason_code"):
+                lines.append("- Blocked reason: `%s`" % asa["blocked_reason_code"])
+            if asa.get("missing_fields"):
+                lines.append("- Missing fields: %s" % ", ".join("`%s`" % f for f in asa["missing_fields"]))
+            if asa.get("invalid_fields"):
+                lines.append("- Invalid fields: %s" % "; ".join(asa["invalid_fields"]))
+            if asa.get("dedicated_approval_required"):
+                lines.append("- ⚠️ Dedicated approval required")
+            if asa.get("service_admin_critical_required"):
+                lines.append("- ⚠️ CRITICAL risk level required")
+        lines.append("")
+
+    # V1.21.21+V1.21.25A: Deferred Action Registry (unified rendering)
+    dar_section = render_dar_section(result)
+    if dar_section:
+        lines.append(dar_section.rstrip())
+        lines.append("")
+
+    # V1.21.24+V1.21.25A: Verifier Deferred Registry Result (unified rendering)
+    vdr_section = render_vdr_section(result)
+    if vdr_section:
+        lines.append(vdr_section.rstrip())
         lines.append("")
 
     # Baseline
@@ -364,8 +608,27 @@ def _format_compact(result):
     pr = result.get("pr_summary", {})
     pr_str = "#%s" % pr.get("number", "?") if pr.get("number") else "none"
     v1f = result.get("v1_freeze", {}).get("verdict", "?")
-    return "QG:%s Smoke:%s Audit:%s Baseline:%s PR:%s V1:%s | %s" % (
+    base = "QG:%s Smoke:%s Audit:%s Baseline:%s PR:%s V1:%s | %s" % (
         qg, smoke, audit, baseline, pr_str, v1f, result.get("operator_summary", "")[:60])
+    # V1.21.16: Append ASA info if present
+    asa = result.get("action_specific_approval")
+    if asa:
+        asa_cat = asa.get("action_category", "?")
+        asa_code = asa.get("blocked_reason_code")
+        asa_part = "ASA:%s" % asa_cat
+        if asa_code:
+            asa_part += "(%s)" % asa_code
+        base += " | " + asa_part
+    # V1.21.21: Append DAR info if present
+    dar = result.get("deferred_action_registry")
+    if dar:
+        actions = sorted(set(e.get("action", "?") for e in dar))
+        base += " | DAR:%d (%s)" % (len(dar), ", ".join(actions))
+    # V1.21.24: Append VDR info if present
+    vdr = result.get("verifier_deferred_result")
+    if vdr:
+        base += " | VDR:%s" % vdr.get("result", "?")
+    return base
 
 
 def build_parser():
@@ -379,6 +642,7 @@ def build_parser():
     parser.add_argument("--compact", action="store_true", help="Compact one-liner output")
     parser.add_argument("--repo-root", help="Repository root (default: cwd)")
     parser.add_argument("--jobs-dir", help="Jobs directory (default: ~/vibedev/jobs)")
+    parser.add_argument("--eag-result", dest="eag_result_file", help="Path to EAG result JSON (optional, for action-specific audit)")
     return parser
 
 
@@ -387,9 +651,15 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    eag_result = None
+    if args.eag_result_file:
+        with open(args.eag_result_file, encoding="utf-8") as f:
+            eag_result = json.load(f)
+
     result = run_report(
         repo_root=args.repo_root or Path(__file__).parent.parent,
         jobs_dir=args.jobs_dir,
+        eag_result=eag_result,
     )
 
     if args.json:
