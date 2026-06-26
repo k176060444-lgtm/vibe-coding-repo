@@ -178,6 +178,26 @@ def _test_routing_guard_recommend_9bao():
     return {"passed": passed, "message": msg}
 
 
+def _test_routing_guard_recommend_risk_compat():
+    import sys
+    sys.path.insert(0, "scripts")
+    from vibe_model_routing_policy import recommend
+    r = recommend("implementer", risk_level="high", enforce_guards=True)
+    candidates = [c["model"] for c in r.get("candidates", [])]
+    blocked = ["mimo", "xiaomi", "deepseek-v4-pro"]
+    violations = []
+    for m in candidates:
+        for bm in blocked:
+            if bm in m.lower():
+                violations.append(m + " contains " + bm)
+    non_mimo = [m for m in candidates if "mimo" not in m.lower() and "deepseek-v4-pro" not in m.lower()]
+    if not non_mimo:
+        violations.append("no non-mimo candidates")
+    passed = len(violations) == 0
+    msg = "candidates=" + str(candidates) if passed else "; ".join(violations)
+    return {"passed": passed, "message": msg}
+
+
 TESTS = [
     ("intake_self_check", _test_intake_self_check),
     ("intake_self_repo_low", _test_intake_self_repo_low),
@@ -227,6 +247,7 @@ TESTS.extend([
     ("routing_guard_node_filter", _test_routing_guard_node_filter),
     ("routing_guard_route_all", _test_routing_guard_route_all),
     ("routing_guard_recommend_9bao", _test_routing_guard_recommend_9bao),
+    ("routing_guard_recommend_risk_compat", _test_routing_guard_recommend_risk_compat),
 ])
 
 if __name__ == "__main__":
