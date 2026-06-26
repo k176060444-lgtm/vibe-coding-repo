@@ -70,6 +70,14 @@ class WorkerNode:
     last_job_completed: str = ""
     baseline_sha: str = ""
     tools_installed: dict = field(default_factory=dict)  # tool_name -> version_or_path
+    # V1.21.33F2A: Extended node inventory fields
+    physical_node_id: str = ""  # unique physical location identifier (e.g. "loc-A", "loc-B")
+    location_id: str = ""  # alias for location
+    vpn_address: str = ""  # primary VPN IP (may duplicate ssh_host for ssh transport)
+    primary_domain: str = ""  # e.g. "5bao.kingjinjing.vip"
+    backup_domain: str = ""  # e.g. "5bao.kingjinjing.top"
+    proxy_port: int = 0  # local proxy port (e.g. 30172)
+    node_aliases: list = field(default_factory=list)  # alternate identifiers
 
     def to_dict(self) -> dict:
         """Serialize WorkerNode to a JSON-safe dict."""
@@ -99,6 +107,13 @@ class WorkerNode:
             "last_job_completed": self.last_job_completed,
             "baseline_sha": self.baseline_sha,
             "tools_installed": dict(self.tools_installed),
+            "physical_node_id": self.physical_node_id,
+            "location_id": self.location_id,
+            "vpn_address": self.vpn_address,
+            "primary_domain": self.primary_domain,
+            "backup_domain": self.backup_domain,
+            "proxy_port": self.proxy_port,
+            "node_aliases": list(self.node_aliases),
         }
 
     @classmethod
@@ -113,6 +128,8 @@ class WorkerNode:
             "token_policy", "allowed_operations", "recent_failure_count",
             "last_health_check", "last_job_completed", "baseline_sha",
             "tools_installed",
+            "physical_node_id", "location_id", "vpn_address",
+            "primary_domain", "backup_domain", "proxy_port", "node_aliases",
         }
         filtered = {k: v for k, v in d.items() if k in known}
         return cls(**filtered)
@@ -134,6 +151,13 @@ DEFAULT_WORKERS = {
         weight=100,
         max_parallel_jobs=1,
         tools_installed={"ripgrep": "13.0.0"},
+        physical_node_id="loc-A-N100",
+        location_id="loc-A",
+        vpn_address="192.168.5.6",
+        primary_domain="5bao.kingjinjing.vip",
+        backup_domain="5bao.kingjinjing.top",
+        proxy_port=30172,
+        node_aliases=["KK-5bao", "5bao-debian-n100"],
     ),
     "9bao": WorkerNode(
         worker_id="9bao",
@@ -149,6 +173,13 @@ DEFAULT_WORKERS = {
         weight=100,
         max_parallel_jobs=1,
         tools_installed={"ripgrep": "13.0.0"},
+        physical_node_id="loc-B-N100",
+        location_id="loc-B",
+        vpn_address="192.168.9.6",
+        primary_domain="9bao.kingjinjing.vip",
+        backup_domain="9bao.kingjinjing.top",
+        proxy_port=30172,
+        node_aliases=["9bao-debian-n100"],
     ),
     "21bao": WorkerNode(
         worker_id="21bao",
@@ -168,6 +199,13 @@ DEFAULT_WORKERS = {
         admission_mode="normal",
         allowed_operations=["smoke", "implementer-small", "reviewer", "implementer"],
         tools_installed={"opencode": "1.17.8"},
+        physical_node_id="loc-C-i5-8600T",
+        location_id="loc-C",
+        vpn_address="192.168.21.6",
+        primary_domain="21bao.kingjinjing.vip",
+        backup_domain="21bao.kingjinjing.top",
+        proxy_port=30172,
+        node_aliases=["21bao-windows-i5-8600T", "vibedev-controller"],
     ),
 }
 
@@ -272,6 +310,140 @@ class WorkerRegistry:
             del self._locks[branch]
             return True
         return False
+
+    # --- V1.21.33F2A: add/remove node scaffold (no hardcoded fixed list) ---
+
+    def add_node(self, worker: "WorkerNode", dry_run: bool = True) -> dict:
+        """Add a new worker node to the registry.
+
+        Default dry_run=True for safety; set dry_run=False to actually mutate.
+        Returns a plan dict describing the change.
+        """
+        plan = {
+            "action": "add_node",
+            "worker_id": worker.worker_id,
+            "node_type": worker.node_type,
+            "transport": worker.transport,
+            "vpn_address": getattr(worker, "vpn_address", ""),
+            "dry_run": dry_run,
+            "would_change_registry": True if not dry_run else False,
+            "requires_operator_approval": True,
+            "validation": [],
+        }
+        # Validation
+        if worker.worker_id in self.workers:
+            plan["validation"].append({
+                "check": "worker_id_unique",
+                "passed": False,
+                "message": f"worker_id={worker.worker_id} already exists",
+            })
+            plan["would_change_registry"] = False
+            plan["error"] = "DUPLICATE_WORKER_ID"
+            return plan
+        plan["validation"].append({"check": "worker_id_unique", "passed": True, "message": "ok"})
+
+        if worker.node_type not in ("debian-worker", "windows-worker", "linux-worker", "macos-worker"):
+            plan["validation"].append({
+                "check": "node_type_supported",
+                "passed": False,
+                "message": f"node_type={worker.node_type} not in supported list",
+            })
+            plan["would_change_registry"] = False
+            plan["error"] = "UNSUPPORTED_NODE_TYPE"
+            return plan
+        plan["validation"].append({"check": "node_type_supported", "passed": True, "message": "ok"})
+
+        if not dry_run:
+            self.workers[worker.worker_id] = copy.deepcopy(worker)
+        return plan
+
+    def remove_node(self, worker_id: str, dry_run: bool = True) -> dict:
+        """Remove a worker node from the registry.
+
+        Default dry_run=True for safety; set dry_run=False to actually mutate.
+        Returns a plan dict describing the change.
+        """
+        plan = {
+            "action": "remove_node",
+            "worker_id": worker_id,
+            "dry_run": dry_run,
+            "would_change_registry": True if not dry_run else False,
+            "requires_operator_approval": True,
+            "validation": [],
+        }
+        if worker_id not in self.workers:
+            plan["validation"].append({
+                "check": "worker_exists",
+                "passed": False,
+                "message": f"worker_id={worker_id} not in registry",
+            })
+            plan["would_change_registry"] = False
+            plan["error"] = "WORKER_NOT_FOUND"
+            return plan
+        plan["validation"].append({"check": "worker_exists", "passed": True, "message": "ok"})
+
+        if self.workers[worker_id].active_jobs > 0:
+            plan["validation"].append({
+                "check": "no_active_jobs",
+                "passed": False,
+                "message": f"worker has {self.workers[worker_id].active_jobs} active jobs",
+            })
+            plan["would_change_registry"] = False
+            plan["error"] = "WORKER_HAS_ACTIVE_JOBS"
+            return plan
+        plan["validation"].append({"check": "no_active_jobs", "passed": True, "message": "ok"})
+
+        if not dry_run:
+            del self.workers[worker_id]
+        return plan
+
+    def dry_run_node_change(self, plan: dict) -> dict:
+        """Validate a node change plan without applying it.
+
+        Returns the plan with validation details.
+        """
+        result = {
+            "plan": plan,
+            "dry_run": True,
+            "would_apply": False,
+            "validation": [],
+        }
+        if plan.get("action") == "add_node":
+            wid = plan.get("worker_id")
+            if wid in self.workers:
+                result["validation"].append({
+                    "check": "worker_id_unique",
+                    "passed": False,
+                    "message": f"worker_id={wid} already exists",
+                })
+            else:
+                result["validation"].append({
+                    "check": "worker_id_unique",
+                    "passed": True,
+                    "message": "ok",
+                })
+        elif plan.get("action") == "remove_node":
+            wid = plan.get("worker_id")
+            if wid not in self.workers:
+                result["validation"].append({
+                    "check": "worker_exists",
+                    "passed": False,
+                    "message": f"worker_id={wid} not in registry",
+                })
+            else:
+                result["validation"].append({
+                    "check": "worker_exists",
+                    "passed": True,
+                    "message": "ok",
+                })
+        else:
+            result["validation"].append({
+                "check": "unknown_action",
+                "passed": False,
+                "message": f"action={plan.get('action')} not supported",
+            })
+        result["would_apply"] = all(v["passed"] for v in result["validation"])
+        return result
 
     def acquire_merge_lock(self, worker_id: str) -> bool:
         """Acquire global merge lock. Returns False if already held."""

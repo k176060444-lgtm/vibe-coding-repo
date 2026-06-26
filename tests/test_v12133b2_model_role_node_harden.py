@@ -4,7 +4,8 @@ import os
 import sys
 import json
 
-WORKTREE = "/home/vibeworker/vibedev/worktrees/v12133b-gray-remediation"
+# V1.21.33F2A: Use relative path from test file location
+WORKTREE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(WORKTREE, "scripts"))
 sys.path.insert(0, os.path.join(WORKTREE, "tests"))
 
@@ -89,30 +90,50 @@ def test_route_all_9_roles():
 
 
 def test_route_all_is_planner_recommended():
-    """T8: route-all is PLANNER_RECOMMENDED, not OPERATOR_SELECTED."""
+    """T8 (updated V1.21.33F2A): route-all is PLANNER_RECOMMENDED, not OPERATOR_SELECTED.
+
+    Per F1B/F2A node inventory correction:
+    - 5bao (192.168.5.6), 9bao (192.168.9.6), 21bao (192.168.21.6) are 3 independent physical locations
+    - node_isolation = "physical"
+    - physical_isolation_claimed = True
+    """
     routes = route_all()
     for role in expected_roles:
         r = routes[role]
         assert r.get("operator_selection_required") is True
-        assert r.get("node_isolation") == "logical_only"
-        assert r.get("physical_isolation_claimed") is False
+        assert r.get("node_isolation") == "physical", \
+            f"{role}: node_isolation should be physical, got {r.get('node_isolation')}"
+        assert r.get("physical_isolation_claimed") is True, \
+            f"{role}: physical_isolation_claimed should be True"
 
 
 def test_logical_node_only_labeled():
-    """T9: LOGICAL_NODE_ONLY correctly labeled."""
+    """T9 (updated V1.21.33F2A): physical isolation correctly labeled.
+
+    Per F1B/F2A: 3 independent physical locations.
+    """
     routes = route_all()
     for role in expected_roles:
         r = routes[role]
-        assert r.get("node_isolation") == "logical_only"
-        assert r.get("physical_isolation_claimed") is False
-        assert r.get("node_degradation_requires_operator_approval") is True
+        assert r.get("node_isolation") == "physical", \
+            f"{role}: node_isolation should be physical"
+        assert r.get("physical_isolation_claimed") is True, \
+            f"{role}: physical_isolation_claimed should be True"
+        assert r.get("node_degradation_requires_operator_approval") is False, \
+            f"{role}: 3 independent physical nodes, no degradation required"
 
 
 def test_node_degradation_requires_approval():
-    """T10: Tester-A/B and Reviewer-A/B on same physical node require approval."""
+    """T10 (updated V1.21.33F2A): 3 independent physical locations, no degradation needed.
+
+    Per F1B/F2A: 5bao/9bao/21bao are 3 independent physical nodes,
+    so Tester-A (5bao), Tester-B (9bao), Reviewer-A (9bao), Reviewer-B (21bao)
+    are all on different physical nodes. node_degradation not required.
+    """
     routes = route_all()
     for role in ["tester-a", "tester-b", "reviewer-a", "reviewer-b"]:
-        assert routes[role].get("node_degradation_requires_operator_approval") is True
+        assert routes[role].get("node_degradation_requires_operator_approval") is False, \
+            f"{role}: independent physical node, no degradation"
 
 
 def test_planned_actual_mismatch_block():

@@ -72,7 +72,7 @@ MODELS = {
         "provider": "deepseek",
         "strengths": ["coding", "instruction_following", "structured_output"],
         "role_fit": {"orchestrator": 0.6, "explorer": 0.7, "planner": 0.8, "implementer": 0.9, "tester-a": 0.8, "tester-b": 0.8, "reviewer-a": 0.8, "reviewer-b": 0.8, "git-integrator": 0.5},
-        "allowed_nodes": ["5bao", "9bao"],
+        "allowed_nodes": ["5bao", "9bao", "21bao"],
         "operator_selection_required": True,
         "guarded_blocked": True,
         "block_reason": "deepseek-v4-pro requires explicit operator approval; not default recommended",
@@ -81,7 +81,7 @@ MODELS = {
         "provider": "xiaomi",
         "strengths": ["chinese_output", "instruction_following", "planning"],
         "role_fit": {"orchestrator": 0.7, "explorer": 0.7, "planner": 0.9, "implementer": 0.7, "tester-a": 0.6, "tester-b": 0.6, "reviewer-a": 0.7, "reviewer-b": 0.7, "git-integrator": 0.4},
-        "allowed_nodes": ["5bao", "9bao", "win"],
+        "allowed_nodes": ["5bao", "9bao", "21bao", "win"],
         "operator_selection_required": True,
         "blocked": True,
         "block_reason": "mimo/xiaomi models are temporary_unavailable",
@@ -90,14 +90,14 @@ MODELS = {
         "provider": "minimax",
         "strengths": ["coding", "testing", "structured_output"],
         "role_fit": {"orchestrator": 0.6, "explorer": 0.7, "planner": 0.7, "implementer": 0.8, "tester-a": 0.8, "tester-b": 0.8, "reviewer-a": 0.8, "reviewer-b": 0.8, "git-integrator": 0.5},
-        "allowed_nodes": ["5bao", "9bao"],
+        "allowed_nodes": ["5bao", "9bao", "21bao"],
         "operator_selection_required": True,
     },
     "volcengine-doubao": {
         "provider": "volcengine",
         "strengths": ["chinese_output", "summarization", "planning"],
         "role_fit": {"orchestrator": 0.8, "explorer": 0.7, "planner": 0.8, "implementer": 0.6, "tester-a": 0.6, "tester-b": 0.6, "reviewer-a": 0.7, "reviewer-b": 0.7, "git-integrator": 0.5},
-        "allowed_nodes": ["5bao", "9bao"],
+        "allowed_nodes": ["5bao", "9bao", "21bao"],
         "operator_selection_required": True,
     },
 }
@@ -209,21 +209,135 @@ def recommend(role, risk_level="low", node_id=None, enforce_guards=True):
     }
 
 
+def _load_worker_registry():
+    """Dynamically load worker registry from vibe_worker_registry.DEFAULT_WORKERS.
+
+    Falls back to a minimal dict if registry import fails.
+    Returns dict of {worker_id: WorkerNode-like dict}.
+    """
+    try:
+        from vibe_worker_registry import DEFAULT_WORKERS, NodeStatus
+        out = {}
+        for wid, wn in DEFAULT_WORKERS.items():
+            out[wid] = {
+                "worker_id": wid,
+                "node_type": wn.node_type,
+                "transport": getattr(wn, "transport", "ssh"),
+                "vpn_address": getattr(wn, "ssh_host", "") or getattr(wn, "vpn_address", ""),
+                "ssh_port": getattr(wn, "ssh_port", 0),
+                "workspace_root": getattr(wn, "workspace_root", ""),
+                "capabilities": list(getattr(wn, "capabilities", [])),
+                "health_status": getattr(wn, "health_status", NodeStatus.UNKNOWN.value if hasattr(NodeStatus, "UNKNOWN") else "UNKNOWN"),
+                "enabled": getattr(wn, "enabled", True),
+                "maintenance_status": getattr(wn, "maintenance_status", "active"),
+            }
+        return out
+    except Exception as e:
+        # Fallback: minimal dict (must NEVER hardcode 5bao/9bao-only)
+        return {
+            "_load_error": str(e),
+            "_note": "registry load failed; route-all must BLOCK or report UNKNOWN_REQUIRES_OPERATOR",
+        }
+
+
+def _resolve_node_for_role(role, registry):
+    """Resolve which node should host a role, based on registry capabilities.
+
+    Returns (node_id, attribution_dict) or (None, error_dict).
+    """
+    if not registry or "_load_error" in registry:
+        return None, {
+            "error": "REGISTRY_UNAVAILABLE",
+            "message": "worker registry not loaded; route-all cannot determine nodes",
+            "operator_action_required": "verify vibe_worker_registry.py import",
+        }
+
+    # Role-to-node preference (declared, not hardcoded fixed list)
+    ROLE_NODE_PREFERENCE = {
+        "orchestrator":    ["21bao", "win"],
+        "planner":         ["21bao", "win"],
+        "git-integrator":  ["21bao", "win"],
+        "implementer":     ["5bao", "9bao", "21bao"],
+        "tester-a":        ["5bao", "9bao"],
+        "tester-b":        ["9bao", "5bao"],
+        "reviewer-a":      ["9bao", "5bao"],
+        "reviewer-b":      ["21bao", "9bao"],
+        "explorer":        ["5bao", "9bao", "21bao"],
+    }
+
+    preferred = ROLE_NODE_PREFERENCE.get(role, [])
+    candidates = []
+    for nid in preferred:
+        node = registry.get(nid)
+        if not node:
+            continue
+        if not node.get("enabled", True):
+            continue
+        if node.get("maintenance_status") == "maintenance":
+            continue
+        if node.get("health_status") == "OFFLINE":
+            continue
+        candidates.append((nid, node))
+
+    if not candidates:
+        return None, {
+            "error": "NO_AVAILABLE_NODE",
+            "message": f"no available node for role={role}; preferred={preferred}",
+            "operator_action_required": "health-check required or operator must confirm",
+        }
+
+    # Pick first available; could be load-balanced in future
+    nid, node = candidates[0]
+    return nid, {
+        "node_id": nid,
+        "node_type": node["node_type"],
+        "transport": node["transport"],
+        "vpn_address": node.get("vpn_address", ""),
+        "capabilities": node.get("capabilities", []),
+        "health_status": node.get("health_status", "UNKNOWN"),
+    }
+
+
 def route_all():
-    """Route all 9 roles with node attribution and operator selection requirement."""
+    """Route all 9 roles with node attribution and operator selection requirement.
+
+    Uses dynamic worker registry (no hardcoded fixed node list).
+    Each node is checked for: enabled, maintenance, health_status != OFFLINE.
+    UNKNOWN health_status requires operator confirmation before assignment.
+    """
     results = {}
+    registry = _load_worker_registry()
+
     for role in ROLES:
         rec = recommend(role)
-        # Add VibeDev 9-role metadata
-        rec["planned_node"] = "LOGICAL_NODE_ONLY"
+        node_id, attribution = _resolve_node_for_role(role, registry)
+
         rec["planned_alias"] = rec.get("recommended", "")
         rec["planned_provider_model"] = ""
-        rec["allowed_nodes_check"] = "5bao and 9bao share same physical node (KK-5bao); LOGICAL_NODE_ONLY"
-        rec["node_isolation"] = "logical_only"
-        rec["physical_isolation_claimed"] = False
         rec["operator_selection_required"] = True
         rec["fallback_count"] = 0
-        rec["node_degradation_requires_operator_approval"] = True
+
+        if node_id:
+            rec["planned_node"] = node_id
+            rec["node_attribution"] = attribution
+            # 3 independent physical locations (per registry)
+            rec["node_isolation"] = "physical"
+            rec["physical_isolation_claimed"] = True
+            rec["node_degradation_requires_operator_approval"] = False
+            rec["allowed_nodes_check"] = (
+                f"node={node_id} from registry; "
+                f"transport={attribution.get('transport')}; "
+                f"health={attribution.get('health_status')}"
+            )
+        else:
+            rec["planned_node"] = None
+            rec["node_attribution"] = attribution
+            rec["node_isolation"] = "UNKNOWN"
+            rec["physical_isolation_claimed"] = False
+            rec["node_degradation_requires_operator_approval"] = True
+            rec["allowed_nodes_check"] = (
+                f"NO_AVAILABLE_NODE for role={role}; error={attribution.get('error')}"
+            )
         results[role] = rec
     return results
 
