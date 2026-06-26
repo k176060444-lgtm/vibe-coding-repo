@@ -514,3 +514,50 @@ class TestRecommendationGateNative(unittest.TestCase):
         reg.set_health("21bao", NodeStatus.ONLINE)
         selected = reg.select_worker("windows-worker")
         assert selected is None
+
+    def test_mimo_models_are_marked_temporary_unavailable_in_yaml(self):
+        """Verify all three mimo models in source YAML are marked temporary_unavailable."""
+        import yaml
+        yaml_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "model_pool.yaml")
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        
+        # Count how many mimo models are found and how many have correct status
+        mimo_count = 0
+        bad_status = 0
+        for model in data["models"]:
+            if "mimo" in model["id"].lower():
+                mimo_count += 1
+                status = model.get("status", "confirmed")
+                if status != "temporary_unavailable":
+                    bad_status += 1
+        
+        self.assertEqual(mimo_count, 3, "Expected exactly 3 mimo models in source YAML")
+        self.assertEqual(bad_status, 0, "All 3 mimo models should have status=temporary_unavailable")
+
+    def test_9bao_allowed_for_volcengine_and_minimax_in_yaml(self):
+        """Verify 9bao is in allowed_nodes for volcengine and minimax."""
+        import yaml
+        yaml_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "model_pool.yaml")
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        
+        found_volc = False
+        volc_has_9bao = False
+        found_mini = False
+        mini_has_9bao = False
+        
+        for model in data["models"]:
+            if model["id"] == "volcengine-doubao-1-5-pro-256k":
+                found_volc = True
+                if "9bao" in model.get("allowed_nodes", []):
+                    volc_has_9bao = True
+            if model["id"] == "minimax-minimax-m2-5":
+                found_mini = True
+                if "9bao" in model.get("allowed_nodes", []):
+                    mini_has_9bao = True
+        
+        self.assertTrue(found_volc, "volcengine-doubao-1-5-pro-256k should exist in YAML")
+        self.assertTrue(volc_has_9bao, "volcengine should allow 9bao")
+        self.assertTrue(found_mini, "minimax-minimax-m2-5 should exist in YAML")
+        self.assertTrue(mini_has_9bao, "minimax should allow 9bao")
