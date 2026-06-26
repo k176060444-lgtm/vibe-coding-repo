@@ -505,6 +505,31 @@ class ModelPool:
             self.snapshot_timestamp = data.get("snapshot_timestamp")
             self.snapshot_sha256 = data.get("snapshot_sha256")
 
+    @classmethod
+    def from_yaml(cls, yaml_path: str) -> "ModelPool":
+        import yaml
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            yaml_data = yaml.safe_load(f)
+        pool = cls()
+        for model in yaml_data.get("models", []):
+            model_id = model["id"]
+            entry = {
+                "exact_model_id": model_id,
+                "model_id": model.get("model"),
+                "alias": model.get("alias", []),
+                "provider": model.get("provider"),
+                "enabled": model.get("enabled", True),
+                "status": model.get("status", "confirmed"),
+                "allowed_nodes": model.get("allowed_nodes", []),
+                "smoke_required": model.get("smoke_required", False),
+                "smoke_results": model.get("smoke_results", {}),
+                "priority": model.get("priority", 100),
+                "node_availability": {n: {"available": True} for n in model.get("allowed_nodes", [])},
+                "health_status": "healthy"
+            }
+            pool.models[model_id] = entry
+        return pool
+
     def save(self):
         """Save pool to disk and recompute snapshot SHA256."""
         content = self._snapshot_content()
@@ -652,7 +677,7 @@ class ModelPool:
         }
 
     def list_models(self, node_id: Optional[str] = None, tag: Optional[str] = None,
-                    enabled_only: bool = False) -> list[dict]:
+                    enabled_only: bool = False, enforce_guards: bool = False) -> list[dict]:
         """List models with optional filters."""
         result = []
         for model_id, entry in self.models.items():
@@ -660,6 +685,27 @@ class ModelPool:
                 continue
             if tag and entry.get("cost_tag") != tag:
                 continue
+
+            # Model selection guards
+            if enforce_guards:
+                # 1. Exclude temporary_unavailable models
+                if entry.get("status") == "temporary_unavailable":
+                    continue
+                # 2. Exclude xiaomi/mimo models
+                if entry.get("provider") == "xiaomi" or "mimo" in model_id.lower():
+                    continue
+                if node_id:
+                    # 3. Check node_id is in allowed_nodes
+                    allowed_nodes = entry.get("allowed_nodes", [])
+                    if allowed_nodes and node_id not in allowed_nodes:
+                        continue
+                    # 4. Check smoke status if required
+                    if entry.get("smoke_required", False):
+                        smoke_results = entry.get("smoke_results", {})
+                        node_smoke = smoke_results.get(node_id, {})
+                        if node_smoke.get("status") != "confirmed":
+                            continue
+
             if node_id:
                 avail = entry.get("node_availability", {}).get(node_id, {})
                 if not avail.get("available", False):
@@ -681,13 +727,33 @@ class ModelPool:
                 return entry["exact_model_id"]
         return None
 
-    def validate_model(self, exact_model_id: str, node_id: str) -> tuple[bool, str]:
+    def validate_model(self, exact_model_id: str, node_id: str, enforce_guards: bool = False) -> tuple[bool, str]:
         """Validate a model is available on a node. Fail-closed."""
         if exact_model_id not in self.models:
             return False, f"model not in pool: {exact_model_id}"
         entry = self.models[exact_model_id]
         if not entry.get("enabled", True):
             return False, f"model disabled: {exact_model_id}"
+
+        # Model selection guards
+        if enforce_guards:
+            # 1. Exclude temporary_unavailable models
+            if entry.get("status") == "temporary_unavailable":
+                return False, f"model marked temporary_unavailable: {exact_model_id}"
+            # 2. Exclude xiaomi/mimo models
+            if entry.get("provider") == "xiaomi" or "mimo" in exact_model_id.lower():
+                return False, f"mimo/xiaomi models are blocked: {exact_model_id}"
+            # 3. Check node_id is in allowed_nodes
+            allowed_nodes = entry.get("allowed_nodes", [])
+            if allowed_nodes and node_id not in allowed_nodes:
+                return False, f"model not allowed on node {node_id}: {exact_model_id}"
+            # 4. Check smoke status if required
+            if entry.get("smoke_required", False):
+                smoke_results = entry.get("smoke_results", {})
+                node_smoke = smoke_results.get(node_id, {})
+                if node_smoke.get("status") != "confirmed":
+                    return False, f"model smoke not confirmed on node {node_id}: {exact_model_id}"
+
         avail = entry.get("node_availability", {}).get(node_id, {})
         if not avail.get("available", False):
             return False, f"model not available on node {node_id}: {exact_model_id}"

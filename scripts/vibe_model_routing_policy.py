@@ -9,6 +9,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 
@@ -69,6 +70,20 @@ MODELS = {
     },
 }
 
+# ── Model Pool Guard ──
+
+def _load_model_pool():
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from opencode_model_pool import ModelPool
+        yp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_pool.yaml")
+        if os.path.exists(yp):
+            return ModelPool.from_yaml(yp)
+    except Exception:
+        pass
+    return None
+
+
 # ── Policy ────────────────────────────────────────────────────────────
 
 NO_AUTO_SWITCH_REASONS = [
@@ -87,13 +102,49 @@ AUTO_SWITCH_ALLOWED = [
 ]
 
 
-def recommend(role, risk_level="low"):
+def recommend(role, risk_level="low", node_id=None, enforce_guards=True):
     """Recommend models for a given role and risk level."""
     if role not in ROLES:
         return {"error": f"unknown role: {role}"}
 
     candidates = []
+
+    # Load model pool for guard filtering
+    pool = _load_model_pool() if enforce_guards else None
+
+    # Build routing-name to YAML model-id mapping
+    _ROUTING_TO_YAML = {
+        "deepseek-v4-pro": None,
+        "mimo-v2.5-pro": "xiaomi-mimo-v2-5-pro",
+        "minimax-m3": "minimax-minimax-m2-5",
+        "volcengine-doubao": "volcengine-doubao-1-5-pro-256k",
+    }
+
     for model_name, model_info in MODELS.items():
+        # Apply model selection guards
+        if enforce_guards and pool:
+            yaml_id = _ROUTING_TO_YAML.get(model_name)
+            pm = pool.models.get(yaml_id) if yaml_id else None
+            if pm:
+                if pm.get("status") in ("temporary_unavailable", "unverified"):
+                    continue
+                if pm.get("provider") == "xiaomi" or "mimo" in model_name.lower():
+                    continue
+                if node_id:
+                    an = pm.get("allowed_nodes", [])
+                    if an and node_id not in an:
+                        continue
+                if pm.get("smoke_required", False):
+                    sr = pm.get("smoke_results", {})
+                    if node_id and sr.get(node_id, {}).get("status") == "failed":
+                        continue
+            else:
+                # Model not in YAML pool - block if guards enabled (unverified)
+                if "mimo" in model_name.lower() or model_info.get("provider") == "xiaomi":
+                    continue
+                # Block models with no YAML entry (they are unverified)
+                if yaml_id is None:
+                    continue
         fit = model_info["role_fit"].get(role, 0)
         candidates.append({
             "model": model_name,

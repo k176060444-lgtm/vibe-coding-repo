@@ -1,0 +1,537 @@
+schema_version: '1.0'
+phase: transitional-local
+source_of_truth: win:C:/Users/KK/AppData/Local/hermes/profiles/vibedev/scripts/model_pool.yaml
+generated_from:
+- scripts/model_alias_config.yaml
+- scripts/node_model_capability.yaml
+generated_at: '2026-06-25T12:13:30Z'
+models:
+- id: anthropic-claude-3-5-haiku-20241022
+  alias:
+  - haiku
+  provider: anthropic
+  model: claude-3-5-haiku-20241022
+  key_env: OPENCODE_ANTHROPIC_API_KEY
+  base_url_env: OPENCODE_ANTHROPIC_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 1
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: haiku'
+- id: anthropic-claude-opus-4
+  alias:
+  - opus
+  - opus-4
+  provider: anthropic
+  model: claude-opus-4
+  key_env: OPENCODE_ANTHROPIC_API_KEY
+  base_url_env: OPENCODE_ANTHROPIC_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 2
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: opus, opus-4'
+- id: anthropic-claude-sonnet-4
+  alias:
+  - claude
+  - sonnet
+  - sonnet-4
+  provider: anthropic
+  model: claude-sonnet-4
+  key_env: OPENCODE_ANTHROPIC_API_KEY
+  base_url_env: OPENCODE_ANTHROPIC_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 3
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: claude, sonnet, sonnet-4'
+- id: dashscope-qwen-max
+  alias:
+  - qwen
+  - qwen-max
+  provider: dashscope
+  model: qwen-max
+  key_env: OPENCODE_DASHSCOPE_API_KEY
+  base_url_env: OPENCODE_DASHSCOPE_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 4
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: qwen, qwen-max'
+- id: dashscope-qwen-plus
+  alias:
+  - qwen-plus
+  provider: dashscope
+  model: qwen-plus
+  key_env: OPENCODE_DASHSCOPE_API_KEY
+  base_url_env: OPENCODE_DASHSCOPE_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 5
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: qwen-plus'
+- id: deepseek-deepseek-chat
+  alias:
+  - deepseek
+  - ds
+  - ds4
+  - deepseek-chat
+  provider: deepseek
+  model: deepseek-chat
+  key_env: OPENCODE_DEEPSEEK_API_KEY
+  base_url_env: OPENCODE_DEEPSEEK_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 6
+  fallback_policy: none
+  smoke_required: true
+  smoke_results:
+    5bao:
+      status: unverified
+      last_verified: null
+      smoke_phase: null
+      wrapper: null
+      invocation: null
+    9bao:
+      status: unverified
+      last_verified: null
+      smoke_phase: null
+      wrapper: null
+      invocation: null
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: deepseek, ds, ds4, deepseek-chat'
+- id: deepseek-deepseek-coder
+  alias:
+  - deepseek-coder
+  provider: deepseek
+  model: deepseek-coder
+  key_env: OPENCODE_DEEPSEEK_API_KEY
+  base_url_env: OPENCODE_DEEPSEEK_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 7
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: deepseek-coder'
+- id: deepseek-deepseek-reasoner
+  alias:
+  - deepseek-r1
+  provider: deepseek
+  model: deepseek-reasoner
+  key_env: OPENCODE_DEEPSEEK_API_KEY
+  base_url_env: OPENCODE_DEEPSEEK_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 8
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: deepseek-r1'
+- id: google-gemini-2-5-flash
+  alias:
+  - gemini-flash
+  provider: google
+  model: gemini-2.5-flash
+  key_env: OPENCODE_GOOGLE_API_KEY
+  base_url_env: OPENCODE_GOOGLE_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 9
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: gemini-flash'
+- id: google-gemini-2-5-pro
+  alias:
+  - gemini
+  - gemini-pro
+  provider: google
+  model: gemini-2.5-pro
+  key_env: OPENCODE_GOOGLE_API_KEY
+  base_url_env: OPENCODE_GOOGLE_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 10
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: gemini, gemini-pro'
+- id: minimax-minimax-m2-5
+  alias:
+  - minimax
+  - minimax-m2.5
+  - minimax-m2
+  provider: minimax
+  model: MiniMax-M2.5
+  key_env: OPENCODE_MINIMAX_API_KEY
+  base_url_env: OPENCODE_MINIMAX_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: paid
+  capability_tags:
+  - chat
+  - code
+  priority: 11
+  fallback_policy: none
+  smoke_required: true
+  smoke_results:
+    5bao:
+      status: unverified
+      last_verified: null
+      smoke_phase: null
+      wrapper: null
+      invocation: null
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: minimax, minimax-m2.5, minimax-m2'
+- id: moonshot-moonshot-v1-128k
+  alias:
+  - kimi
+  provider: moonshot
+  model: moonshot-v1-128k
+  key_env: OPENCODE_MOONSHOT_API_KEY
+  base_url_env: OPENCODE_MOONSHOT_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 12
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: kimi'
+- id: openai-gpt-4o
+  alias:
+  - gpt4o
+  - gpt-4o
+  - gpt4
+  provider: openai
+  model: gpt-4o
+  key_env: OPENCODE_OPENAI_API_KEY
+  base_url_env: OPENCODE_OPENAI_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 13
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: gpt4o, gpt-4o, gpt4'
+- id: openai-o1
+  alias:
+  - o1
+  provider: openai
+  model: o1
+  key_env: OPENCODE_OPENAI_API_KEY
+  base_url_env: OPENCODE_OPENAI_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 14
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: o1'
+- id: openai-o3
+  alias:
+  - o3
+  provider: openai
+  model: o3
+  key_env: OPENCODE_OPENAI_API_KEY
+  base_url_env: OPENCODE_OPENAI_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 15
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: o3'
+- id: openai-o3-mini
+  alias:
+  - o3-mini
+  provider: openai
+  model: o3-mini
+  key_env: OPENCODE_OPENAI_API_KEY
+  base_url_env: OPENCODE_OPENAI_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 16
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: o3-mini'
+- id: openai-o4-mini
+  alias:
+  - o4-mini
+  provider: openai
+  model: o4-mini
+  key_env: OPENCODE_OPENAI_API_KEY
+  base_url_env: OPENCODE_OPENAI_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 17
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: o4-mini'
+- id: volcengine-doubao-1-5-pro-256k
+  alias:
+  - doubao
+  - doubao-pro
+  - doubao-1.5
+  provider: volcengine
+  model: doubao-1.5-pro-256k
+  key_env: OPENCODE_VOLCENGINE_API_KEY
+  base_url_env: OPENCODE_VOLCENGINE_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: paid
+  capability_tags:
+  - chat
+  - code
+  priority: 18
+  fallback_policy: none
+  smoke_required: true
+  smoke_results:
+    5bao:
+      status: unverified
+      last_verified: null
+      smoke_phase: null
+      wrapper: null
+      invocation: null
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: doubao, doubao-pro, doubao-1.5'
+- id: xai-grok-3
+  alias:
+  - grok
+  - grok-3
+  provider: xai
+  model: grok-3
+  key_env: OPENCODE_XAI_API_KEY
+  base_url_env: OPENCODE_XAI_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes: []
+  cost: unknown
+  capability_tags:
+  - chat
+  - code
+  priority: 19
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: grok, grok-3'
+- id: xiaomi-mimo-v2-5-pro
+  alias:
+  - mimo
+  - mimo-v2.5
+  - mimo-v2.5-pro
+  provider: xiaomi
+  model: mimo-v2.5-pro
+  key_env: OPENCODE_XIAOMI_API_KEY
+  base_url_env: OPENCODE_XIAOMI_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - chat
+  - code
+  priority: 20
+  fallback_policy: none
+  smoke_required: true
+  smoke_results:
+    5bao:
+      status: confirmed
+      last_verified: '2026-06-25T11:40:28Z'
+      smoke_phase: V1.21.30Z_NODE_MODEL_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: xiaomi-plan/mimo-v2.5-pro
+    9bao:
+      status: confirmed
+      last_verified: '2026-06-25T11:40:28Z'
+      smoke_phase: V1.21.30Z_NODE_MODEL_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: xiaomi-plan/mimo-v2.5-pro
+    win:
+      status: confirmed
+      last_verified: null
+      smoke_phase: null
+      wrapper: null
+      invocation: null
+  source: migrated-from-model_alias_config.yaml
+  notes: 'Migrated alias group: mimo, mimo-v2.5, mimo-v2.5-pro'
+  status: temporary_unavailable
+  reason: HTTP_401_INVALID_API_KEY
+- id: xiaomi-mimo-v2-5-pro-payg
+  alias:
+  - xmipro
+  provider: xiaomi
+  model: mimo-v2.5-pro
+  key_env: XIAOMI_API_KEY
+  base_url_env: XIAOMI_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: paid
+  capability_tags:
+  - chat
+  - code
+  - deep-thinking
+  - function-calling
+  - structured-output
+  - web-search
+  priority: 21
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: operator-add-v1.21.31H
+  notes: 'Xiaomi MiMo V2.5 Pro (pay-as-you-go). Base URL: https://api.xiaomimimo.com/v1'
+  status: temporary_unavailable
+  reason: HTTP_401_INVALID_API_KEY
+- id: xiaomi-mimo-v2-5-payg
+  alias:
+  - xmi
+  provider: xiaomi
+  model: mimo-v2.5
+  key_env: XIAOMI_API_KEY
+  base_url_env: XIAOMI_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: paid
+  capability_tags:
+  - chat
+  - code
+  - deep-thinking
+  - function-calling
+  - structured-output
+  - web-search
+  - multimodal
+  priority: 22
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: operator-add-v1.21.31H
+  notes: 'Xiaomi MiMo V2.5 Omni (pay-as-you-go). Base URL: https://api.xiaomimimo.com/v1'
+  status: temporary_unavailable
+  reason: HTTP_401_INVALID_API_KEY

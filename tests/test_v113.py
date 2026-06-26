@@ -87,6 +87,117 @@ def _test_schema_valid_report():
     return {"passed": ok, "message": f"valid={d.get('valid')} errors={len(d.get('errors', []))}" if d else "fail"}
 
 # ── Runner ──
+def _test_routing_guard_excludes_mimo():
+    import sys
+    sys.path.insert(0, "scripts")
+    from vibe_model_routing_policy import recommend
+    r = recommend("implementer")
+    c = [c["model"] for c in r.get("candidates", [])]
+    mimo_excluded = all("mimo" not in m.lower() for m in c)
+    return {"passed": mimo_excluded, "message": "mimo excluded: " + str(mimo_excluded)}
+
+def _test_routing_guard_excludes_unverified():
+    import sys
+    sys.path.insert(0, "scripts")
+    from vibe_model_routing_policy import recommend
+    r = recommend("implementer")
+    c = [c["model"] for c in r.get("candidates", [])]
+    ds_excluded = all("deepseek-v4-pro" not in m.lower() for m in c)
+    return {"passed": ds_excluded, "message": "deepseek-v4-pro excluded: " + str(ds_excluded)}
+
+def _test_routing_guard_allows_non_mimo():
+    import sys
+    sys.path.insert(0, "scripts")
+    from vibe_model_routing_policy import recommend
+    r = recommend("implementer")
+    c = [c["model"] for c in r.get("candidates", [])]
+    minimax_ok = any("minimax" in m.lower() for m in c)
+    volc_ok = any("volcengine" in m.lower() or "doubao" in m.lower() for m in c)
+    return {"passed": minimax_ok and volc_ok, "message": "minimax=" + str(minimax_ok) + " volcengine=" + str(volc_ok)}
+
+def _test_routing_guard_disabled_includes_all():
+    import sys
+    sys.path.insert(0, "scripts")
+    from vibe_model_routing_policy import recommend
+    r = recommend("implementer", enforce_guards=False)
+    c = [c["model"] for c in r.get("candidates", [])]
+    mimo_included = any("mimo" in m.lower() for m in c)
+    ds_included = any("deepseek-v4-pro" in m.lower() for m in c)
+    return {"passed": mimo_included and ds_included, "message": "mimo=" + str(mimo_included) + " ds=" + str(ds_included)}
+
+def _test_routing_guard_node_filter():
+    import sys
+    sys.path.insert(0, "scripts")
+    from vibe_model_routing_policy import recommend
+    r = recommend("implementer", node_id="5bao")
+    c = [c["model"] for c in r.get("candidates", [])]
+    return {"passed": len(c) >= 2, "message": "candidates=" + str(len(c))}
+
+def _test_routing_guard_route_all():
+    import sys
+    sys.path.insert(0, "scripts")
+    from vibe_model_routing_policy import route_all
+    ra = route_all()
+    results = []
+    blocked_models = ["mimo", "xiaomi", "deepseek-v4-pro"]
+    all_ok = True
+    for role, data in ra.items():
+        models = [c["model"] for c in data.get("candidates", [])]
+        for bm in blocked_models:
+            if any(bm in m.lower() for m in models):
+                all_ok = False
+                results.append(role + " contains " + bm)
+        non_mimo = [m for m in models if "mimo" not in m.lower() and "deepseek-v4-pro" not in m.lower()]
+        if not non_mimo:
+            all_ok = False
+            results.append(role + " has no non-mimo candidates")
+    if all_ok:
+        results.append("all roles clean")
+    return {"passed": all_ok, "message": "; ".join(results)}
+
+
+def _test_routing_guard_recommend_9bao():
+    import sys
+    sys.path.insert(0, "scripts")
+    from vibe_model_routing_policy import recommend
+    r = recommend("implementer", node_id="9bao", enforce_guards=True)
+    candidates = [c["model"] for c in r.get("candidates", [])]
+    # Check blocked models
+    blocked = ["mimo", "xiaomi", "deepseek-v4-pro"]
+    violations = []
+    for m in candidates:
+        for bm in blocked:
+            if bm in m.lower():
+                violations.append(m + " contains " + bm)
+    # Check at least one non-mimo candidate
+    non_mimo = [m for m in candidates if "mimo" not in m.lower() and "deepseek-v4-pro" not in m.lower()]
+    if not non_mimo:
+        violations.append("no non-mimo candidates")
+    passed = len(violations) == 0
+    msg = "candidates=" + str(candidates) if passed else "; ".join(violations)
+    return {"passed": passed, "message": msg}
+
+
+def _test_routing_guard_recommend_risk_compat():
+    import sys
+    sys.path.insert(0, "scripts")
+    from vibe_model_routing_policy import recommend
+    r = recommend("implementer", risk_level="high", enforce_guards=True)
+    candidates = [c["model"] for c in r.get("candidates", [])]
+    blocked = ["mimo", "xiaomi", "deepseek-v4-pro"]
+    violations = []
+    for m in candidates:
+        for bm in blocked:
+            if bm in m.lower():
+                violations.append(m + " contains " + bm)
+    non_mimo = [m for m in candidates if "mimo" not in m.lower() and "deepseek-v4-pro" not in m.lower()]
+    if not non_mimo:
+        violations.append("no non-mimo candidates")
+    passed = len(violations) == 0
+    msg = "candidates=" + str(candidates) if passed else "; ".join(violations)
+    return {"passed": passed, "message": msg}
+
+
 TESTS = [
     ("intake_self_check", _test_intake_self_check),
     ("intake_self_repo_low", _test_intake_self_repo_low),
@@ -123,6 +234,21 @@ def main():
         return 1
     print(f"\nALL {total} TESTS PASSED")
     return 0
+
+
+
+
+
+TESTS.extend([
+    ("routing_guard_excludes_mimo", _test_routing_guard_excludes_mimo),
+    ("routing_guard_excludes_unverified", _test_routing_guard_excludes_unverified),
+    ("routing_guard_allows_non_mimo", _test_routing_guard_allows_non_mimo),
+    ("routing_guard_disabled_includes_all", _test_routing_guard_disabled_includes_all),
+    ("routing_guard_node_filter", _test_routing_guard_node_filter),
+    ("routing_guard_route_all", _test_routing_guard_route_all),
+    ("routing_guard_recommend_9bao", _test_routing_guard_recommend_9bao),
+    ("routing_guard_recommend_risk_compat", _test_routing_guard_recommend_risk_compat),
+])
 
 if __name__ == "__main__":
     sys.exit(main())
