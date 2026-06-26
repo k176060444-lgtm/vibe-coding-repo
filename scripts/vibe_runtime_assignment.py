@@ -124,6 +124,7 @@ class RuntimeAssignment:
     audit_requirements: List[str] = field(default_factory=list)
     report_schema_version: str = "1.0.0"
     derivation_source: str = "self_constructed"  # "self_constructed" | "approval_contract"
+    runtime_assignment_id: str = ""  # filled by derive_runtime_assignment / can be empty for legacy
 
     def validate(self) -> List[str]:
         errors = []
@@ -201,6 +202,8 @@ class ExecutionTicket:
     no_fallback: bool = True
     expected_artifacts: List[str] = field(default_factory=list)
     report_schema_ref: str = "report_schema_v1.0.0"
+    base_sha: str = ""  # must match approval/assignment base_sha
+    expires_at: Optional[str] = None  # optional ticket-level expiry
 
     def validate(self) -> List[str]:
         errors = []
@@ -242,6 +245,7 @@ class ExecutionTicket:
             node_id=ra.node_id,
             provider=ra.provider,
             model=ra.model,
+            base_sha=assignment.base_sha,
             allowed_paths=assignment.allowed_files,
             forbidden_paths=assignment.forbidden_files,
             expected_artifacts=assignment.expected_outputs,
@@ -454,6 +458,7 @@ def derive_runtime_assignment(approval: ApprovalContract) -> RuntimeAssignment:
     return RuntimeAssignment(
         workorder_id=approval.workorder_id,
         approval_id=approval.approval_id,
+        runtime_assignment_id=derive_runtime_assignment_id(approval.approval_id),
         base_sha=approval.base_sha,
         created_at=approval.approved_at,
         scope=approval.scope,
@@ -473,6 +478,19 @@ def derive_runtime_assignment(approval: ApprovalContract) -> RuntimeAssignment:
         ],
         derivation_source="approval_contract",
     )
+
+
+def derive_runtime_assignment_id(approval_id: str) -> str:
+    """Derive a deterministic runtime_assignment_id from approval_id.
+
+    This is the sanctioned way to obtain a runtime_assignment_id. Any
+    RuntimeAssignment presented to the dispatcher must have a
+    runtime_assignment_id matching derive_runtime_assignment_id(approval_id).
+    """
+    if not approval_id:
+        raise ValueError("approval_id is required")
+    h = hashlib.sha256(approval_id.encode()).hexdigest()[:16]
+    return f"ra_{h}"
 
 
 # ──────────────────────────────────────────────
