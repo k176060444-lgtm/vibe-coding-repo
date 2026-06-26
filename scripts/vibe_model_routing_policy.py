@@ -74,6 +74,8 @@ MODELS = {
         "role_fit": {"orchestrator": 0.6, "explorer": 0.7, "planner": 0.8, "implementer": 0.9, "tester-a": 0.8, "tester-b": 0.8, "reviewer-a": 0.8, "reviewer-b": 0.8, "git-integrator": 0.5},
         "allowed_nodes": ["5bao", "9bao"],
         "operator_selection_required": True,
+        "guarded_blocked": True,
+        "block_reason": "deepseek-v4-pro requires explicit operator approval; not default recommended",
     },
     "mimo-v2.5-pro": {
         "provider": "xiaomi",
@@ -144,7 +146,7 @@ def recommend(role, risk_level="low", node_id=None, enforce_guards=True):
 
     # Build routing-name to YAML model-id mapping
     _ROUTING_TO_YAML = {
-        "deepseek-v4-pro": None,
+        "deepseek-v4-pro": "deepseek-deepseek-chat",
         "mimo-v2.5-pro": "xiaomi-mimo-v2-5-pro",
         "minimax-m3": "minimax-minimax-m2-5",
         "volcengine-doubao": "volcengine-doubao-1-5-pro-256k",
@@ -175,6 +177,9 @@ def recommend(role, risk_level="low", node_id=None, enforce_guards=True):
                 # Block models with no YAML entry (they are unverified)
                 if yaml_id is None:
                     continue
+            # Respect guarded_blocked flag (e.g. deepseek-v4-pro requires operator approval)
+            if model_info.get("guarded_blocked"):
+                continue
         fit = model_info["role_fit"].get(role, 0)
         candidates.append({
             "model": model_name,
@@ -214,8 +219,11 @@ def route_all():
         rec["planned_alias"] = rec.get("recommended", "")
         rec["planned_provider_model"] = ""
         rec["allowed_nodes_check"] = "5bao and 9bao share same physical node (KK-5bao); LOGICAL_NODE_ONLY"
+        rec["node_isolation"] = "logical_only"
+        rec["physical_isolation_claimed"] = False
         rec["operator_selection_required"] = True
         rec["fallback_count"] = 0
+        rec["node_degradation_requires_operator_approval"] = True
         results[role] = rec
     return results
 

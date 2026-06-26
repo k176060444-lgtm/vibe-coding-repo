@@ -1020,14 +1020,24 @@ class ModelPool:
         best = scored[0][1]
         alternatives = [s[1]["exact_model_id"] for s in scored[1:3]]
 
+        # Build dynamic reason: cost_tag must match actual model cost
+        actual_cost = best.get("cost_tag", "unknown")
+        if actual_cost == "free":
+            cost_desc = "free model"
+        elif actual_cost == "paid":
+            cost_desc = "paid model"
+        else:
+            cost_desc = f"cost={actual_cost}"
+        reason = f"strategy={config['strategy']}; {cost_desc}; priority={best['priority']}"
+
         return {
             "task_type": task_type,
             "strategy": config["strategy"],
             "node": node_id,
             "recommended": best["exact_model_id"],
             "alias": best["alias"],
-            "cost_tag": best["cost_tag"],
-            "reason": f"{config['strategy']}; priority={best['priority']}",
+            "cost_tag": actual_cost,
+            "reason": reason,
             "alternatives": alternatives,
             "operator_selection_required": True,
             "fallback_count": 0,
@@ -2039,6 +2049,168 @@ def main():
 
     else:
         parser.print_help()
+
+
+# --- V1.21.33B2: ROLE_NODE_MODEL_ASSIGNMENT_REQUEST ---
+
+def generate_assignment_request(
+    role_matrix: dict,
+    node_matrix: dict,
+    model_matrix: dict,
+    scope: dict,
+    approval_id: str = None,
+) -> dict:
+    """Generate a frozen ROLE_NODE_MODEL_ASSIGNMENT_REQUEST.
+
+    Args:
+        role_matrix: {role: assignee} mapping
+        node_matrix: {role: node} mapping
+        model_matrix: {role: {alias, provider, model}} mapping
+        scope: {files, actions, boundaries} dict
+        approval_id: Optional agent-generated ID (auto-generated if None)
+
+    Returns:
+        Frozen assignment request dict.
+    """
+    import uuid
+    import datetime
+    if approval_id is None:
+        approval_id = f"approval_{uuid.uuid4().hex[:12]}"
+
+    # Validate all 9 roles are present
+    required_roles = [
+        "orchestrator", "explorer", "planner", "implementer",
+        "tester-a", "tester-b", "reviewer-a", "reviewer-b", "git-integrator"
+    ]
+    for role in required_roles:
+        if role not in role_matrix:
+            raise ValueError(f"Missing required role: {role}")
+        if role not in node_matrix:
+            raise ValueError(f"Missing node for role: {role}")
+        if role not in model_matrix:
+            raise ValueError(f"Missing model for role: {role}")
+
+    # Validate no role conflicts
+    role_exclusions = {
+        "orchestrator": ["explorer", "planner", "implementer", "tester-a", "tester-b",
+                         "reviewer-a", "reviewer-b", "git-integrator"],
+        "planner": ["explorer", "implementer", "tester-a", "tester-b",
+                    "reviewer-a", "reviewer-b", "git-integrator"],
+        "explorer": ["planner", "implementer", "tester-a", "tester-b",
+                     "reviewer-a", "reviewer-b", "git-integrator"],
+        "tester-a": ["tester-b"],
+        "reviewer-a": ["reviewer-b"],
+    }
+    for role, excluded in role_exclusions.items():
+        assignee = role_matrix.get(role)
+        if not assignee:
+            continue
+        for ex_role in excluded:
+            if role_matrix.get(ex_role) == assignee:
+                raise ValueError(f"Role conflict: {role} and {ex_role} both assigned to {assignee}")
+
+    request = {
+        "approval_id": approval_id,
+        "role_matrix": role_matrix,
+        "node_matrix": node_matrix,
+        "model_matrix": model_matrix,
+        "scope": scope,
+        "frozen": True,
+        "operator_selected": True,
+        "fallback_allowed": False,
+        "generated_at": datetime.datetime.now().isoformat(),
+    }
+    return request
+
+
+def validate_actual_execution_report(assignment: dict, actual: dict) -> dict:
+    """Validate planned vs actual execution report.
+
+    Args:
+        assignment: Frozen ROLE_NODE_MODEL_ASSIGNMENT_REQUEST dict.
+        actual: Actual execution report with per-role actual_node, actual_provider, actual_model.
+
+    Returns:
+        Validation result dict with violations list.
+    """
+    violations = []
+    model_matrix = assignment.get("model_matrix", {})
+    node_matrix = assignment.get("node_matrix", {})
+
+    for role, model_info in model_matrix.items():
+        planned_node = node_matrix.get(role)
+        actual_node = actual.get(role, {}).get("actual_node")
+        actual_provider = actual.get(role, {}).get("actual_provider")
+        actual_model = actual.get(role, {}).get("actual_model")
+
+        if planned_node and actual_node and planned_node != actual_node:
+            violations.append({
+                "role": role,
+                "field": "node",
+                "planned": planned_node,
+                "actual": actual_node,
+                "severity": "BLOCKER",
+                "message": f"Node mismatch for {role}: planned={planned_node}, actual={actual_node}",
+            })
+
+        planned_provider = model_info.get("provider")
+        if planned_provider and actual_provider and planned_provider != actual_provider:
+            violations.append({
+                "role": role,
+                "field": "provider",
+                "planned": planned_provider,
+                "actual": actual_provider,
+                "severity": "BLOCKER",
+                "message": f"Provider mismatch for {role}: planned={planned_provider}, actual={actual_provider}",
+            })
+
+        planned_model = model_info.get("model")
+        if planned_model and actual_model and planned_model != actual_model:
+            violations.append({
+                "role": role,
+                "field": "model",
+                "planned": planned_model,
+                "actual": actual_model,
+                "severity": "BLOCKER",
+                "message": f"Model mismatch for {role}: planned={planned_model}, actual={actual_model}",
+            })
+
+    if assignment.get("fallback_allowed") is False:
+        for role, role_actual in actual.items():
+            if role_actual.get("fallback_count", 0) > 0:
+                violations.append({
+                    "role": role,
+                    "field": "fallback",
+                    "planned": "fallback_allowed=False",
+                    "actual": f"fallback_count={role_actual.get('fallback_count')}",
+                    "severity": "BLOCKER",
+                    "message": f"Fallback not allowed but {role} used {role_actual.get('fallback_count')} fallbacks",
+                })
+
+    return {
+        "valid": len(violations) == 0,
+        "violations": violations,
+        "approval_id": assignment.get("approval_id"),
+    }
+
+
+def check_model_available(pool, model_id: str, node_id: str) -> dict:
+    """Check if a model is available on a node. If not, return BLOCK."""
+    model = pool.models.get(model_id)
+    if not model:
+        return {"available": False, "reason": f"Model {model_id} not found in pool", "action": "BLOCK"}
+    status = model.get("status", "")
+    if status in ("temporary_unavailable", "unverified", "disabled", "quarantined"):
+        return {"available": False, "reason": f"Model {model_id} status={status}", "action": "BLOCK"}
+    if node_id:
+        an = model.get("allowed_nodes", [])
+        if an and node_id not in an:
+            return {"available": False, "reason": f"Model {model_id} not allowed on node {node_id}", "action": "BLOCK"}
+        na = model.get("node_availability", {})
+        na_entry = na.get(node_id, {})
+        if not na_entry.get("available", False):
+            return {"available": False, "reason": f"Model {model_id} not available on node {node_id}", "action": "BLOCK"}
+    return {"available": True, "reason": "ok", "action": "ALLOW"}
 
 
 if __name__ == "__main__":
