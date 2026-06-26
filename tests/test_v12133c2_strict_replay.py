@@ -5,7 +5,8 @@ import sys
 import json
 import subprocess
 
-WORKTREE = "/home/vibeworker/vibedev/worktrees/v12133c2-strict-replay"
+# V1.21.33F2A: Use relative path from test file location (not hardcoded worktree)
+WORKTREE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(WORKTREE, "scripts"))
 
 from opencode_model_pool import ModelPool, generate_assignment_request, validate_actual_execution_report, check_model_available
@@ -218,34 +219,43 @@ def test_deepseek_guarded_blocked():
 
 
 def test_node_degradation_recorded():
-    """T11: node_degradation_requires_operator_approval recorded."""
+    """T11 (updated V1.21.33F2A): 3 independent physical nodes, no degradation needed.
+
+    Per F1B/F2A: node_isolation=physical, physical_isolation_claimed=True.
+    """
     routes = route_all()
-    # All roles should have this flag set
     for role in ROLES:
-        assert routes[role].get("node_degradation_requires_operator_approval") is True, \
-            f"{role}: missing node_degradation flag"
+        r = routes[role]
+        assert r.get("node_isolation") == "physical", \
+            f"{role}: node_isolation should be physical"
+        assert r.get("physical_isolation_claimed") is True, \
+            f"{role}: physical_isolation_claimed should be True"
 
 
 def test_logical_node_only_not_physical_isolation():
-    """T12: 5bao/9bao logical_only, not physical isolation."""
+    """T12 (updated V1.21.33F2A): 3 independent physical nodes, physical isolation claimed."""
     routes = route_all()
     for role in ROLES:
         r = routes[role]
-        assert r.get("node_isolation") == "logical_only", \
-            f"{role}: node_isolation should be logical_only, got {r.get('node_isolation')}"
-        assert r.get("physical_isolation_claimed") is False, \
-            f"{role}: should not claim physical isolation"
+        assert r.get("node_isolation") == "physical", \
+            f"{role}: node_isolation should be physical, got {r.get('node_isolation')}"
+        assert r.get("physical_isolation_claimed") is True, \
+            f"{role}: should claim physical isolation (3 independent locations)"
 
 
 def test_21bao_offline_not_selected():
-    """T13: 21bao is offline and must not appear in operator selection."""
+    """T13 (updated V1.21.33F2A): 21bao is now SELECTED for orchestrator/planner/reviewer-b/git-integrator.
+
+    Per F1B/F2A: 21bao is Windows i5-8600T orchestrator/control-plane, transport=local-exec.
+    21bao is NOT offline; SSH-failure should not be used to judge its offline status.
+    """
     routes = route_all()
-    for role in ROLES:
-        r = routes[role]
-        assert "21bao" not in str(r.get("planned_node", "")), \
-            f"{role}: 21bao should not be selected (offline)"
-        assert "21bao" not in str(r.get("recommended", "")), \
-            f"{role}: 21bao should not appear in recommended"
+    # 21bao SHOULD be selected for orchestrator/planner/reviewer-b/git-integrator
+    selected_roles = [r for r in ROLES if routes[r].get("planned_node") == "21bao"]
+    assert "orchestrator" in selected_roles, "orchestrator should be on 21bao"
+    assert "planner" in selected_roles, "planner should be on 21bao"
+    assert "git-integrator" in selected_roles, "git-integrator should be on 21bao"
+    assert "reviewer-b" in selected_roles, "reviewer-b should be on 21bao (cross-OS review)"
 
 
 def test_no_real_model_call_evidence():
