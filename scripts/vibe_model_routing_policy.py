@@ -355,17 +355,17 @@ def self_check(output_json=False):
     })
 
     # Reviewer recommendation
-    r2 = recommend("reviewer")
+    r2 = recommend("reviewer-a")
     checks.append({
-        "name": "reviewer_recommendation",
+        "name": "reviewer-a_recommendation",
         "passed": r2.get("recommended") is not None,
         "message": f"recommended={r2.get('recommended')}",
     })
 
     # Summarizer recommendation
-    r3 = recommend("summarizer")
+    r3 = recommend("explorer")
     checks.append({
-        "name": "summarizer_recommendation",
+        "name": "explorer_recommendation",
         "passed": r3.get("recommended") is not None,
         "message": f"recommended={r3.get('recommended')}",
     })
