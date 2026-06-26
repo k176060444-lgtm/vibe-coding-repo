@@ -8,6 +8,7 @@ import sys
 import os
 import json
 import tempfile
+from typing import Dict, List, Optional
 
 SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -543,3 +544,296 @@ def test_ticket_from_assignment():
     assert ticket.approval_id == assign.approval_id
     errors = ticket.validate()
     assert len(errors) == 0, f"Ticket validation errors: {errors}"
+
+
+# ──────────────────────────────────────────────
+# I5: ApprovalContract + Integration Tests (18 new tests)
+# ──────────────────────────────────────────────
+
+from scripts.vibe_runtime_assignment import (
+    ApprovalContract, derive_runtime_assignment, derive_operator_selected,
+    derive_runtime_assignment_source, validate_base_sha_match,
+    validate_approval_not_expired, validate_action_allowed,
+    trace_assignment_to_approval,
+    VALID_SELECTION_SOURCES, EXECUTABLE_SELECTION_SOURCES,
+)
+
+
+def _make_valid_approval(
+    selection_source: str = "operator_confirmed_default",
+    base_sha: str = "c71f9b5d6cbde04c7461b894108235b44886a64a",
+    expires_at: Optional[str] = None,
+    approval_id: str = "appr_test_valid",
+    workorder_id: str = "wo_test_valid",
+    operator_id: str = "kk",
+    forbidden_actions: Optional[List[str]] = None,
+    allowed_actions: Optional[List[str]] = None,
+):
+    """Create a valid ApprovalContract for testing."""
+    if forbidden_actions is None:
+        forbidden_actions = ["push", "merge"]
+    if allowed_actions is None:
+        allowed_actions = ["local_exec", "test_run"]
+    return ApprovalContract(
+        approval_id=approval_id,
+        workorder_id=workorder_id,
+        operator_id=operator_id,
+        operator_label="KK (operator)",
+        approved_at="2026-06-26T12:00:00Z",
+        base_sha=base_sha,
+        expires_at=expires_at,
+        risk_level="low",
+        scope="test scope",
+        selected_role_matrix={r: r for r in VALID_ROLES},
+        selected_node_matrix={
+            "orchestrator": "21bao", "planner": "21bao", "reviewer-b": "21bao",
+            "git-integrator": "21bao", "tester-b": "9bao", "reviewer-a": "9bao",
+            "explorer": "5bao", "implementer": "5bao", "tester-a": "5bao",
+        },
+        selected_model_matrix={
+            r: {"provider": "minimax-plan", "model": "MiniMax-M3", "alias": "minimax-m3"}
+            for r in VALID_ROLES
+        },
+        allowed_actions=allowed_actions,
+        forbidden_actions=forbidden_actions,
+        allowed_files=["tests/"],
+        forbidden_files=FORBIDDEN_FILES,
+        selection_source=selection_source,
+    )
+
+
+# I5-1: ApprovalContract creation
+def test_i5_approval_contract_creation():
+    """Valid ApprovalContract must pass validation."""
+    appr = _make_valid_approval()
+    errors = appr.validate()
+    assert len(errors) == 0, f"Validation errors: {errors}"
+
+
+# I5-2: Missing approval_id
+def test_i5_missing_approval_id():
+    """ApprovalContract without approval_id must be blocked."""
+    appr = _make_valid_approval(approval_id="")
+    errors = appr.validate()
+    assert any("approval_id" in e for e in errors)
+
+
+# I5-3: Missing operator_id
+def test_i5_missing_operator_id():
+    """ApprovalContract without operator_id must be blocked."""
+    appr = _make_valid_approval(operator_id="")
+    errors = appr.validate()
+    assert any("operator_id" in e for e in errors)
+
+
+# I5-4: base_sha mismatch
+def test_i5_base_sha_mismatch():
+    """RuntimeAssignment base_sha must match ApprovalContract base_sha."""
+    appr1 = _make_valid_approval(base_sha="aaaaaaa11111")
+    appr2 = _make_valid_approval(base_sha="bbbbbbb22222", approval_id="appr_test2")
+    assign1 = derive_runtime_assignment(appr1)
+    assign2 = derive_runtime_assignment(appr2)
+    errors = validate_base_sha_match(appr1, assign2)
+    assert len(errors) > 0
+    assert any("base_sha mismatch" in e for e in errors)
+
+
+# I5-5: Expired approval
+def test_i5_expired_approval():
+    """Expired ApprovalContract must be rejected by derive_runtime_assignment."""
+    appr = _make_valid_approval(expires_at="2020-01-01T00:00:00Z")
+    try:
+        derive_runtime_assignment(appr)
+        assert False, "Should have raised ValueError for expired approval"
+    except ValueError as e:
+        assert "expired" in str(e)
+
+
+# I5-6: planner_default BLOCK
+def test_i5_planner_default_blocked():
+    """selection_source=planner_default must NOT authorize execution."""
+    appr = _make_valid_approval(selection_source="planner_default")
+    try:
+        derive_runtime_assignment(appr)
+        assert False, "Should have raised ValueError for planner_default"
+    except ValueError as e:
+        assert "planner_default" in str(e) or "does not authorize" in str(e)
+    # Also check derive_operator_selected
+    assert derive_operator_selected("planner_default") is False
+
+
+# I5-7: operator_confirmed_default PASS
+def test_i5_operator_confirmed_default_passes():
+    """selection_source=operator_confirmed_default must authorize execution."""
+    appr = _make_valid_approval(selection_source="operator_confirmed_default")
+    assign = derive_runtime_assignment(appr)
+    assert assign.operator_selected is True
+    assert assign.derivation_source == "approval_contract"
+    # Role source should be "recommendation" (traceable to planner)
+    assert assign.role_assignments["implementer"].source == "recommendation"
+    assert derive_operator_selected("operator_confirmed_default") is True
+
+
+# I5-8: operator_override PASS
+def test_i5_operator_override_passes():
+    """selection_source=operator_override must authorize execution."""
+    appr = _make_valid_approval(selection_source="operator_override")
+    assign = derive_runtime_assignment(appr)
+    assert assign.operator_selected is True
+    # Role source should be "operator_override"
+    assert assign.role_assignments["implementer"].source == "operator_override"
+    assert derive_operator_selected("operator_override") is True
+
+
+# I5-9: derive_runtime_assignment
+def test_i5_derive_runtime_assignment():
+    """derive_runtime_assignment must produce correct RuntimeAssignment from ApprovalContract."""
+    appr = _make_valid_approval()
+    assign = derive_runtime_assignment(appr)
+    assert assign.approval_id == appr.approval_id
+    assert assign.base_sha == appr.base_sha
+    assert assign.workorder_id == appr.workorder_id
+    assert assign.operator_selected is True
+    assert assign.fallback_allowed is False
+    assert assign.fallback_count == 0
+    assert assign.derivation_source == "approval_contract"
+    assert len(assign.role_assignments) == 9
+    # Verify orchestrator defaults to 21bao
+    assert assign.role_assignments["orchestrator"].node_id == "21bao"
+
+
+# I5-10: Cannot derive without ApprovalContract
+def test_i5_cannot_derive_without_approval():
+    """derive_runtime_assignment must reject non-ApprovalContract input."""
+    try:
+        derive_runtime_assignment("not an approval")
+        assert False, "Should have raised TypeError"
+    except TypeError as e:
+        assert "ApprovalContract" in str(e)
+
+    try:
+        derive_runtime_assignment({"approval_id": "x"})
+        assert False, "Should have raised TypeError"
+    except TypeError as e:
+        assert "ApprovalContract" in str(e)
+
+
+# I5-11: forbidden action BLOCK
+def test_i5_forbidden_action_block():
+    """RuntimeAssignment must reject actions in forbidden_actions."""
+    appr = _make_valid_approval(
+        forbidden_actions=["push", "merge", "force_push"],
+        allowed_actions=["local_exec", "test_run"],
+    )
+    assign = derive_runtime_assignment(appr)
+    # Push is forbidden
+    errors_push = validate_action_allowed(assign, "push")
+    assert len(errors_push) > 0
+    # Local exec is allowed
+    errors_local = validate_action_allowed(assign, "local_exec")
+    assert len(errors_local) == 0
+    # Test run is allowed
+    errors_test = validate_action_allowed(assign, "test_run")
+    assert len(errors_test) == 0
+    # Some random action not in allowed_actions
+    errors_random = validate_action_allowed(assign, "random_action")
+    assert len(errors_random) > 0
+
+
+# I5-12: allowed action PASS
+def test_i5_allowed_action_pass():
+    """RuntimeAssignment must accept actions in allowed_actions."""
+    appr = _make_valid_approval(allowed_actions=["local_exec", "test_run", "self_check"])
+    assign = derive_runtime_assignment(appr)
+    for action in ["local_exec", "test_run", "self_check"]:
+        errors = validate_action_allowed(assign, action)
+        assert len(errors) == 0, f"Action {action} should be allowed: {errors}"
+
+
+# I5-13: Approval JSON roundtrip
+def test_i5_approval_json_roundtrip():
+    """ApprovalContract must survive JSON roundtrip."""
+    appr = _make_valid_approval()
+    json_str = appr.to_json()
+    restored = ApprovalContract.from_json(json_str)
+    assert restored.approval_id == appr.approval_id
+    assert restored.workorder_id == appr.workorder_id
+    assert restored.operator_id == appr.operator_id
+    assert restored.base_sha == appr.base_sha
+    assert restored.selection_source == appr.selection_source
+    assert restored.selected_node_matrix == appr.selected_node_matrix
+    assert restored.selected_model_matrix == appr.selected_model_matrix
+
+
+# I5-14: RuntimeAssignment 来源校验
+def test_i5_runtime_assignment_source_validation():
+    """trace_assignment_to_approval must verify RuntimeAssignment origin."""
+    appr = _make_valid_approval()
+    assign = derive_runtime_assignment(appr)
+    # Valid trace
+    errors = trace_assignment_to_approval(assign, appr)
+    assert len(errors) == 0, f"Valid trace should pass: {errors}"
+
+    # Wrong approval_id
+    wrong_appr = _make_valid_approval(approval_id="appr_wrong")
+    errors2 = trace_assignment_to_approval(assign, wrong_appr)
+    assert len(errors2) > 0
+    assert any("approval_id mismatch" in e for e in errors2)
+
+    # Wrong base_sha
+    wrong_sha_appr = _make_valid_approval(base_sha="wrong_sha_xx")
+    errors3 = trace_assignment_to_approval(assign, wrong_sha_appr)
+    assert len(errors3) > 0
+    assert any("base_sha mismatch" in e for e in errors3)
+
+
+# I5-15: Self-constructed RuntimeAssignment must be marked
+def test_i5_self_constructed_marked():
+    """RuntimeAssignment not derived from approval must have derivation_source='self_constructed'."""
+    assign = _make_full_assignment()
+    assign.derivation_source = "self_constructed"
+    assert assign.derivation_source == "self_constructed"
+    # This is a valid state for testing, but not for execution
+    assert assign.derivation_source != "approval_contract"
+
+
+# I5-16: derive_operator_selected semantics
+def test_i5_derive_operator_selected_semantics():
+    """derive_operator_selected must follow selection_source semantics."""
+    assert derive_operator_selected("planner_default") is False
+    assert derive_operator_selected("operator_confirmed_default") is True
+    assert derive_operator_selected("operator_override") is True
+    assert derive_operator_selected("invalid_source") is False
+
+
+# I5-17: derive_runtime_assignment_source preserves operator_override
+def test_i5_derive_runtime_assignment_source_preserves_override():
+    """derive_runtime_assignment_source must preserve operator_override distinction."""
+    assert derive_runtime_assignment_source("planner_default") == "recommendation"
+    assert derive_runtime_assignment_source("operator_confirmed_default") == "recommendation"
+    assert derive_runtime_assignment_source("operator_override") == "operator_override"
+
+
+# I5-18: Expiration boundary check
+def test_i5_expiration_boundary():
+    """Approval expiration must be strictly after expires_at."""
+    # Future expiration
+    future_appr = _make_valid_approval(expires_at="2099-12-31T23:59:59Z")
+    assert future_appr.is_expired() is False
+    assign = derive_runtime_assignment(future_appr)
+    assert assign.approval_id == future_appr.approval_id
+
+    # Past expiration
+    past_appr = _make_valid_approval(expires_at="2020-01-01T00:00:00Z")
+    assert past_appr.is_expired() is True
+    try:
+        derive_runtime_assignment(past_appr)
+        assert False, "Should have raised ValueError"
+    except ValueError:
+        pass
+
+    # No expiration
+    no_exp_appr = _make_valid_approval(expires_at=None)
+    assert no_exp_appr.is_expired() is False
+    assign2 = derive_runtime_assignment(no_exp_appr)
+    assert assign2.approval_id == no_exp_appr.approval_id

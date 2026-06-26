@@ -123,6 +123,7 @@ class RuntimeAssignment:
     expected_outputs: List[str] = field(default_factory=list)
     audit_requirements: List[str] = field(default_factory=list)
     report_schema_version: str = "1.0.0"
+    derivation_source: str = "self_constructed"  # "self_constructed" | "approval_contract"
 
     def validate(self) -> List[str]:
         errors = []
@@ -307,6 +308,231 @@ class ReconciliationResult:
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, default=str)
+
+
+# ──────────────────────────────────────────────
+# ApprovalContract
+# ──────────────────────────────────────────────
+
+VALID_SELECTION_SOURCES = ["planner_default", "operator_confirmed_default", "operator_override"]
+EXECUTABLE_SELECTION_SOURCES = ["operator_confirmed_default", "operator_override"]
+VALID_RISK_LEVELS = ["low", "medium", "high"]
+
+
+@dataclass
+class ApprovalContract:
+    """Operator-approved execution authorization.
+
+    Source of truth for RuntimeAssignment. RuntimeAssignment must be
+    derived from ApprovalContract via derive_runtime_assignment().
+    """
+    approval_id: str
+    workorder_id: str
+    operator_id: str
+    operator_label: str = ""
+    approved_at: str = ""
+    base_sha: str = ""
+    expires_at: Optional[str] = None
+    approval_version: str = "1.0.0"
+    approval_notes: str = ""
+    risk_level: str = "low"
+    scope: str = ""
+    selected_role_matrix: Dict[str, str] = field(default_factory=dict)
+    selected_node_matrix: Dict[str, str] = field(default_factory=dict)
+    selected_model_matrix: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    allowed_actions: List[str] = field(default_factory=list)
+    forbidden_actions: List[str] = field(default_factory=list)
+    allowed_files: List[str] = field(default_factory=list)
+    forbidden_files: List[str] = field(default_factory=lambda: FORBIDDEN_FILES[:])
+    selection_source: str = "planner_default"
+    approval_signature: Optional[str] = None  # reserved, not implemented
+
+    def validate(self) -> List[str]:
+        errors = []
+        if not self.approval_id:
+            errors.append("approval_id is required")
+        if not self.workorder_id:
+            errors.append("workorder_id is required")
+        if not self.operator_id:
+            errors.append("operator_id is required")
+        if not self.approved_at:
+            errors.append("approved_at is required")
+        if not self.base_sha or len(self.base_sha) < 7:
+            errors.append("base_sha is required (min 7 chars)")
+        if self.risk_level not in VALID_RISK_LEVELS:
+            errors.append(f"Invalid risk_level: {self.risk_level}")
+        if self.selection_source not in VALID_SELECTION_SOURCES:
+            errors.append(f"Invalid selection_source: {self.selection_source}")
+        if not self.selected_role_matrix:
+            errors.append("selected_role_matrix is required")
+        if not self.selected_node_matrix:
+            errors.append("selected_node_matrix is required")
+        if not self.selected_model_matrix:
+            errors.append("selected_model_matrix is required")
+        for role in VALID_ROLES:
+            if role not in self.selected_role_matrix:
+                errors.append(f"selected_role_matrix missing: {role}")
+            if role not in self.selected_node_matrix:
+                errors.append(f"selected_node_matrix missing: {role}")
+            if role not in self.selected_model_matrix:
+                errors.append(f"selected_model_matrix missing: {role}")
+        return errors
+
+    def is_expired(self, now: Optional[str] = None) -> bool:
+        if not self.expires_at:
+            return False
+        if now is None:
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return now > self.expires_at
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), indent=2, default=str)
+
+    @classmethod
+    def from_json(cls, data: str) -> "ApprovalContract":
+        return cls(**json.loads(data))
+
+
+# ──────────────────────────────────────────────
+# Derivation Functions
+# ──────────────────────────────────────────────
+
+
+def derive_operator_selected(selection_source: str) -> bool:
+    """Only operator-confirmed sources authorize execution."""
+    return selection_source in EXECUTABLE_SELECTION_SOURCES
+
+
+def derive_runtime_assignment_source(selection_source: str) -> str:
+    """Map selection_source to RoleAssignment.source."""
+    if selection_source == "operator_override":
+        return "operator_override"
+    return "recommendation"
+
+
+def derive_runtime_assignment(approval: ApprovalContract) -> RuntimeAssignment:
+    """Derive RuntimeAssignment from ApprovalContract.
+
+    This is the ONLY sanctioned way to create an executable RuntimeAssignment.
+    RuntimeAssignment must NOT be self-constructed for execution.
+    """
+    if not isinstance(approval, ApprovalContract):
+        raise TypeError("RuntimeAssignment must be derived from ApprovalContract")
+
+    errors = approval.validate()
+    if errors:
+        raise ValueError(f"Invalid approval: {errors}")
+
+    if approval.is_expired():
+        raise ValueError(f"Approval {approval.approval_id} has expired")
+
+    operator_selected = derive_operator_selected(approval.selection_source)
+    if not operator_selected:
+        raise ValueError(
+            f"selection_source={approval.selection_source} does not authorize execution; "
+            f"must be one of {EXECUTABLE_SELECTION_SOURCES}"
+        )
+
+    role_assignments = {}
+    for role in VALID_ROLES:
+        node_id = approval.selected_node_matrix[role]
+        model_info = approval.selected_model_matrix[role]
+        ra = RoleAssignment(
+            role=role,
+            assignee=f"{role}/{node_id}",
+            node_id=node_id,
+            transport=NODE_TRANSPORT_MAP[node_id],
+            provider=model_info["provider"],
+            model=model_info["model"],
+            model_alias=model_info["alias"],
+            health_status_at_approval="UNKNOWN",
+            capability_required=[],
+            source=derive_runtime_assignment_source(approval.selection_source),
+        )
+        role_assignments[role] = ra
+
+    return RuntimeAssignment(
+        workorder_id=approval.workorder_id,
+        approval_id=approval.approval_id,
+        base_sha=approval.base_sha,
+        created_at=approval.approved_at,
+        scope=approval.scope,
+        risk_level=approval.risk_level,
+        operator_selected=operator_selected,
+        fallback_allowed=False,
+        fallback_count=0,
+        role_assignments=role_assignments,
+        allowed_files=approval.allowed_files,
+        forbidden_files=approval.forbidden_files,
+        allowed_actions=approval.allowed_actions,
+        forbidden_actions=approval.forbidden_actions,
+        expected_outputs=[],
+        audit_requirements=[
+            "base_sha_match", "approval_not_expired",
+            "secret_leak_check", "forbidden_files_check",
+        ],
+        derivation_source="approval_contract",
+    )
+
+
+# ──────────────────────────────────────────────
+# Cross-validation
+# ──────────────────────────────────────────────
+
+
+def validate_base_sha_match(
+    approval: ApprovalContract, assignment: RuntimeAssignment
+) -> List[str]:
+    """Enforce approval.base_sha == assignment.base_sha."""
+    errors = []
+    if approval.base_sha != assignment.base_sha:
+        errors.append(
+            f"base_sha mismatch: approval={approval.base_sha}, "
+            f"assignment={assignment.base_sha}"
+        )
+    return errors
+
+
+def validate_approval_not_expired(approval: ApprovalContract) -> List[str]:
+    """Enforce approval not expired."""
+    if approval.is_expired():
+        return [f"Approval {approval.approval_id} has expired at {approval.expires_at}"]
+    return []
+
+
+def validate_action_allowed(
+    assignment: RuntimeAssignment, action: str
+) -> List[str]:
+    """Enforce action is in allowed_actions and not in forbidden_actions."""
+    errors = []
+    if action in assignment.forbidden_actions:
+        errors.append(f"Action '{action}' is in forbidden_actions")
+    if assignment.allowed_actions and action not in assignment.allowed_actions:
+        errors.append(f"Action '{action}' is not in allowed_actions")
+    return errors
+
+
+def trace_assignment_to_approval(
+    assignment: RuntimeAssignment, approval: ApprovalContract
+) -> List[str]:
+    """Verify RuntimeAssignment was derived from this ApprovalContract."""
+    errors = []
+    if assignment.approval_id != approval.approval_id:
+        errors.append(
+            f"approval_id mismatch: assignment={assignment.approval_id}, "
+            f"approval={approval.approval_id}"
+        )
+    if assignment.base_sha != approval.base_sha:
+        errors.append(
+            f"base_sha mismatch: assignment={assignment.base_sha}, "
+            f"approval={approval.base_sha}"
+        )
+    if assignment.workorder_id != approval.workorder_id:
+        errors.append(
+            f"workorder_id mismatch: assignment={assignment.workorder_id}, "
+            f"approval={approval.workorder_id}"
+        )
+    return errors
 
 
 # ──────────────────────────────────────────────
@@ -643,6 +869,103 @@ def self_check() -> Dict[str, Any]:
     )
     assert "base_sha" in str(assign_no_sha.validate())
     results.append({"name": "base_sha_required", "passed": True})
+
+    # SC21: ApprovalContract valid creation
+    valid_approval = ApprovalContract(
+        approval_id="appr_sc21", workorder_id="wo_sc21", operator_id="kk",
+        approved_at="2026-06-26T12:00:00Z",
+        base_sha="c71f9b5d6cbde04c7461b894108235b44886a64a",
+        scope="sc21 test",
+        selected_role_matrix={r: r for r in VALID_ROLES},
+        selected_node_matrix={
+            "orchestrator": "21bao", "planner": "21bao", "reviewer-b": "21bao",
+            "git-integrator": "21bao", "tester-b": "9bao", "reviewer-a": "9bao",
+            "explorer": "5bao", "implementer": "5bao", "tester-a": "5bao",
+        },
+        selected_model_matrix={
+            r: {"provider": "minimax-plan", "model": "MiniMax-M3", "alias": "minimax-m3"}
+            for r in VALID_ROLES
+        },
+        selection_source="operator_confirmed_default",
+    )
+    assert len(valid_approval.validate()) == 0
+    results.append({"name": "approval_valid", "passed": True})
+
+    # SC22: derive_runtime_assignment from valid approval
+    derived = derive_runtime_assignment(valid_approval)
+    assert derived.approval_id == valid_approval.approval_id
+    assert derived.base_sha == valid_approval.base_sha
+    assert derived.operator_selected is True
+    assert derived.derivation_source == "approval_contract"
+    results.append({"name": "derive_runtime_assignment", "passed": True})
+
+    # SC23: base_sha mismatch BLOCK
+    mismatch_approval = ApprovalContract(
+        approval_id="appr_sc23", workorder_id="wo_sc23", operator_id="kk",
+        approved_at="2026-06-26T12:00:00Z",
+        base_sha="aaaaaaa",
+        scope="sc23 test",
+        selected_role_matrix={r: r for r in VALID_ROLES},
+        selected_node_matrix=valid_approval.selected_node_matrix,
+        selected_model_matrix=valid_approval.selected_model_matrix,
+        selection_source="operator_confirmed_default",
+    )
+    derived2 = derive_runtime_assignment(mismatch_approval)
+    base_sha_errors = validate_base_sha_match(valid_approval, derived2)
+    assert len(base_sha_errors) > 0
+    results.append({"name": "base_sha_mismatch_block", "passed": True})
+
+    # SC24: expired approval BLOCK
+    expired_approval = ApprovalContract(
+        approval_id="appr_sc24", workorder_id="wo_sc24", operator_id="kk",
+        approved_at="2020-01-01T00:00:00Z",
+        expires_at="2020-01-02T00:00:00Z",
+        base_sha="c71f9b5d6cbde04c7461b894108235b44886a64a",
+        scope="sc24 test",
+        selected_role_matrix={r: r for r in VALID_ROLES},
+        selected_node_matrix=valid_approval.selected_node_matrix,
+        selected_model_matrix=valid_approval.selected_model_matrix,
+        selection_source="operator_confirmed_default",
+    )
+    try:
+        derive_runtime_assignment(expired_approval)
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "expired" in str(e)
+    results.append({"name": "expired_approval_block", "passed": True})
+
+    # SC25: planner_default BLOCK
+    planner_default_approval = ApprovalContract(
+        approval_id="appr_sc25", workorder_id="wo_sc25", operator_id="kk",
+        approved_at="2026-06-26T12:00:00Z",
+        base_sha="c71f9b5d6cbde04c7461b894108235b44886a64a",
+        scope="sc25 test",
+        selected_role_matrix={r: r for r in VALID_ROLES},
+        selected_node_matrix=valid_approval.selected_node_matrix,
+        selected_model_matrix=valid_approval.selected_model_matrix,
+        selection_source="planner_default",
+    )
+    try:
+        derive_runtime_assignment(planner_default_approval)
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "planner_default" in str(e) or "does not authorize" in str(e)
+    results.append({"name": "planner_default_block", "passed": True})
+
+    # SC26: operator_override source preserved
+    override_approval = ApprovalContract(
+        approval_id="appr_sc26", workorder_id="wo_sc26", operator_id="kk",
+        approved_at="2026-06-26T12:00:00Z",
+        base_sha="c71f9b5d6cbde04c7461b894108235b44886a64a",
+        scope="sc26 test",
+        selected_role_matrix={r: r for r in VALID_ROLES},
+        selected_node_matrix=valid_approval.selected_node_matrix,
+        selected_model_matrix=valid_approval.selected_model_matrix,
+        selection_source="operator_override",
+    )
+    derived_override = derive_runtime_assignment(override_approval)
+    assert derived_override.role_assignments["implementer"].source == "operator_override"
+    results.append({"name": "operator_override_preserved", "passed": True})
 
     # Summary
     passed = sum(1 for r in results if r["passed"])
