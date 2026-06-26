@@ -155,6 +155,29 @@ def _test_routing_guard_route_all():
         results.append("all roles clean")
     return {"passed": all_ok, "message": "; ".join(results)}
 
+
+def _test_routing_guard_recommend_9bao():
+    import sys
+    sys.path.insert(0, "scripts")
+    from vibe_model_routing_policy import recommend
+    r = recommend("implementer", node_id="9bao", enforce_guards=True)
+    candidates = [c["model"] for c in r.get("candidates", [])]
+    # Check blocked models
+    blocked = ["mimo", "xiaomi", "deepseek-v4-pro"]
+    violations = []
+    for m in candidates:
+        for bm in blocked:
+            if bm in m.lower():
+                violations.append(m + " contains " + bm)
+    # Check at least one non-mimo candidate
+    non_mimo = [m for m in candidates if "mimo" not in m.lower() and "deepseek-v4-pro" not in m.lower()]
+    if not non_mimo:
+        violations.append("no non-mimo candidates")
+    passed = len(violations) == 0
+    msg = "candidates=" + str(candidates) if passed else "; ".join(violations)
+    return {"passed": passed, "message": msg}
+
+
 TESTS = [
     ("intake_self_check", _test_intake_self_check),
     ("intake_self_repo_low", _test_intake_self_repo_low),
@@ -194,6 +217,8 @@ def main():
 
 
 
+
+
 TESTS.extend([
     ("routing_guard_excludes_mimo", _test_routing_guard_excludes_mimo),
     ("routing_guard_excludes_unverified", _test_routing_guard_excludes_unverified),
@@ -201,5 +226,8 @@ TESTS.extend([
     ("routing_guard_disabled_includes_all", _test_routing_guard_disabled_includes_all),
     ("routing_guard_node_filter", _test_routing_guard_node_filter),
     ("routing_guard_route_all", _test_routing_guard_route_all),
+    ("routing_guard_recommend_9bao", _test_routing_guard_recommend_9bao),
 ])
 
+if __name__ == "__main__":
+    sys.exit(main())
