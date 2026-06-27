@@ -290,6 +290,32 @@ def self_check() -> dict:
     if not enforce_result["passed"]:
         all_passed = False
 
+    # Check 7: ARCH-002 — Worker health status documented
+    try:
+        from vibe_worker_registry import WorkerRegistry, NodeStatus
+        reg = WorkerRegistry()
+        health_checks = []
+        for wid, w in reg.workers.items():
+            hs = w.health_status
+            status_known = hs != ""
+            expected = NodeStatus.UNKNOWN
+            health_checks.append(
+                f"{wid}={hs if hs else '(empty)'}")
+        checks.append({
+            "name": "worker_health_status",
+            "passed": all(hs != "" for hs in health_checks),
+            "detail": ", ".join(health_checks),
+        })
+        if not all(hs != "" for hs in health_checks):
+            all_passed = False
+    except Exception as e:
+        checks.append({
+            "name": "worker_health_status",
+            "passed": False,
+            "detail": f"error: {e}",
+        })
+        all_passed = False
+
     return {
         "passed": all_passed,
         "version": "1.0.0",

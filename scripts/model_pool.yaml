@@ -733,7 +733,7 @@ models:
   model: glm-5.2
   key_env: OPENCODE_GO_API_KEY
   base_url_env: OPENCODE_GO_BASE_URL
-  enabled: false
+  enabled: true
   quarantined: false
   allowed_nodes:
   - 5bao
@@ -769,7 +769,7 @@ models:
   model: glm-5.1
   key_env: OPENCODE_GO_API_KEY
   base_url_env: OPENCODE_GO_BASE_URL
-  enabled: false
+  enabled: true
   quarantined: false
   allowed_nodes:
   - 5bao
@@ -842,7 +842,7 @@ models:
   model: kimi-k2.6
   key_env: OPENCODE_GO_API_KEY
   base_url_env: OPENCODE_GO_BASE_URL
-  enabled: false
+  enabled: true
   quarantined: false
   allowed_nodes:
   - 5bao
@@ -878,7 +878,7 @@ models:
   model: qwen3.7-max
   key_env: OPENCODE_GO_API_KEY
   base_url_env: OPENCODE_GO_BASE_URL
-  enabled: false
+  enabled: true
   quarantined: false
   allowed_nodes:
   - 5bao
@@ -915,7 +915,7 @@ models:
   model: qwen3.7-plus
   key_env: OPENCODE_GO_API_KEY
   base_url_env: OPENCODE_GO_BASE_URL
-  enabled: false
+  enabled: true
   quarantined: false
   allowed_nodes:
   - 5bao
@@ -951,7 +951,7 @@ models:
   model: mimo-v2.5-pro
   key_env: OPENCODE_GO_API_KEY
   base_url_env: OPENCODE_GO_BASE_URL
-  enabled: false
+  enabled: true
   quarantined: false
   allowed_nodes:
   - 5bao
@@ -1016,3 +1016,40 @@ models:
   health_status: ok
   source: hermes_provider_sync
   notes: 'Hermes opencode-go model: mimo-v2.5 (alias: opencode-mimo)'
+- id: opencode-go-deepseek-v4-pro
+  alias:
+  - opencode-ds4pro
+  - opencode-deepseek-v4-pro
+  provider: opencode-go
+  model: deepseek-v4-pro
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  - strong
+  priority: 35
+  fallback_policy: none
+  smoke_required: false
+  smoke_results:
+    5bao:
+      status: confirmed
+      last_verified: '2026-06-27T22:46:00Z'
+      smoke_phase: v1.21.33I19_ENABLE_ALL_AND_ADD_DEEPSEEK_V4_PRO
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/deepseek-v4-pro
+    9bao:
+      status: confirmed
+      last_verified: '2026-06-27T22:46:00Z'
+      smoke_phase: v1.21.33I19_ENABLE_ALL_AND_ADD_DEEPSEEK_V4_PRO
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/deepseek-v4-pro
+  health_status: ok
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: deepseek-v4-pro (alias: opencode-ds4pro)'

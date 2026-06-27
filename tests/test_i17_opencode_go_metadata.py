@@ -2,10 +2,10 @@
 """Tests for I17 opencode-go metadata alignment.
 
 Verifies:
-- All 8 opencode-go models have smoke_results=confirmed on 5bao/9bao
+- All 9 opencode-go models have smoke_results=confirmed on 5bao/9bao
 - smoke_required=false (already verified)
 - health_status=ok
-- enabled status unchanged (only canary enabled)
+- enabled status: all 9 enabled (I19 enable-all + add deepseek-v4-pro)
 - Extra visible models still NOT in central pool
 - Route-all unchanged
 - Secret safety
@@ -25,6 +25,7 @@ OPCODE_GO_IDS = [
     "opencode-go-glm-5-2",
     "opencode-go-glm-5-1",
     "opencode-go-deepseek-v4-flash",
+    "opencode-go-deepseek-v4-pro",
     "opencode-go-kimi-k2-6",
     "opencode-go-qwen3-7-max",
     "opencode-go-qwen3-7-plus",
@@ -33,7 +34,6 @@ OPCODE_GO_IDS = [
 ]
 
 EXTRA_VISIBLE = [
-    "opencode-go/deepseek-v4-pro",
     "opencode-go/kimi-k2.7-code",
     "opencode-go/minimax-m2.7",
     "opencode-go/minimax-m3",
@@ -47,10 +47,10 @@ def load_pool():
     return pool
 
 
-def test_8_opencode_go_models_present():
+def test_9_opencode_go_models_present():
     pool = load_pool()
     go_models = [e for e in pool['models'] if e.get('provider') == 'opencode-go']
-    assert len(go_models) == 8, f"Expected 8 opencode-go models, found {len(go_models)}"
+    assert len(go_models) == 9, f"Expected 9 opencode-go models, found {len(go_models)}"
 
 
 def test_all_have_confirmed_smoke_results():
@@ -64,8 +64,13 @@ def test_all_have_confirmed_smoke_results():
             assert node in sr, f"{eid}: missing smoke_results for {node}"
             assert sr[node]['status'] == 'confirmed', \
                 f"{eid}: {node} smoke status is {sr[node]['status']}, expected confirmed"
-            assert sr[node]['smoke_phase'] == 'v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE', \
-                f"{eid}: {node} smoke_phase mismatch"
+            # I16E models use the original phase; I19 model uses the new phase
+            valid_phases = [
+                'v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE',
+                'v1.21.33I19_ENABLE_ALL_AND_ADD_DEEPSEEK_V4_PRO',
+            ]
+            assert sr[node]['smoke_phase'] in valid_phases, \
+                f"{eid}: {node} smoke_phase mismatch: {sr[node]['smoke_phase']}"
             assert sr[node]['wrapper'] == '~/bin/vibedev-opencode', \
                 f"{eid}: {node} wrapper mismatch"
             assert 'opencode-go/' in sr[node]['invocation'], \
@@ -93,20 +98,23 @@ def test_health_status_ok():
 
 
 def test_enabled_status_unchanged():
-    """Only opencode-go-deepseek-v4-flash (canary) + opencode-go-mimo-v2-5 (I18) should be enabled."""
+    """All 9 opencode-go models should be enabled (I19 enable-all)."""
     ENABLED_OC = {
+        "opencode-go-glm-5-2",
+        "opencode-go-glm-5-1",
         "opencode-go-deepseek-v4-flash",
+        "opencode-go-deepseek-v4-pro",
+        "opencode-go-kimi-k2-6",
+        "opencode-go-qwen3-7-max",
+        "opencode-go-qwen3-7-plus",
+        "opencode-go-mimo-v2-5-pro",
         "opencode-go-mimo-v2-5",
     }
     pool = load_pool()
     for entry in pool['models']:
         if entry.get('provider') != 'opencode-go':
             continue
-        if entry['id'] in ENABLED_OC:
-            assert entry.get('enabled') is True, f"{entry['id']} should be enabled"
-        else:
-            assert entry.get('enabled') is False, \
-                f"{entry['id']} should NOT be enabled"
+        assert entry.get('enabled') is True, f"{entry['id']} should be enabled"
 
 
 def test_extra_visible_not_in_central_pool():
@@ -126,10 +134,7 @@ def test_extra_visible_not_in_central_pool():
         short = extra.split('/')[-1]
         # Convert to pool ID convention: dots to hyphens
         expected_id = f"opencode-go-{short.replace('.', '-')}"
-        if expected_id == 'opencode-go-deepseek-v4-pro':
-            assert expected_id not in pool_ids, \
-                f"Extra model {expected_id} found in central pool!"
-        elif expected_id == 'opencode-go-kimi-k2-7-code':
+        if expected_id == 'opencode-go-kimi-k2-7-code':
             assert expected_id not in pool_ids, \
                 f"Extra model {expected_id} found in central pool!"
         elif expected_id == 'opencode-go-minimax-m2-7':
