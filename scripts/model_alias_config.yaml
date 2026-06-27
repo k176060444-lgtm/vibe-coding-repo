@@ -1,0 +1,418 @@
+# Model Alias Configuration
+# Machine-readable alias → canonical provider/model mapping.
+# operator 编辑此文件修正映射。
+#
+# status:
+#   confirmed        — operator 已确认，可正常使用
+#   review_required  — 需 operator 确认后方可使用
+#   deprecated       — 已废弃
+#
+# 所有新 alias 默认 status: review_required，需 operator promote。
+# cost: free / paid / unknown
+
+aliases:
+  # --- Xiaomi ---
+  mimo:
+    provider: xiaomi
+    model: mimo-v2.5-pro
+    status: confirmed
+    cost: free
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+    notes: "Xiaomi MiMo v2.5 Pro"
+
+  mimo-v2.5:
+    provider: xiaomi
+    model: mimo-v2.5-pro
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  mimo-v2.5-pro:
+    provider: xiaomi
+    model: mimo-v2.5-pro
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  # --- MiniMax ---
+  minimax:
+    provider: minimax
+    model: MiniMax-M2.5
+    status: confirmed
+    cost: paid
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+    notes: "MiniMax M2.5"
+
+  minimax-m2.5:
+    provider: minimax
+    model: MiniMax-M2.5
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  minimax-m2:
+    provider: minimax
+    model: MiniMax-M2.5
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  # --- ByteDance / Doubao ---
+  doubao:
+    provider: volcengine
+    model: doubao-1.5-pro-256k
+    status: confirmed
+    cost: paid
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+    notes: "ByteDance Doubao 1.5 Pro 256K"
+
+  doubao-pro:
+    provider: volcengine
+    model: doubao-1.5-pro-256k
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  doubao-1.5:
+    provider: volcengine
+    model: doubao-1.5-pro-256k
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  # --- DeepSeek ---
+  deepseek:
+    provider: deepseek
+    model: deepseek-chat
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  ds:
+    provider: deepseek
+    model: deepseek-chat
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  ds4:
+    provider: deepseek
+    model: deepseek-chat
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  ds4flash:
+    provider: null
+    model: null
+    status: review_required
+    cost: unknown
+    confirmed_by: null
+    confirmed_at: null
+    candidates:
+      - provider: deepseek
+        model: deepseek-chat
+        likelihood: medium
+        notes: "通用对话模型，非 flash 特定"
+      - provider: deepseek
+        model: deepseek-v3
+        likelihood: low
+        notes: "v3 可能是 flash 语义的正确映射"
+    review_reason: "ds4flash 中的 'flash' 语义未确认：应为 deepseek-chat、deepseek-v3 或其他"
+
+  deepseek-chat:
+    provider: deepseek
+    model: deepseek-chat
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  deepseek-coder:
+    provider: deepseek
+    model: deepseek-coder
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  deepseek-r1:
+    provider: deepseek
+    model: deepseek-reasoner
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  # --- Anthropic / Claude ---
+  claude:
+    provider: anthropic
+    model: claude-sonnet-4
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  sonnet:
+    provider: anthropic
+    model: claude-sonnet-4
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  sonnet-4:
+    provider: anthropic
+    model: claude-sonnet-4
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  opus:
+    provider: anthropic
+    model: claude-opus-4
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  opus-4:
+    provider: anthropic
+    model: claude-opus-4
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  haiku:
+    provider: anthropic
+    model: claude-3-5-haiku-20241022
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  # --- OpenAI ---
+  gpt4o:
+    provider: openai
+    model: gpt-4o
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  gpt-4o:
+    provider: openai
+    model: gpt-4o
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  gpt4:
+    provider: openai
+    model: gpt-4o
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  o1:
+    provider: openai
+    model: o1
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  o3:
+    provider: openai
+    model: o3
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  o3-mini:
+    provider: openai
+    model: o3-mini
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  o4-mini:
+    provider: openai
+    model: o4-mini
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  # --- Alibaba / Qwen ---
+  qwen:
+    provider: dashscope
+    model: qwen-max
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  qwen-max:
+    provider: dashscope
+    model: qwen-max
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  qwen-plus:
+    provider: dashscope
+    model: qwen-plus
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  # --- Google / Gemini ---
+  gemini:
+    provider: google
+    model: gemini-2.5-pro
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  gemini-pro:
+    provider: google
+    model: gemini-2.5-pro
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  gemini-flash:
+    provider: google
+    model: gemini-2.5-flash
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  # --- xAI / Grok ---
+  grok:
+    provider: xai
+    model: grok-3
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  grok-3:
+    provider: xai
+    model: grok-3
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  # --- Moonshot / Kimi ---
+  kimi:
+    provider: moonshot
+    model: moonshot-v1-128k
+    status: confirmed
+    confirmed_by: operator
+    confirmed_at: "2026-06-25"
+
+  # --- OpenCode Go (Hermes provider sync) ---
+  opencode-glm52:
+    provider: opencode-go
+    model: glm-5.2
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-glm-5.2:
+    provider: opencode-go
+    model: glm-5.2
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-glm51:
+    provider: opencode-go
+    model: glm-5.1
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-glm-5.1:
+    provider: opencode-go
+    model: glm-5.1
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-ds4flash:
+    provider: opencode-go
+    model: deepseek-v4-flash
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-deepseek-v4-flash:
+    provider: opencode-go
+    model: deepseek-v4-flash
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-kimi26:
+    provider: opencode-go
+    model: kimi-k2.6
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-kimi-k2.6:
+    provider: opencode-go
+    model: kimi-k2.6
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-qwen37max:
+    provider: opencode-go
+    model: qwen3.7-max
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-qwen3.7-max:
+    provider: opencode-go
+    model: qwen3.7-max
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-qwen37plus:
+    provider: opencode-go
+    model: qwen3.7-plus
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-qwen3.7-plus:
+    provider: opencode-go
+    model: qwen3.7-plus
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-mimopro:
+    provider: opencode-go
+    model: mimo-v2.5-pro
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-mimo-v2.5-pro:
+    provider: opencode-go
+    model: mimo-v2.5-pro
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-mimo:
+    provider: opencode-go
+    model: mimo-v2.5
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"
+
+  opencode-mimo-v2.5:
+    provider: opencode-go
+    model: mimo-v2.5
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model sync v1"

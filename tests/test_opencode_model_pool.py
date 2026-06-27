@@ -530,17 +530,17 @@ class TestRecommendationGateNative(unittest.TestCase):
         with open(yaml_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
         
-        # Count how many mimo models are found and how many have correct status
+        # Count how many mimo models from xiaomi provider are found and how many have correct status
         mimo_count = 0
         bad_status = 0
         for model in data["models"]:
-            if "mimo" in model["id"].lower():
+            if "mimo" in model["id"].lower() and model.get("provider") == "xiaomi":
                 mimo_count += 1
                 status = model.get("status", "confirmed")
                 if status != "temporary_unavailable":
                     bad_status += 1
         
-        self.assertEqual(mimo_count, 3, "Expected exactly 3 mimo models in source YAML")
+        self.assertEqual(mimo_count, 3, "Expected exactly 3 xiaomi mimo models in source YAML")
         self.assertEqual(bad_status, 0, "All 3 mimo models should have status=temporary_unavailable")
 
     def test_9bao_allowed_for_volcengine_and_minimax_in_yaml(self):
