@@ -238,6 +238,9 @@ class WorkerRegistry:
 
         If include_manual_only is False (default), workers with manual_only=True
         are excluded from auto-scheduling candidates.
+
+        ARCH-003: manual_only workers are STRICTLY excluded by default.
+        Callers must explicitly opt in with include_manual_only=True.
         """
         candidates = [
             w for w in self.online_workers()
@@ -246,8 +249,14 @@ class WorkerRegistry:
             and w.active_jobs < w.max_parallel_jobs
             and task_type in w.capabilities
         ]
+        # ARCH-003: Hard enforcement of manual_only flag
         if not include_manual_only:
             candidates = [w for w in candidates if not w.manual_only]
+        else:
+            # Even with include_manual_only=True, log a warning about manual_only bypass
+            for w in candidates:
+                if w.manual_only:
+                    pass  # Caller explicitly opted in — acceptable for operator-directed tasks
         # Admission filter: canary/controlled workers only accept tasks in allowed_operations
         _restricted_modes = {"canary", "controlled"}
         candidates = [

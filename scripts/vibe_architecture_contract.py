@@ -179,6 +179,50 @@ def validate_no_ssh_bypass() -> dict:
     }
 
 
+def runtime_enforce() -> dict:
+    """Runtime enforcement gate — fail-closed check for ARCH-001/003.
+
+    Can be called at any critical entry point before dispatch.
+    Returns {"passed": bool, "errors": [str], "warnings": [str]}.
+    """
+    errors = []
+    warnings = []
+
+    # 1. ARCH-001: Verify no worker has forbidden transport config
+    transport_result = validate_all_workers()
+    for wid, w_result in transport_result["workers"].items():
+        if not w_result["passed"]:
+            errors.extend(w_result["errors"])
+
+    # 2. ARCH-001: 21bao must not have SSH fields
+    w21 = DEFAULT_WORKERS.get("21bao")
+    if w21:
+        ssh_fields = [getattr(w21, "ssh_host", ""),
+                      getattr(w21, "ssh_user", ""),
+                      getattr(w21, "ssh_key_path", "")]
+        if any(ssh_fields):
+            errors.append("21bao has SSH fields set — local-exec violation")
+
+    # 3. ARCH-003: Check no SSH bypass with forbidden usernames
+    bypass_result = validate_no_ssh_bypass()
+    bypass_count = len(bypass_result.get("ssh_bypass_issues", []))
+    if not bypass_result["passed"]:
+        errors.append(f"SSH bypass detected ({bypass_count} issue(s))")
+
+    # 4. ARCH-003: Verify registry has no forbidden default usernames
+    for wid in ["5bao", "9bao"]:
+        w = DEFAULT_WORKERS.get(wid)
+        if w:
+            user = getattr(w, "ssh_user", "")
+            if user.lower() in FORBIDDEN_USERNAMES:
+                errors.append(f"{wid}: forbidden username '{user}'")
+
+    return {
+        "passed": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
 def self_check() -> dict:
     """Run all architecture contract checks."""
     checks = []
@@ -234,6 +278,18 @@ def self_check() -> dict:
             })
 
     all_passed = all(c["passed"] for c in checks)
+
+    # Check 6: Runtime enforcement
+    enforce_result = runtime_enforce()
+    checks.append({
+        "name": "runtime_enforce",
+        "passed": enforce_result["passed"],
+        "detail": f"errors={enforce_result['errors']}, "
+                  f"warnings={enforce_result['warnings']}",
+    })
+    if not enforce_result["passed"]:
+        all_passed = False
+
     return {
         "passed": all_passed,
         "version": "1.0.0",

@@ -102,11 +102,105 @@ MODELS = {
     },
 }
 
-# ── Model Pool Guard ──
+# ── Operator Checkpoint Gate (DSP-002) ──
+
+
+def require_operator_checkpoint(role: str = None,
+                                model_alias: str = None,
+                                phase_id: str = None) -> dict:
+    """Lightweight operator checkpoint gate — fail-closed.
+
+    Simulates the approval gate that must exist between route-all
+    recommendation and actual dispatch. In production this would
+    reference an operator-approved dispatch manifest. For I22,
+    this provides a fail-closed gate that rejects any dispatch
+    that hasn't been explicitly approved.
+
+    Returns {"approved": bool, "reason": str, "gate": str}.
+    Always returns {"approved": False, "reason": "operator_checkpoint_required",
+                    "gate": "dsp-002"} — dispatch must not proceed without
+                    explicit operator approval manifest.
+    """
+    return {
+        "approved": False,
+        "reason": "operator_checkpoint_required",
+        "gate": "dsp-002",
+        "detail": {
+            "role": role,
+            "model_alias": model_alias,
+            "phase_id": phase_id,
+        },
+        "message": "No operator-approved dispatch manifest. "
+                   "Hermes/WebDEV/vibedev may only recommend; "
+                   "operator must approve before dispatch.",
+    }
+
+
+# ── Central Pool Guard (POOL-001) ──
+
+
+# Known extra visible models that exist in provider API but NOT in central pool.
+# These MUST NOT be resolved by alias resolver or used in route-all.
+EXTRA_VISIBLE_MODELS = {
+    "opencode-go/deepseek-v4-pro": "extra visible — not in central pool",
+    "opencode-go/kimi-k2.7-code": "extra visible — not in central pool",
+    "opencode-go/minimax-m2.7": "extra visible — not in central pool",
+    "opencode-go/minimax-m3": "extra visible — not in central pool",
+    "opencode-go/qwen3.6-plus": "extra visible — not in central pool",
+}
+
+
+def validate_model_in_central_pool(model_id: str) -> dict:
+    """Verify a model ID exists in the central model_pool.yaml.
+
+    Returns {"in_pool": bool, "detail": str, "enabled": bool|None}.
+    """
+    pool = _load_model_pool()
+    if pool is None:
+        return {"in_pool": False, "detail": "central pool not loadable",
+                "enabled": None}
+    pm = pool.models.get(model_id)
+    if pm is None:
+        return {"in_pool": False,
+                "detail": f"model '{model_id}' not found in central pool",
+                "enabled": None}
+    return {"in_pool": True,
+            "detail": f"model '{model_id}' found in central pool",
+            "enabled": pm.get("enabled", False)}
+
+
+def is_extra_visible_model(model_id: str) -> bool:
+    """Check if a model ID is an extra visible model (not in central pool)."""
+    return model_id in EXTRA_VISIBLE_MODELS
+
+
+# ── Hard Boundary Enforcement (ARCH-003) ──
+
+
+FORBIDDEN_OPERATIONS = {
+    "direct_ssh_bypass": "SSH commands must come from registry, not direct",
+    "secret_env_write": "secret/env write requires operator approval",
+    "node_write": "node filesystem write requires operator approval",
+    "model_call": "model API call requires operator-approved dispatch",
+    "merge_push": "merge/push requires explicit operator approval",
+}
+
+
+def check_forbidden_operation(operation: str) -> dict:
+    """Check if an operation is forbidden by hard boundary.
+
+    Returns {"allowed": bool, "reason": str}.
+    """
+    if operation in FORBIDDEN_OPERATIONS:
+        return {
+            "allowed": False,
+            "reason": FORBIDDEN_OPERATIONS[operation],
+        }
+    return {"allowed": True, "reason": "operation not in forbidden list"}
 
 def _load_model_pool():
+    """Load central model pool for guard filtering."""
     try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from opencode_model_pool import ModelPool
         yp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_pool.yaml")
         if os.path.exists(yp):
