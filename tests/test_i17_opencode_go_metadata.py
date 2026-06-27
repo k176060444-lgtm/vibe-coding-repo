@@ -93,16 +93,20 @@ def test_health_status_ok():
 
 
 def test_enabled_status_unchanged():
-    """Only opencode-go-deepseek-v4-flash (canary) should be enabled."""
+    """Only opencode-go-deepseek-v4-flash (canary) + opencode-go-mimo-v2-5 (I18) should be enabled."""
+    ENABLED_OC = {
+        "opencode-go-deepseek-v4-flash",
+        "opencode-go-mimo-v2-5",
+    }
     pool = load_pool()
     for entry in pool['models']:
         if entry.get('provider') != 'opencode-go':
             continue
-        if entry['id'] == 'opencode-go-deepseek-v4-flash':
-            assert entry.get('enabled') is True, f"Canary should be enabled"
+        if entry['id'] in ENABLED_OC:
+            assert entry.get('enabled') is True, f"{entry['id']} should be enabled"
         else:
             assert entry.get('enabled') is False, \
-                f"{entry['id']} should NOT be enabled (I17 is metadata-only)"
+                f"{entry['id']} should NOT be enabled"
 
 
 def test_extra_visible_not_in_central_pool():

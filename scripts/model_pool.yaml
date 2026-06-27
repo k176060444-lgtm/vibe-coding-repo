@@ -988,7 +988,7 @@ models:
   model: mimo-v2.5
   key_env: OPENCODE_GO_API_KEY
   base_url_env: OPENCODE_GO_BASE_URL
-  enabled: false
+  enabled: true
   quarantined: false
   allowed_nodes:
   - 5bao
