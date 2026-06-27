@@ -86,15 +86,64 @@ def test_missing_plan_block():
 
 
 # ──────────────────────────────────────────────
-# T3: real_execution=true → BLOCK
+# T3: real_execution=true with valid conditions → PASS
 # ──────────────────────────────────────────────
 
 
-def test_real_execution_true_block():
-    plan = _make_valid_plan(real_execution=True)
+def test_real_execution_true_valid_pass():
+    """real_execution=true with valid conditions should PASS."""
+    plan = _make_valid_plan(
+        real_execution=True,
+        target_node="5bao",
+        fallback_count=0,
+        action="fixture_add",
+        target_provider="minimax-plan",
+        target_model="MiniMax-M3",
+        approval_id="appr_i9_real",
+        execution_ticket_id="tkt_i9_real",
+        plan_id="plan_i9_real",
+    )
+    result = worker_runtime_gate(plan)
+    assert result.allowed is True, f"expected allowed=True, got {result.block_reasons}"
+    assert result.real_execution is True
+    assert result.worker_invoked is True
+    assert result.status == "real_passed"
+
+
+def test_real_execution_true_invalid_node_block():
+    """real_execution=true with invalid node should BLOCK."""
+    plan = _make_valid_plan(
+        real_execution=True,
+        target_node="9bao",
+        fallback_count=0,
+        action="fixture_add",
+        target_provider="minimax-plan",
+        target_model="MiniMax-M3",
+        approval_id="appr_i9_real",
+        execution_ticket_id="tkt_i9_real",
+        plan_id="plan_i9_real",
+    )
     result = worker_runtime_gate(plan)
     assert result.allowed is False
-    assert any("real_execution" in r for r in result.block_reasons)
+    assert any("node must be 5bao" in r for r in result.block_reasons)
+
+
+def test_real_execution_true_forbidden_action_block():
+    """real_execution=true with forbidden action should BLOCK."""
+    plan = _make_valid_plan(
+        real_execution=True,
+        target_node="5bao",
+        fallback_count=0,
+        action="push",
+        target_provider="minimax-plan",
+        target_model="MiniMax-M3",
+        approval_id="appr_i9_real",
+        execution_ticket_id="tkt_i9_real",
+        plan_id="plan_i9_real",
+    )
+    result = worker_runtime_gate(plan)
+    assert result.allowed is False
+    assert any("forbidden" in r for r in result.block_reasons)
 
 
 # ──────────────────────────────────────────────

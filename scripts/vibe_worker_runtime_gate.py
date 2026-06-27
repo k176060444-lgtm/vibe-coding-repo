@@ -125,15 +125,46 @@ def worker_runtime_gate(
         result.block_reasons = errors
         return result
 
-    # R2: real_execution must be False
-    if plan.real_execution is not False:
+    # R2: real_execution check
+    # For no-op path: real_execution must be False
+    # For real execution path: must meet additional conditions
+    if plan.real_execution is True:
+        # Real execution requires node=5bao, fallback_count=0,
+        # action in fixture/doc allowlist
+        if plan.target_node not in ("5bao",):
+            errors.append(
+                f"real_execution node must be 5bao, got {plan.target_node}"
+            )
+        if plan.fallback_count != 0:
+            errors.append(
+                f"real_execution fallback_count must be 0, "
+                f"got {plan.fallback_count}"
+            )
+        if plan.action not in (
+            "local_exec", "test_run", "self_check", "dry_run",
+            "fixture_add", "fixture_modify", "doc_add", "doc_modify",
+        ):
+            errors.append(
+                f"real_execution action '{plan.action}' not in "
+                f"fixture/doc allowlist"
+            )
+        if plan.action in ("push", "merge", "force_push", "model_call"):
+            errors.append(f"forbidden action for real_execution: {plan.action}")
+        if not plan.target_provider:
+            errors.append("target_provider required for real_execution")
+        if not plan.target_model:
+            errors.append("target_model required for real_execution")
+        if not plan.approval_id:
+            errors.append("approval_id required for real_execution")
+        if not plan.execution_ticket_id:
+            errors.append("execution_ticket_id required for real_execution")
+        if not plan.plan_id:
+            errors.append("plan_id required for real_execution")
+    elif plan.real_execution is not False:
         errors.append(
-            f"plan.real_execution must be False for no-op worker, "
+            f"plan.real_execution must be False or True, "
             f"got {plan.real_execution}"
         )
-        result.allowed = False
-        result.block_reasons = errors
-        return result
 
     # R3: approval_id must be present
     if not plan.approval_id:
@@ -230,7 +261,13 @@ def worker_runtime_gate(
     result.model = plan.target_model
     result.action = plan.action
     result.operator_id = plan.operator_id
-    result.status = "noop_passed"
+    result.real_execution = plan.real_execution
+    if plan.real_execution is True:
+        result.status = "real_passed"
+        result.worker_invoked = True
+    else:
+        result.status = "noop_passed"
+        result.worker_invoked = False
     result.block_reasons = []
 
     return result
@@ -286,13 +323,51 @@ def self_check() -> Dict[str, Any]:
            wr2.allowed is False,
            any("missing DispatchPlan" in r for r in wr2.block_reasons))
 
-    # SC3: real_execution=true → BLOCK
-    plan_bad = _make_valid_plan()
-    plan_bad.real_execution = True
-    wr3 = worker_runtime_gate(plan_bad)
-    _check("real_execution_true_block",
-           wr3.allowed is False,
-           any("real_execution" in r for r in wr3.block_reasons))
+    # SC3: real_execution=true with valid conditions → PASS
+    plan_real = _make_valid_plan()
+    plan_real.real_execution = True
+    plan_real.target_node = "5bao"
+    plan_real.fallback_count = 0
+    plan_real.action = "fixture_add"
+    plan_real.target_provider = "minimax-plan"
+    plan_real.target_model = "MiniMax-M3"
+    plan_real.approval_id = "appr_i9_real"
+    plan_real.execution_ticket_id = "tkt_i9_real"
+    plan_real.plan_id = "plan_i9_real"
+    wr3 = worker_runtime_gate(plan_real)
+    _check("real_execution_true_valid_pass",
+           wr3.allowed is True,
+           f"block_reasons={wr3.block_reasons}")
+
+    # SC3b: real_execution=true with invalid node → BLOCK
+    plan_bad_node = _make_valid_plan()
+    plan_bad_node.real_execution = True
+    plan_bad_node.target_node = "9bao"
+    plan_bad_node.action = "fixture_add"
+    plan_bad_node.target_provider = "minimax-plan"
+    plan_bad_node.target_model = "MiniMax-M3"
+    plan_bad_node.approval_id = "appr_i9_real"
+    plan_bad_node.execution_ticket_id = "tkt_i9_real"
+    plan_bad_node.plan_id = "plan_i9_real"
+    wr3b = worker_runtime_gate(plan_bad_node)
+    _check("real_execution_invalid_node_block",
+           wr3b.allowed is False,
+           any("node must be 5bao" in r for r in wr3b.block_reasons))
+
+    # SC3c: real_execution=true with forbidden action → BLOCK
+    plan_bad_action = _make_valid_plan()
+    plan_bad_action.real_execution = True
+    plan_bad_action.target_node = "5bao"
+    plan_bad_action.action = "push"
+    plan_bad_action.target_provider = "minimax-plan"
+    plan_bad_action.target_model = "MiniMax-M3"
+    plan_bad_action.approval_id = "appr_i9_real"
+    plan_bad_action.execution_ticket_id = "tkt_i9_real"
+    plan_bad_action.plan_id = "plan_i9_real"
+    wr3c = worker_runtime_gate(plan_bad_action)
+    _check("real_execution_forbidden_action_block",
+           wr3c.allowed is False,
+           any("forbidden" in r for r in wr3c.block_reasons))
 
     # SC4: missing approval_id → BLOCK
     plan_no_appr = _make_valid_plan()
@@ -424,9 +499,9 @@ def self_check() -> Dict[str, Any]:
     _check("no_subprocess_ssh_opencode_worker", True,
            "worker_runtime_gate is pure function, no side effects")
 
-    # SC20: All invocation flags are False in result
+    # SC20: No-op path all invocation flags are False
     wr20 = worker_runtime_gate(_make_valid_plan())
-    _check("all_invocation_flags_false",
+    _check("noop_all_invocation_flags_false",
            wr20.allowed is True
            and wr20.worker_invoked is False
            and wr20.ssh_invoked is False
@@ -434,6 +509,34 @@ def self_check() -> Dict[str, Any]:
            and wr20.model_invoked is False,
            f"worker={wr20.worker_invoked} ssh={wr20.ssh_invoked} "
            f"opencode={wr20.opencode_invoked} model={wr20.model_invoked}")
+
+    # SC21: Real execution path worker_invoked=True
+    plan_real = _make_valid_plan()
+    plan_real.real_execution = True
+    plan_real.target_node = "5bao"
+    plan_real.fallback_count = 0
+    plan_real.action = "fixture_add"
+    plan_real.target_provider = "minimax-plan"
+    plan_real.target_model = "MiniMax-M3"
+    plan_real.approval_id = "appr_i9_sc21"
+    plan_real.execution_ticket_id = "tkt_i9_sc21"
+    plan_real.plan_id = "plan_i9_sc21"
+    wr21 = worker_runtime_gate(plan_real)
+    _check("real_execution_worker_invoked_true",
+           wr21.allowed is True
+           and wr21.real_execution is True
+           and wr21.worker_invoked is True
+           and wr21.status == "real_passed",
+           f"allowed={wr21.allowed} real_exec={wr21.real_execution} "
+           f"worker={wr21.worker_invoked} status={wr21.status}")
+
+    # SC22: Real execution path ssh/opencode/model still False
+    _check("real_execution_ssh_opencode_model_false",
+           wr21.ssh_invoked is False
+           and wr21.opencode_invoked is False
+           and wr21.model_invoked is False,
+           f"ssh={wr21.ssh_invoked} opencode={wr21.opencode_invoked} "
+           f"model={wr21.model_invoked}")
 
     # Summary
     passed = sum(1 for r in results if r["passed"])
