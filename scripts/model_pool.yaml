@@ -744,8 +744,21 @@ models:
   - coding
   priority: 27
   fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
+  smoke_required: false
+  smoke_results:
+    5bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/glm-5.2
+    9bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/glm-5.2
+  health_status: ok
   source: hermes_provider_sync
   notes: 'Hermes opencode-go model: glm-5.2 (alias: opencode-glm52)'
 - id: opencode-go-glm-5-1
@@ -767,8 +780,21 @@ models:
   - coding
   priority: 28
   fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
+  smoke_required: false
+  smoke_results:
+    5bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/glm-5.1
+    9bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/glm-5.1
+  health_status: ok
   source: hermes_provider_sync
   notes: 'Hermes opencode-go model: glm-5.1 (alias: opencode-glm51)'
 - id: opencode-go-deepseek-v4-flash
@@ -791,8 +817,21 @@ models:
   - fast
   priority: 29
   fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
+  smoke_required: false
+  smoke_results:
+    5bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/deepseek-v4-flash
+    9bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/deepseek-v4-flash
+  health_status: ok
   source: hermes_provider_sync
   notes: 'Hermes opencode-go model: deepseek-v4-flash (alias: opencode-ds4flash)'
 - id: opencode-go-kimi-k2-6
@@ -814,8 +853,21 @@ models:
   - coding
   priority: 30
   fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
+  smoke_required: false
+  smoke_results:
+    5bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/kimi-k2.6
+    9bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/kimi-k2.6
+  health_status: ok
   source: hermes_provider_sync
   notes: 'Hermes opencode-go model: kimi-k2.6 (alias: opencode-kimi26)'
 - id: opencode-go-qwen3-7-max
@@ -838,8 +890,21 @@ models:
   - strong
   priority: 31
   fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
+  smoke_required: false
+  smoke_results:
+    5bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/qwen3.7-max
+    9bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/qwen3.7-max
+  health_status: ok
   source: hermes_provider_sync
   notes: 'Hermes opencode-go model: qwen3.7-max (alias: opencode-qwen37max)'
 - id: opencode-go-qwen3-7-plus
@@ -861,8 +926,21 @@ models:
   - coding
   priority: 32
   fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
+  smoke_required: false
+  smoke_results:
+    5bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/qwen3.7-plus
+    9bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/qwen3.7-plus
+  health_status: ok
   source: hermes_provider_sync
   notes: 'Hermes opencode-go model: qwen3.7-plus (alias: opencode-qwen37plus)'
 - id: opencode-go-mimo-v2-5-pro
@@ -885,8 +963,21 @@ models:
   - strong
   priority: 33
   fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
+  smoke_required: false
+  smoke_results:
+    5bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/mimo-v2.5-pro
+    9bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/mimo-v2.5-pro
+  health_status: ok
   source: hermes_provider_sync
   notes: 'Hermes opencode-go model: mimo-v2.5-pro (alias: opencode-mimopro)'
 - id: opencode-go-mimo-v2-5
@@ -908,7 +999,20 @@ models:
   - coding
   priority: 34
   fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
+  smoke_required: false
+  smoke_results:
+    5bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/mimo-v2.5
+    9bao:
+      status: confirmed
+      last_verified: '2026-06-27T10:00:00Z'
+      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      wrapper: ~/bin/vibedev-opencode
+      invocation: opencode-go/mimo-v2.5
+  health_status: ok
   source: hermes_provider_sync
   notes: 'Hermes opencode-go model: mimo-v2.5 (alias: opencode-mimo)'
