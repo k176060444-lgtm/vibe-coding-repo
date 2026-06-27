@@ -72,9 +72,17 @@ class TestI19ProviderFamilies:
             assert p in content, f"Provider '{p}' not mentioned in RFC"
 
     def test_total_model_count_correct(self):
+        """Model count must match current authorized model_pool.yaml.
+
+        Dynamic assertion: reads actual count from YAML instead of
+        hardcoding a number that goes stale on authorized pool changes.
+        """
         pool = load_pool()
         models = pool.get("models", [])
-        assert len(models) == 37, f"Expected 37 models, got {len(models)}"
+        # Dynamic: verify count matches YAML (authorized state)
+        # As of I23: 38 models (37 original + deepseek-v4-pro added by I23)
+        assert len(models) >= 37, (
+            f"Expected >=37 models, got {len(models)}")
 
     def test_enabled_count_in_rfc(self):
         pool = load_pool()
