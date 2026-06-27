@@ -146,9 +146,9 @@ def recommend(role, risk_level="low", node_id=None, enforce_guards=True):
 
     # Build routing-name to YAML model-id mapping
     _ROUTING_TO_YAML = {
-        "deepseek-v4-pro": "deepseek-deepseek-chat",
+        "deepseek-v4-pro": "deepseek-plan-deepseek-v4-pro",
         "mimo-v2.5-pro": "xiaomi-mimo-v2-5-pro",
-        "minimax-m3": "minimax-minimax-m2-5",
+        "minimax-m3": "minimax-plan-minimax-m3",
         "volcengine-doubao": "volcengine-doubao-1-5-pro-256k",
     }
 

@@ -497,11 +497,53 @@ class WorkerRegistry:
 
         Only sets ONLINE on successful probe. Keeps UNKNOWN on failure.
         Evidence includes: timestamp, exit_code, stdout, latency_ms.
+
+        For local-exec workers (e.g. 21bao), performs a local lightweight
+        check instead of SSH. This avoids false "no SSH credential" reports.
         """
         w = self.workers.get(worker_id)
         if not w:
             return {"worker_id": worker_id, "status": "UNKNOWN",
                     "error": "worker_not_found"}
+
+        # local-exec workers: lightweight local probe, no SSH
+        if w.transport == "local-exec":
+            import time as _time
+            start = _time.monotonic()
+            try:
+                import subprocess as _subprocess
+                result = _subprocess.run(
+                    ["hostname"], capture_output=True, text=True, timeout=timeout)
+                elapsed_ms = int((_time.monotonic() - start) * 1000)
+                if result.returncode == 0:
+                    self.set_health(worker_id, NodeStatus.ONLINE)
+                    return {
+                        "worker_id": worker_id,
+                        "status": "ONLINE",
+                        "transport": "local-exec",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "exit_code": 0,
+                        "stdout": result.stdout.strip()[:200],
+                        "latency_ms": elapsed_ms,
+                    }
+                else:
+                    self.set_health(worker_id, NodeStatus.OFFLINE)
+                    return {
+                        "worker_id": worker_id,
+                        "status": "OFFLINE",
+                        "transport": "local-exec",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "exit_code": result.returncode,
+                        "stderr": result.stderr.strip()[:200],
+                    }
+            except Exception as e:
+                self.set_health(worker_id, NodeStatus.OFFLINE)
+                return {
+                    "worker_id": worker_id, "status": "OFFLINE",
+                    "transport": "local-exec",
+                    "error": str(e)[:200],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
 
         key = ssh_key_path or w.ssh_key_path
         ssh_cmd = [
