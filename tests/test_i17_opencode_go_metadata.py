@@ -151,9 +151,10 @@ def test_route_all_unchanged():
     )
     assert result.returncode == 0, f"route-all failed: {result.stderr}"
     routes = json.loads(result.stdout)
-    assert len(routes) == 9, f"Expected 9 roles, got {len(routes)}"
+    roles = {k: v for k, v in routes.items() if not k.startswith("_")}
+    assert len(roles) == 9, f"Expected 9 roles, got {len(roles)}"
     # Check no opencode-go models in route-all
-    for role, info in routes.items():
+    for role, info in roles.items():
         model = info.get('recommended', '')
         assert 'opencode-go' not in model, \
             f"Route-all role {role} uses opencode-go model {model} (should be unchanged)"

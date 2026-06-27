@@ -118,9 +118,10 @@ def test_proxy_port_30172_all_nodes():
 def test_route_all_9_roles_output():
     """route-all outputs 9 roles."""
     routes = route_all()
-    assert len(routes) == 9
+    roles = {k: v for k, v in routes.items() if not k.startswith("_")}
+    assert len(roles) == 9
     for role in ROLES:
-        assert role in routes
+        assert role in roles
 
 
 def test_route_all_orchestrator_on_21bao():

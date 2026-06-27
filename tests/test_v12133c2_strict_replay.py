@@ -299,10 +299,11 @@ def test_all_9_roles_have_assignments():
 def test_route_all_9_roles_output():
     """T17: route-all outputs all 9 roles."""
     routes = route_all()
-    assert len(routes) == 9, f"Expected 9 roles, got {len(routes)}"
+    roles = {k: v for k, v in routes.items() if not k.startswith("_")}
+    assert len(roles) == 9, f"Expected 9 roles, got {len(roles)}"
     for role in ROLES:
-        assert role in routes, f"Missing role: {role}"
-        assert routes[role].get("recommended") is not None, f"{role}: no recommendation"
+        assert role in roles, f"Missing role: {role}"
+        assert roles[role].get("recommended") is not None, f"{role}: no recommendation"
 
 
 def test_21bao_node_check():

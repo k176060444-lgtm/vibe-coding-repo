@@ -102,11 +102,108 @@ MODELS = {
     },
 }
 
-# ── Model Pool Guard ──
+# ── Operator Checkpoint Gate (DSP-002) ──
+
+
+def require_operator_checkpoint(role: str = None,
+                                model_alias: str = None,
+                                phase_id: str = None) -> dict:
+    """Lightweight operator checkpoint gate — fail-closed.
+
+    Simulates the approval gate that must exist between route-all
+    recommendation and actual dispatch. In production this would
+    reference an operator-approved dispatch manifest. For I22,
+    this provides a fail-closed gate that rejects any dispatch
+    that hasn't been explicitly approved.
+
+    Returns {"approved": bool, "reason": str, "gate": str}.
+    Always returns {"approved": False, "reason": "operator_checkpoint_required",
+                    "gate": "dsp-002"} — dispatch must not proceed without
+                    explicit operator approval manifest.
+    """
+    return {
+        "approved": False,
+        "reason": "operator_checkpoint_required",
+        "gate": "dsp-002",
+        "detail": {
+            "role": role,
+            "model_alias": model_alias,
+            "phase_id": phase_id,
+        },
+        "message": "No operator-approved dispatch manifest. "
+                   "Hermes/WebDEV/vibedev may only recommend; "
+                   "operator must approve before dispatch.",
+    }
+
+
+# ── Central Pool Guard (POOL-001) ──
+
+
+# Known extra visible models that exist in provider API but NOT in central pool.
+# These MUST NOT be resolved by alias resolver or used in route-all.
+EXTRA_VISIBLE_MODELS = {
+    "opencode-go/deepseek-v4-pro": "extra visible — not in central pool",
+    "opencode-go/kimi-k2.7-code": "extra visible — not in central pool",
+    "opencode-go/minimax-m2.7": "extra visible — not in central pool",
+    "opencode-go/minimax-m3": "extra visible — not in central pool",
+    "opencode-go/qwen3.6-plus": "extra visible — not in central pool",
+}
+
+
+def validate_model_in_central_pool(model_id: str) -> dict:
+    """Verify a model ID exists in the central model_pool.yaml.
+
+    Returns {"in_pool": bool, "detail": str, "enabled": bool|None}.
+    """
+    pool = _load_model_pool()
+    if pool is None:
+        return {"in_pool": False, "detail": "central pool not loadable",
+                "enabled": None}
+    pm = pool.models.get(model_id)
+    if pm is None:
+        return {"in_pool": False,
+                "detail": f"model '{model_id}' not found in central pool",
+                "enabled": None}
+    return {"in_pool": True,
+            "detail": f"model '{model_id}' found in central pool",
+            "enabled": pm.get("enabled", False)}
+
+
+def is_extra_visible_model(model_id: str) -> bool:
+    """Check if a model ID is an extra visible model (not in central pool)."""
+    return model_id in EXTRA_VISIBLE_MODELS
+
+
+# ── Hard Boundary Enforcement (ARCH-003) ──
+
+
+FORBIDDEN_OPERATIONS = {
+    "direct_ssh_bypass": "SSH commands must come from registry, not direct",
+    "secret_env_write": "secret/env write requires operator approval",
+    "secret_write": "secret/env write requires operator approval",
+    "node_write": "node filesystem write requires operator approval",
+    "model_call": "model API call requires operator-approved dispatch",
+    "merge": "merge requires explicit operator approval",
+    "push": "push requires explicit operator approval",
+    "merge_push": "merge/push requires explicit operator approval",
+}
+
+
+def check_forbidden_operation(operation: str) -> dict:
+    """Check if an operation is forbidden by hard boundary.
+
+    Returns {"allowed": bool, "reason": str}.
+    """
+    if operation in FORBIDDEN_OPERATIONS:
+        return {
+            "allowed": False,
+            "reason": FORBIDDEN_OPERATIONS[operation],
+        }
+    return {"allowed": True, "reason": "operation not in forbidden list"}
 
 def _load_model_pool():
+    """Load central model pool for guard filtering."""
     try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from opencode_model_pool import ModelPool
         yp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_pool.yaml")
         if os.path.exists(yp):
@@ -157,6 +254,21 @@ def recommend(role, risk_level="low", node_id=None, enforce_guards=True):
         if enforce_guards and pool:
             yaml_id = _ROUTING_TO_YAML.get(model_name)
             pm = pool.models.get(yaml_id) if yaml_id else None
+
+            # ── POOL-001: Central pool guard ──────────────────
+            # Verify model exists in central pool via YAML ID
+            if yaml_id:
+                pool_check = validate_model_in_central_pool(yaml_id)
+                if not pool_check.get("in_pool"):
+                    continue  # Block: not in central pool
+                # Also check enabled/verified status from guard function
+                if pool_check.get("enabled") is False:
+                    continue  # Block: disabled in central pool
+            # ── POOL-001: Extra visible model guard ───────────
+            if is_extra_visible_model(model_name):
+                continue  # Block: extra visible
+            # ─────────────────────────────────────────────────
+
             if pm:
                 if pm.get("status") in ("temporary_unavailable", "unverified"):
                     continue
@@ -299,12 +411,39 @@ def _resolve_node_for_role(role, registry):
 
 
 def route_all():
-    """Route all 9 roles with node attribution and operator selection requirement.
+    """Route all 9 roles with node attribution, operator checkpoint, and pool guard.
+
+    ├─ DSP-002: require_operator_checkpoint() — fail-closed gate
+    ├─ ARCH-001: runtime_enforce() — architecture contract verification
+    ├─ POOL-001: validate_model_in_central_pool() — each recommended model
+    └─ POOL-001: is_extra_visible_model() — extra visible models blocked
 
     Uses dynamic worker registry (no hardcoded fixed node list).
     Each node is checked for: enabled, maintenance, health_status != OFFLINE.
     UNKNOWN health_status requires operator confirmation before assignment.
     """
+    gate_results = {}
+
+    # ── DSP-002: Operator Checkpoint Gate ─────────────────────
+    # Fail-closed: without operator-approved dispatch manifest,
+    # dispatch must not proceed. This call is the gate entry point.
+    gate_results["operator_checkpoint"] = require_operator_checkpoint(
+        phase_id="route-all")
+
+    # ── ARCH-001/003: Runtime Enforcement Gate ────────────────
+    # Verify architecture contract (worker transport, SSH bypass,
+    # forbidden usernames) at every route-all entry.
+    try:
+        from vibe_architecture_contract import runtime_enforce
+        gate_results["runtime_enforcement"] = runtime_enforce()
+    except ImportError:
+        gate_results["runtime_enforcement"] = {
+            "passed": False,
+            "errors": ["vibe_architecture_contract not importable"],
+            "warnings": [],
+        }
+    # ──────────────────────────────────────────────────────────
+
     results = {}
     registry = _load_worker_registry()
 
@@ -316,6 +455,35 @@ def route_all():
         rec["planned_provider_model"] = ""
         rec["operator_selection_required"] = True
         rec["fallback_count"] = 0
+
+        # ── POOL-001: Central Pool Guard for each role ─────────
+        recommended = rec.get("recommended", "")
+        if recommended:
+            # Use YAML ID mapping for pool lookup (routing name != YAML key)
+            _ROUTING_TO_YAML = {
+                "deepseek-v4-pro": "deepseek-plan-deepseek-v4-pro",
+                "mimo-v2.5-pro": "xiaomi-mimo-v2-5-pro",
+                "minimax-m3": "minimax-plan-minimax-m3",
+                "volcengine-doubao": "volcengine-doubao-1-5-pro-256k",
+            }
+            yaml_id = _ROUTING_TO_YAML.get(recommended, recommended)
+            pool_check = validate_model_in_central_pool(yaml_id)
+            rec["_pool_verified"] = pool_check.get("in_pool", False)
+            rec["_pool_enabled"] = pool_check.get("enabled")
+            rec["_extra_visible"] = is_extra_visible_model(recommended)
+            if not pool_check.get("in_pool"):
+                rec["_pool_warning"] = (
+                    f"Model '{recommended}' not in central pool — "
+                    "cannot dispatch without operator override")
+            if is_extra_visible_model(recommended):
+                rec["_pool_warning"] = (
+                    f"Model '{recommended}' is extra visible — "
+                    "BLOCKED from route/dispatch/alias")
+        else:
+            rec["_pool_verified"] = False
+            rec["_pool_enabled"] = None
+            rec["_extra_visible"] = False
+        # ──────────────────────────────────────────────────────
 
         if node_id:
             rec["planned_node"] = node_id
@@ -339,6 +507,7 @@ def route_all():
                 f"NO_AVAILABLE_NODE for role={role}; error={attribution.get('error')}"
             )
         results[role] = rec
+    results["_gate_results"] = gate_results
     return results
 
 
@@ -402,11 +571,18 @@ def build_parser():
     p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     p.add_argument("--json", dest="output_json", action="store_true")
     p.add_argument("--self-check", dest="self_check_flag", action="store_true")
+    p.add_argument("--runtime-enforce", dest="runtime_enforce_flag",
+                   action="store_true",
+                   help="Run architecture contract runtime enforcement gate")
     sub = p.add_subparsers(dest="command")
     p_route = sub.add_parser("route")
     p_route.add_argument("--task-type", required=True)
     p_route.add_argument("--risk", default="low")
     sub.add_parser("route-all")
+    p_check = sub.add_parser("check")
+    p_check.add_argument("--operation", required=True,
+                         help="Operation to check: model_call, node_write, "
+                              "secret_write, merge, push, direct_ssh_bypass")
     return p
 
 
@@ -416,10 +592,17 @@ def main(argv=None):
 
     if args.self_check_flag:
         result = self_check(args.output_json)
+    elif args.runtime_enforce_flag:
+        # ARCH-001/003: Runtime enforcement gate from CLI
+        from vibe_architecture_contract import runtime_enforce
+        result = runtime_enforce()
     elif args.command == "route":
         result = recommend(args.task_type, args.risk)
     elif args.command == "route-all":
         result = route_all()
+    elif args.command == "check":
+        # ARCH-003: Forbidden operation check gate from CLI
+        result = check_forbidden_operation(args.operation)
     else:
         p.print_help()
         return 1

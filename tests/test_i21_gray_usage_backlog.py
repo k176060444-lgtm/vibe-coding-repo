@@ -302,7 +302,8 @@ class TestBacklogNoChanges:
         )
         assert result.returncode == 0, f"route-all failed: {result.stderr}"
         data = json.loads(result.stdout)
-        assert len(data) == 9, f"Expected 9 route-all roles, got {len(data)}"
+        roles = {k: v for k, v in data.items() if not k.startswith("_")}
+        assert len(roles) == 9, f"Expected 9 route-all roles, got {len(roles)}"
 
     def test_model_pool_unchanged(self):
         result = subprocess.run(
