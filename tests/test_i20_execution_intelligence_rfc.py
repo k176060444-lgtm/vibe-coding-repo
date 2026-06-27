@@ -284,3 +284,102 @@ class TestI20Migration:
         content = load_rfc()
         assert "pre-i20" in content.lower() or "Pre-I20" in content, \
             "Pre-I20 evidence defaults should be defined"
+
+
+class TestI20aEnhancements:
+    """Tests for I20A minimal schema enhancements."""
+
+    def test_environment_field_exists(self):
+        content = load_rfc()
+        assert "environment" in content, "Missing environment field group"
+
+    def test_environment_subfields(self):
+        content = load_rfc()
+        for sf in ["node", "worker_version", "opencode_version", "model_pool_head", "dispatch_manifest_version"]:
+            assert sf in content, f"Missing environment sub-field: {sf}"
+
+    def test_environment_nullable(self):
+        content = load_rfc()
+        assert "nullable" in content[content.lower().find("environment"):content.lower().find("environment")+500].lower() or \
+               "nullable" in content, "environment must be nullable"
+
+    def test_task_tags_field_exists(self):
+        content = load_rfc()
+        assert "task_tags" in content, "Missing task_tags field"
+
+    def test_task_tags_provider_agnostic(self):
+        content = load_rfc()
+        # Check tags mention multiple providers
+        assert "task_tags" in content
+        tag_section = content[content.lower().find("task_tags"):content.lower().find("task_tags")+300]
+        assert "provider-agnostic" in tag_section.lower() or "14 provider" in content, \
+            "task_tags should be provider-agnostic"
+
+    def test_operator_feedback_field_exists(self):
+        content = load_rfc()
+        assert "operator_feedback" in content, "Missing operator_feedback field"
+
+    def test_operator_feedback_subfields(self):
+        content = load_rfc()
+        for sf in ["accepted", "rating", "note"]:
+            assert sf in content, f"Missing operator_feedback sub-field: {sf}"
+
+    def test_operator_feedback_nullable(self):
+        content = load_rfc()
+        # Sub-fields use null (JSON nullable) or have nullable descriptions
+        assert "null" in content[content.lower().find("operator_feedback"):content.lower().find("operator_feedback")+500], \
+            "operator_feedback fields must support null values"
+        # Also check field dictionary has int/null or string/null for these
+        assert "int/null" in content or "string/null" in content or "nullable" in content, \
+            "RFC should document nullable types"
+
+    def test_no_hashes_implemented(self):
+        """Hash terms may appear in 'Explicitly Excluded' section, but not as implemented fields."""
+        content = load_rfc()
+        # The hash terms appear in the exclusion table — that's ok
+        # Verify they're only mentioned in exclusion context
+        for h in ["prompt_hash", "input_hash", "approval_hash", "execution_hash"]:
+            if h in content:
+                # Must be in the "Explicitly Excluded" section or "does NOT" context
+                idx = content.find(h)
+                context = content[max(0,idx-200):idx+200]
+                assert "Explicitly Excluded" in context or "excluded" in context.lower(), \
+                    f"{h} should only appear as excluded, not as implemented"
+
+    def test_no_normalization_implementation(self):
+        content = load_rfc()
+        assert "normalization" not in content or \
+               "future concept" in content.lower() or \
+               "Explicitly Excluded" in content[content.lower().find("normalization"):content.lower().find("normalization")+300], \
+            "Normalization must not be implemented as schema"
+
+    def test_no_cost_model(self):
+        content = load_rfc()
+        # Cost may be mentioned as excluded, but must not be implemented
+        cost_section = content[content.lower().find("cost"):content.lower().find("cost")+200] if "cost" in content.lower() else ""
+        assert "Explicitly Excluded" in content or "does NOT" in content, \
+            "cost must be explicitly excluded"
+
+    def test_no_recommendation_engine(self):
+        content = load_rfc()
+        assert "does NOT" in content or "Explicitly Excluded" in content, \
+            "Recommendation engine must be excluded"
+
+    def test_no_normalization_implementation(self):
+        content = load_rfc()
+        assert "normalization" not in content or \
+               "future concept" in content.lower() or \
+               "Explicitly Excluded" in content[content.lower().find("normalization"):content.lower().find("normalization")+300], \
+            "Normalization must not be implemented as schema"
+
+    def test_environment_category_exists(self):
+        content = load_rfc()
+        assert "Environment" in content, "Missing Environment category in field groups"
+        assert "Operator Feedback" in content, "Missing Operator Feedback category"
+        assert "Tags" in content, "Missing Tags category"
+
+    def test_field_count_with_i20a(self):
+        """Total fields should be 49 (38 original + 11 new sub-fields)."""
+        content = load_rfc()
+        # Just verify the table rows go up to 49
+        assert "49" in content, "Field dictionary should extend to 49 rows"

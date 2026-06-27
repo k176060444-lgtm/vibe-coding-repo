@@ -152,6 +152,22 @@ Each single execution (one model call within a role within a phase) produces one
     "secret_scan_passed": true,
     "hidden_bidi_scan_passed": true,
     "forbidden_files_check_passed": true
+  },
+
+  "environment": {
+    "node": "5bao",
+    "worker_version": "vibedev-opencode 1.17.8",
+    "opencode_version": "1.17.8",
+    "model_pool_head": "76e1e031b18c8b5409e4fd077974c014bd8762db",
+    "dispatch_manifest_version": "1.0"
+  },
+
+  "task_tags": ["live-smoke", "opencode-go", "verification"],
+
+  "operator_feedback": {
+    "accepted": true,
+    "rating": null,
+    "note": null
   }
 }
 ```
@@ -198,6 +214,17 @@ Each single execution (one model call within a role within a phase) produces one
 | 36 | `merge_commit_sha` | string | No | SHA if merged |
 | 37 | `evidence_refs` | string[] | No | Links to supporting documents |
 | 38 | `redaction_check` | object | No | Secret/bidi/forbidden pass flags |
+| 39 | `environment` | object | No | Runtime snapshot during execution |
+| 40 | `environment.node` | string | No | Node that ran the execution |
+| 41 | `environment.worker_version` | string | No | Worker wrapper version |
+| 42 | `environment.opencode_version` | string | No | OpenCode CLI version |
+| 43 | `environment.model_pool_head` | string | No | Git SHA of model_pool.yaml at execution time |
+| 44 | `environment.dispatch_manifest_version` | string | No | Active manifest version |
+| 45 | `task_tags` | string[] | No | Tags: python, cpp, review, bugfix, refactor, test, linux, vba |
+| 46 | `operator_feedback` | object | No | Post-execution operator feedback |
+| 47 | `operator_feedback.accepted` | bool | No | Operator accepted the result |
+| 48 | `operator_feedback.rating` | int/null | No | 1-5 rating (null if not rated) |
+| 49 | `operator_feedback.note` | string/null | No | Free-text operator note |
 
 ### 3.3 Field Category Groups
 
@@ -216,6 +243,9 @@ Each single execution (one model call within a role within a phase) produces one
 | **Integration** | merge_result, merge_commit_sha |
 | **Traces** | evidence_refs |
 | **Safety** | redaction_check |
+| **Environment** | environment (5 sub-fields) |
+| **Tags** | task_tags |
+| **Operator Feedback** | operator_feedback (3 sub-fields) |
 
 ### 3.4 task_type Enum
 
@@ -400,6 +430,47 @@ opencode-go, volcengine, xai, xiaomi
 - `provider` is a free string that must match the central pool provider name.
 - `model_id` must match a model in `scripts/model_pool.yaml` (enforced in future implementation).
 - Extra visible models (deepseek-v4-pro, kimi-k2.7-code, etc.) SHOULD NOT appear as `model_id` unless they are added to the central pool.
+
+---
+
+## 7a. I20A Minimal Enhancements
+
+### Added Fields
+
+Three lightweight field groups added to the Execution Record Schema (schema version 1.0):
+
+1. **`environment`** (object, nullable): Runtime snapshot capturing:
+   - `node`: execution node (5bao, 9bao, 21bao)
+   - `worker_version`: vibedev-opencode runner version
+   - `opencode_version`: OpenCode CLI version
+   - `model_pool_head`: git SHA of `scripts/model_pool.yaml` at execution time
+   - `dispatch_manifest_version`: active manifest version during execution
+   All five sub-fields are nullable.
+
+2. **`task_tags`** (string array, nullable): Lightweight classification tags for the task:
+   - `python`, `cpp`, `vba`, `linux`, `review`, `bugfix`, `refactor`, `test`
+   - Provider-agnostic — tags apply equally to all 14 provider families.
+   - No limit on tag values; intended for future filtering and trend analysis.
+
+3. **`operator_feedback`** (object, nullable): Post-execution operator feedback:
+   - `accepted` (bool): Whether operator accepted the execution result
+   - `rating` (int|null): 1–5 rating (null when not rated)
+   - `note` (string|null): Free-text operator note
+   All three sub-fields are nullable.
+
+### Explicitly Excluded from I20A
+
+| Item | Reason | Future Phase |
+|---|---|---|
+| Complex reproducibility hashes (prompt_hash, input_hash, approval_hash, execution_hash) | Heavy, premature, no current consumer | I30+ (if needed) |
+| Cost model / provider pricing | Requires real cost data and secret-adjacent computations | I23+ |
+| Recommendation engine | Algorithm implementation, not schema | I25+ |
+| Heavy normalization framework | Complex, not needed for current schema | Future concept only |
+| Scoring algorithm implementation | Out of scope for foundation | I24+ |
+
+### Migration
+
+Existing I20 schema v1.0 records without `environment`, `task_tags`, or `operator_feedback` are fully backward compatible. All three fields default to `null` when absent.
 
 ---
 
