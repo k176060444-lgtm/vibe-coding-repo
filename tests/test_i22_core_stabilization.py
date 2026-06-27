@@ -250,11 +250,75 @@ class TestNoRegression:
         )
         assert result.returncode == 0, f"route-all failed: {result.stderr}"
         data = json.loads(result.stdout)
-        assert len(data) == 9, f"Expected 9 roles, got {len(data)}"
+        # Skip _gate_results key — it's a gate wiring addition, not a role
+        roles = {k: v for k, v in data.items() if not k.startswith("_")}
+        assert len(roles) == 9, f"Expected 9 roles, got {len(roles)}"
         expected_roles = {"orchestrator", "explorer", "planner", "implementer",
                           "tester-a", "tester-b", "reviewer-a", "reviewer-b",
                           "git-integrator"}
-        assert set(data.keys()) == expected_roles
+        assert set(roles.keys()) == expected_roles
+
+    def test_route_all_has_gate_results(self):
+        """I22 gate wiring: route_all must include operator_checkpoint and runtime_enforce."""
+        result = subprocess.run(
+            [sys.executable, "scripts/vibe_model_routing_policy.py",
+             "--json", "route-all"],
+            capture_output=True, text=True, cwd=REPO_ROOT
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        gates = data.get("_gate_results", {})
+        assert "operator_checkpoint" in gates, \
+            "route_all() must call require_operator_checkpoint()"
+        assert "runtime_enforcement" in gates, \
+            "route_all() must call runtime_enforce()"
+        cp = gates["operator_checkpoint"]
+        assert cp.get("approved") is False, \
+            "require_operator_checkpoint must be fail-closed"
+        re = gates["runtime_enforcement"]
+        assert re.get("passed") is True, \
+            "runtime_enforce must pass in current state"
+
+    def test_route_all_roles_have_pool_guard(self):
+        """I22 gate wiring: each route-all role must have pool verification."""
+        result = subprocess.run(
+            [sys.executable, "scripts/vibe_model_routing_policy.py",
+             "--json", "route-all"],
+            capture_output=True, text=True, cwd=REPO_ROOT
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        roles = {k: v for k, v in data.items() if not k.startswith("_")}
+        for role, rdata in roles.items():
+            assert "_pool_verified" in rdata, \
+                f"route_all() must call validate_model_in_central_pool for {role}"
+            assert "_extra_visible" in rdata, \
+                f"route_all() must call is_extra_visible_model for {role}"
+
+    def test_recommend_calls_extra_visible_and_pool_guard(self):
+        """I22 gate wiring: recommend() must call is_extra_visible_model and
+        validate_model_in_central_pool via guard path."""
+        from vibe_model_routing_policy import recommend
+        # Use enforce_guards=True (default) — this triggers extra_visible and
+        # pool checks. If an extra visible model somehow enters the MODELS dict,
+        # it would be blocked here.
+        result = recommend("implementer", enforce_guards=True)
+        assert result.get("recommended") is not None, \
+            "recommend() should produce a valid recommendation"
+        # All recommended models must have pool_verified True
+        # (verified inside route_all, check via route_all)
+        result2 = subprocess.run(
+            [sys.executable, "scripts/vibe_model_routing_policy.py",
+             "--json", "route-all"],
+            capture_output=True, text=True, cwd=REPO_ROOT
+        )
+        data = json.loads(result2.stdout)
+        roles = {k: v for k, v in data.items() if not k.startswith("_")}
+        for role, rdata in roles.items():
+            assert rdata.get("_pool_verified") is True, \
+                f"{role}: model '{rdata.get('recommended')}' not verified in central pool"
+            assert rdata.get("_extra_visible") is False, \
+                f"{role}: model '{rdata.get('recommended')}' flagged extra visible"
 
     def test_model_pool_unchanged(self):
         result = subprocess.run(
@@ -307,3 +371,62 @@ class TestNoRegression:
                         continue  # Regex pattern definition, safe
                     assert False, \
                         f"Secret pattern '{pat}' found in {fname}"
+
+    def test_runtime_enforce_cli_standalone(self):
+        """ARCH-001/003: runtime_enforce must be callable via CLI."""
+        result = subprocess.run(
+            [sys.executable, "scripts/vibe_model_routing_policy.py",
+             "--runtime-enforce", "--json"],
+            capture_output=True, text=True, cwd=REPO_ROOT
+        )
+        assert result.returncode == 0, \
+            f"--runtime-enforce failed: {result.stderr}"
+        data = json.loads(result.stdout)
+        assert "passed" in data
+        assert data["passed"] is True
+
+    def test_runtime_enforce_arch_contract_cli(self):
+        """ARCH-001/003: runtime_enforce via architecture_contract.py CLI."""
+        result = subprocess.run(
+            [sys.executable, "scripts/vibe_architecture_contract.py",
+             "--runtime-enforce", "--json"],
+            capture_output=True, text=True, cwd=REPO_ROOT
+        )
+        assert result.returncode == 0, \
+            f"arch contract --runtime-enforce failed: {result.stderr}"
+        data = json.loads(result.stdout)
+        assert data["passed"] is True
+
+    def test_check_forbidden_operation_cli(self):
+        """ARCH-003: check_forbidden_operation must be callable via CLI."""
+        for op in ["model_call", "node_write", "secret_write",
+                    "merge", "push", "direct_ssh_bypass"]:
+            result = subprocess.run(
+                [sys.executable, "scripts/vibe_model_routing_policy.py",
+                 "--json", "check", "--operation", op],
+                capture_output=True, text=True, cwd=REPO_ROOT
+            )
+            assert result.returncode == 0, \
+                f"check --operation {op} failed: {result.stderr}"
+            data = json.loads(result.stdout)
+            assert data["allowed"] is False, \
+                f"Operation '{op}' should be blocked"
+
+    def test_check_invalid_operation_allowed(self):
+        """Non-forbidden operations should be allowed."""
+        result = subprocess.run(
+            [sys.executable, "scripts/vibe_model_routing_policy.py",
+             "--json", "check", "--operation", "read_file"],
+            capture_output=True, text=True, cwd=REPO_ROOT
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["allowed"] is True
+
+    def test_no_ssh_bypass_paths(self):
+        """ARCH-003: No SSH bypass with forbidden username in any script."""
+        from scripts.vibe_architecture_contract import validate_no_ssh_bypass
+        result = validate_no_ssh_bypass()
+        assert result["passed"] is True, \
+            f"SSH bypass detected: {result['ssh_bypass_issues']}"
+        assert len(result["ssh_bypass_issues"]) == 0

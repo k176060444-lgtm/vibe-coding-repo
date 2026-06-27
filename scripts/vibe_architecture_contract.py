@@ -303,6 +303,8 @@ def main():
         description="VibeDev Architecture Contract Validator")
     parser.add_argument("--self-check", action="store_true",
                         help="Run all architecture contract checks")
+    parser.add_argument("--runtime-enforce", action="store_true",
+                        help="Run architecture contract runtime enforcement gate")
     parser.add_argument("--json", action="store_true",
                         help="JSON output")
     args = parser.parse_args()
@@ -316,6 +318,18 @@ def main():
             for c in result["checks"]:
                 status = "✅" if c["passed"] else "❌"
                 print(f"  {status} {c['name']}: {c['detail']}")
+        sys.exit(0 if result["passed"] else 1)
+    elif args.runtime_enforce:
+        # ARCH-001/003: Standalone runtime enforcement gate
+        result = runtime_enforce()
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"Runtime Enforcement: {'PASS' if result['passed'] else 'FAIL'}")
+            for e in result["errors"]:
+                print(f"  ❌ {e}")
+            for w in result["warnings"]:
+                print(f"  ⚠️  {w}")
         sys.exit(0 if result["passed"] else 1)
     else:
         parser.print_help()
