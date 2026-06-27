@@ -73,6 +73,8 @@ EXACT_ALIAS_MAP = {
     "opencode-mimo-v2.5-pro": "opencode-go-mimo-v2-5-pro",
     "opencode-mimo": "opencode-go-mimo-v2-5",
     "opencode-mimo-v2.5": "opencode-go-mimo-v2-5",
+    "opencode-ds4pro": "opencode-go-deepseek-v4-pro",
+    "opencode-deepseek-v4-pro": "opencode-go-deepseek-v4-pro",
 }
 
 # Ambiguous aliases → list of candidate exact_model_ids
@@ -111,6 +113,7 @@ AMBIGUOUS_ALIAS_MAP = {
         "opencode-go-qwen3-7-plus",
         "opencode-go-mimo-v2-5-pro",
         "opencode-go-mimo-v2-5",
+        "opencode-go-deepseek-v4-pro",
     ],
     "opencode-go": [
         "opencode-go-deepseek-v4-flash",
@@ -121,6 +124,7 @@ AMBIGUOUS_ALIAS_MAP = {
         "opencode-go-qwen3-7-plus",
         "opencode-go-mimo-v2-5-pro",
         "opencode-go-mimo-v2-5",
+        "opencode-go-deepseek-v4-pro",
     ],
 }
 

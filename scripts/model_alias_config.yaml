@@ -416,3 +416,17 @@ aliases:
     status: review_required
     cost: free
     notes: "Hermes opencode-go model sync v1"
+
+  opencode-ds4pro:
+    provider: opencode-go
+    model: deepseek-v4-pro
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model: deepseek-v4-pro (alias: opencode-ds4pro)"
+
+  opencode-deepseek-v4-pro:
+    provider: opencode-go
+    model: deepseek-v4-pro
+    status: review_required
+    cost: free
+    notes: "Hermes opencode-go model: deepseek-v4-pro (alias: opencode-ds4pro)"
