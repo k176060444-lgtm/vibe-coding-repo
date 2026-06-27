@@ -83,7 +83,7 @@ def test_recommend_reviewer_returns_error():
 # ── 4. route_all() outputs 9 roles ────────────────────────────────────
 
 def test_route_all_9_roles():
-    """route_all() returns exactly 9 roles."""
+    """route_all() returns exactly 9 business roles (excluding _gate_results metadata)."""
     from vibe_model_routing_policy import route_all
     result = route_all()
     expected_roles = [
@@ -93,7 +93,11 @@ def test_route_all_9_roles():
     ]
     for role in expected_roles:
         assert role in result, f"Missing role: {role}"
-    assert len(result) == 9, f"Expected 9 roles, got {len(result)}"
+    # Filter out metadata keys (like _gate_results) before counting
+    business_roles = {k: v for k, v in result.items() if not k.startswith("_")}
+    assert len(business_roles) == 9, (
+        f"Expected 9 business roles, got {len(business_roles)}: "
+        f"{sorted(business_roles.keys())}")
 
 
 def test_route_all_orchestrator_21bao():
@@ -109,18 +113,22 @@ def test_route_all_orchestrator_21bao():
 # ── 5. operator_selection_required and fallback_count ─────────────────
 
 def test_route_all_operator_selection_required():
-    """Every role in route_all has operator_selection_required=true."""
+    """Every business role in route_all has operator_selection_required=true."""
     from vibe_model_routing_policy import route_all
     result = route_all()
     for role, rec in result.items():
+        if role.startswith("_"):
+            continue  # Skip metadata keys like _gate_results
         assert rec.get("operator_selection_required") is True, f"{role}: not operator_selection_required"
 
 
 def test_route_all_fallback_count_zero():
-    """Every role in route_all has fallback_count=0."""
+    """Every business role in route_all has fallback_count=0."""
     from vibe_model_routing_policy import route_all
     result = route_all()
     for role, rec in result.items():
+        if role.startswith("_"):
+            continue  # Skip metadata keys like _gate_results
         assert rec.get("fallback_count") == 0, f"{role}: fallback_count={rec.get('fallback_count')}"
 
 
@@ -131,6 +139,8 @@ def test_route_all_health_unknown_not_online():
     from vibe_model_routing_policy import route_all
     result = route_all()
     for role, rec in result.items():
+        if role.startswith("_"):
+            continue  # Skip metadata keys like _gate_results
         attrib = rec.get("node_attribution", {})
         health = attrib.get("health_status", "N/A")
         assert health != "ONLINE", f"{role}: health=ONLINE (should be UNKNOWN)"
@@ -150,10 +160,12 @@ def test_route_all_health_unknown_not_offline():
 # ── 7. node_isolation and physical_isolation ──────────────────────────
 
 def test_route_all_physical_isolation():
-    """route_all() claims physical_isolation_claimed=true for all roles."""
+    """route_all() claims physical_isolation_claimed=true for all business roles."""
     from vibe_model_routing_policy import route_all
     result = route_all()
     for role, rec in result.items():
+        if role.startswith("_"):
+            continue  # Skip metadata keys like _gate_results
         assert rec.get("physical_isolation_claimed") is True, f"{role}: not physical"
 
 
@@ -162,6 +174,8 @@ def test_route_all_no_logical_node_only():
     from vibe_model_routing_policy import route_all
     result = route_all()
     for role, rec in result.items():
+        if role.startswith("_"):
+            continue  # Skip metadata keys like _gate_results
         assert rec.get("node_isolation") != "logical_only", f"{role}: still logical_only"
 
 
@@ -172,7 +186,9 @@ def test_route_all_three_nodes():
     from vibe_model_routing_policy import route_all
     result = route_all()
     nodes = set()
-    for rec in result.values():
+    for role, rec in result.items():
+        if role.startswith("_"):
+            continue  # Skip metadata keys like _gate_results
         nid = rec.get("planned_node")
         if nid:
             nodes.add(nid)
@@ -186,7 +202,9 @@ def test_route_all_21bao_local_exec():
     """21bao transport is local-exec, not ssh."""
     from vibe_model_routing_policy import route_all
     result = route_all()
-    for rec in result.values():
+    for role, rec in result.items():
+        if role.startswith("_"):
+            continue  # Skip metadata keys like _gate_results
         attrib = rec.get("node_attribution", {})
         if attrib.get("node_id") == "21bao":
             assert attrib.get("transport") == "local-exec", f"21bao transport={attrib.get('transport')}"

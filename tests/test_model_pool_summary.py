@@ -82,10 +82,21 @@ class TestSummarizeModel:
 class TestSummarizeOpencodeModels:
     """Integration test: reads actual model_pool.yaml from repo."""
 
-    def test_returns_8_opencode_go_models(self):
+    def test_returns_all_opencode_go_models(self):
+        """Returns all opencode-go models from model_pool.yaml (dynamic count).
+
+        I23 authorized: 9 opencode-go models (8 original + deepseek-v4-pro).
+        """
         yaml_path = _REPO_ROOT / "scripts" / "model_pool.yaml"
         summaries = summarize_opencode_models(yaml_path)
-        assert len(summaries) == 8
+        # Dynamic: count matches YAML, not hardcoded
+        import yaml as _yaml
+        with open(yaml_path) as f:
+            pool = _yaml.safe_load(f)
+        expected = sum(1 for m in pool.get("models", [])
+                       if m.get("provider") == "opencode-go")
+        assert len(summaries) == expected, (
+            f"Expected {expected} opencode-go models, got {len(summaries)}")
         # All should mention provider=opencode-go
         for s in summaries:
             assert "provider=opencode-go" in s
@@ -98,11 +109,13 @@ class TestSummarizeOpencodeModels:
         assert "enabled" in canary_lines[0]
         assert "fallback=none" in canary_lines[0]
 
-    def test_seven_disabled_models(self):
+    def test_all_opencode_go_enabled(self):
+        """All opencode-go models are enabled per I23 authorization."""
         yaml_path = _REPO_ROOT / "scripts" / "model_pool.yaml"
         summaries = summarize_opencode_models(yaml_path)
         disabled = [s for s in summaries if "disabled" in s]
-        assert len(disabled) == 7
+        assert len(disabled) == 0, (
+            f"Expected 0 disabled opencode-go models, got {len(disabled)}: {disabled}")
 
     def test_missing_file_returns_empty(self, tmp_path):
         summaries = summarize_opencode_models(tmp_path / "nonexistent.yaml")

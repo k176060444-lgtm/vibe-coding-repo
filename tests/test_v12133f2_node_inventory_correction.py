@@ -4,8 +4,9 @@ import os
 import sys
 import json
 
-WORKTREE = "/home/vibeworker/vibedev/worktrees/v12133f2a-node-inventory-correction"
-sys.path.insert(0, os.path.join(WORKTREE, "scripts"))
+# Use local scripts/ directory (not hardcoded worktree path)
+_SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "scripts")
+sys.path.insert(0, os.path.abspath(_SCRIPTS_DIR))
 
 from vibe_worker_registry import (
     DEFAULT_WORKERS, WorkerRegistry, WorkerNode, NodeStatus, TaskType,
