@@ -535,3 +535,190 @@ models:
   notes: 'Xiaomi MiMo V2.5 Omni (pay-as-you-go). Base URL: https://api.xiaomimimo.com/v1'
   status: temporary_unavailable
   reason: HTTP_401_INVALID_API_KEY
+- id: opencode-go-glm-5-2
+  alias:
+  - opencode-glm52
+  - opencode-glm-5.2
+  provider: opencode-go
+  model: glm-5.2
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  priority: 23
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: glm-5.2 (alias: opencode-glm52)'
+- id: opencode-go-glm-5-1
+  alias:
+  - opencode-glm51
+  - opencode-glm-5.1
+  provider: opencode-go
+  model: glm-5.1
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  priority: 24
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: glm-5.1 (alias: opencode-glm51)'
+- id: opencode-go-deepseek-v4-flash
+  alias:
+  - opencode-ds4flash
+  - opencode-deepseek-v4-flash
+  provider: opencode-go
+  model: deepseek-v4-flash
+  key_env: ""
+  base_url_env: ""
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  - fast
+  priority: 25
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: deepseek-v4-flash (alias: opencode-ds4flash)'
+- id: opencode-go-kimi-k2-6
+  alias:
+  - opencode-kimi26
+  - opencode-kimi-k2.6
+  provider: opencode-go
+  model: kimi-k2.6
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  priority: 26
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: kimi-k2.6 (alias: opencode-kimi26)'
+- id: opencode-go-qwen3-7-max
+  alias:
+  - opencode-qwen37max
+  - opencode-qwen3.7-max
+  provider: opencode-go
+  model: qwen3.7-max
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  - strong
+  priority: 27
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: qwen3.7-max (alias: opencode-qwen37max)'
+- id: opencode-go-qwen3-7-plus
+  alias:
+  - opencode-qwen37plus
+  - opencode-qwen3.7-plus
+  provider: opencode-go
+  model: qwen3.7-plus
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  priority: 28
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: qwen3.7-plus (alias: opencode-qwen37plus)'
+- id: opencode-go-mimo-v2-5-pro
+  alias:
+  - opencode-mimopro
+  - opencode-mimo-v2.5-pro
+  provider: opencode-go
+  model: mimo-v2.5-pro
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  - strong
+  priority: 29
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: mimo-v2.5-pro (alias: opencode-mimopro)'
+- id: opencode-go-mimo-v2-5
+  alias:
+  - opencode-mimo
+  - opencode-mimo-v2.5
+  provider: opencode-go
+  model: mimo-v2.5
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  priority: 30
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: mimo-v2.5 (alias: opencode-mimo)'
