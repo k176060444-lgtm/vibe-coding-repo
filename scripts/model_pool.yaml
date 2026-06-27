@@ -431,6 +431,196 @@ models:
   smoke_results: {}
   source: migrated-from-model_alias_config.yaml
   notes: 'Migrated alias group: grok, grok-3'
+- id: deepseek-plan-deepseek-v4-pro
+  alias:
+  - deepseek-v4-pro
+  - ds-v4-pro
+  - deepseek-pro
+  provider: deepseek-plan
+  model: deepseek-v4-pro
+  key_env: OPENCODE_DEEPSEEK_API_KEY
+  base_url_env: OPENCODE_DEEPSEEK_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: paid
+  capability_tags:
+  - code
+  - strong
+  priority: 20
+  fallback_policy: none
+  smoke_required: true
+  smoke_results:
+    5bao:
+      status: unverified
+      last_verified: null
+      smoke_phase: null
+      wrapper: null
+      invocation: null
+    9bao:
+      status: unverified
+      last_verified: null
+      smoke_phase: null
+      wrapper: null
+      invocation: null
+  source: i15-pool-correction
+  notes: 'Added by I15: node-configured model from 5bao/9bao opencode.jsonc'
+- id: minimax-plan-minimax-m3
+  alias:
+  - minimax-m3
+  - m3
+  - minimax-m3
+  provider: minimax-plan
+  model: MiniMax-M3
+  key_env: OPENCODE_MINIMAX_CN_API_KEY
+  base_url_env: OPENCODE_MINIMAX_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: paid
+  capability_tags:
+  - code
+  - chat
+  priority: 21
+  fallback_policy: none
+  smoke_required: true
+  smoke_results:
+    5bao:
+      status: unverified
+      last_verified: null
+      smoke_phase: null
+      wrapper: null
+      invocation: null
+    9bao:
+      status: unverified
+      last_verified: null
+      smoke_phase: null
+      wrapper: null
+      invocation: null
+  source: i15-pool-correction
+  notes: 'Added by I15: route-all 8/9 roles use minimax-m3; matches 5bao/9bao opencode.jsonc'
+- id: opencode-deepseek-v4-flash-free
+  alias:
+  - opencode-ds4flash-free
+  - deepseek-v4-flash-free
+  provider: opencode
+  model: deepseek-v4-flash-free
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: free
+  capability_tags:
+  - code
+  - fast
+  - free
+  priority: 22
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: i15-pool-correction
+  notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
+- id: opencode-mimo-v2-5-free
+  alias:
+  - opencode-mimo-free
+  - mimo-v2.5-free
+  provider: opencode
+  model: mimo-v2.5-free
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: free
+  capability_tags:
+  - code
+  - free
+  priority: 23
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: i15-pool-correction
+  notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
+- id: opencode-nemotron-3-ultra-free
+  alias:
+  - opencode-nemotron-free
+  - nemotron-3-ultra-free
+  provider: opencode
+  model: nemotron-3-ultra-free
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: free
+  capability_tags:
+  - code
+  - strong
+  - free
+  priority: 24
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: i15-pool-correction
+  notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
+- id: opencode-north-mini-code-free
+  alias:
+  - opencode-north-free
+  - north-mini-code-free
+  provider: opencode
+  model: north-mini-code-free
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: free
+  capability_tags:
+  - code
+  - fast
+  - free
+  priority: 25
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: i15-pool-correction
+  notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
+- id: opencode-big-pickle
+  alias:
+  - opencode-big-pickle
+  - big-pickle
+  provider: opencode
+  model: big-pickle
+  key_env: ""
+  base_url_env: ""
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: free
+  capability_tags:
+  - general
+  - free
+  priority: 26
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: i15-pool-correction
+  notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
 - id: xiaomi-mimo-v2-5-pro
   alias:
   - mimo
@@ -541,8 +731,8 @@ models:
   - opencode-glm-5.2
   provider: opencode-go
   model: glm-5.2
-  key_env: ""
-  base_url_env: ""
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
   enabled: false
   quarantined: false
   allowed_nodes:
@@ -552,7 +742,7 @@ models:
   cost: free
   capability_tags:
   - coding
-  priority: 23
+  priority: 27
   fallback_policy: none
   smoke_required: true
   smoke_results: {}
@@ -564,102 +754,8 @@ models:
   - opencode-glm-5.1
   provider: opencode-go
   model: glm-5.1
-  key_env: ""
-  base_url_env: ""
-  enabled: false
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  - win
-  cost: free
-  capability_tags:
-  - coding
-  priority: 24
-  fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: glm-5.1 (alias: opencode-glm51)'
-- id: opencode-go-deepseek-v4-flash
-  alias:
-  - opencode-ds4flash
-  - opencode-deepseek-v4-flash
-  provider: opencode-go
-  model: deepseek-v4-flash
-  key_env: ""
-  base_url_env: ""
-  enabled: true
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  - win
-  cost: free
-  capability_tags:
-  - coding
-  - fast
-  priority: 25
-  fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: deepseek-v4-flash (alias: opencode-ds4flash)'
-- id: opencode-go-kimi-k2-6
-  alias:
-  - opencode-kimi26
-  - opencode-kimi-k2.6
-  provider: opencode-go
-  model: kimi-k2.6
-  key_env: ""
-  base_url_env: ""
-  enabled: false
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  - win
-  cost: free
-  capability_tags:
-  - coding
-  priority: 26
-  fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: kimi-k2.6 (alias: opencode-kimi26)'
-- id: opencode-go-qwen3-7-max
-  alias:
-  - opencode-qwen37max
-  - opencode-qwen3.7-max
-  provider: opencode-go
-  model: qwen3.7-max
-  key_env: ""
-  base_url_env: ""
-  enabled: false
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  - win
-  cost: free
-  capability_tags:
-  - coding
-  - strong
-  priority: 27
-  fallback_policy: none
-  smoke_required: true
-  smoke_results: {}
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: qwen3.7-max (alias: opencode-qwen37max)'
-- id: opencode-go-qwen3-7-plus
-  alias:
-  - opencode-qwen37plus
-  - opencode-qwen3.7-plus
-  provider: opencode-go
-  model: qwen3.7-plus
-  key_env: ""
-  base_url_env: ""
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
   enabled: false
   quarantined: false
   allowed_nodes:
@@ -674,15 +770,62 @@ models:
   smoke_required: true
   smoke_results: {}
   source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: qwen3.7-plus (alias: opencode-qwen37plus)'
-- id: opencode-go-mimo-v2-5-pro
+  notes: 'Hermes opencode-go model: glm-5.1 (alias: opencode-glm51)'
+- id: opencode-go-deepseek-v4-flash
   alias:
-  - opencode-mimopro
-  - opencode-mimo-v2.5-pro
+  - opencode-ds4flash
+  - opencode-deepseek-v4-flash
   provider: opencode-go
-  model: mimo-v2.5-pro
-  key_env: ""
-  base_url_env: ""
+  model: deepseek-v4-flash
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  - fast
+  priority: 29
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: deepseek-v4-flash (alias: opencode-ds4flash)'
+- id: opencode-go-kimi-k2-6
+  alias:
+  - opencode-kimi26
+  - opencode-kimi-k2.6
+  provider: opencode-go
+  model: kimi-k2.6
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  priority: 30
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: kimi-k2.6 (alias: opencode-kimi26)'
+- id: opencode-go-qwen3-7-max
+  alias:
+  - opencode-qwen37max
+  - opencode-qwen3.7-max
+  provider: opencode-go
+  model: qwen3.7-max
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
   enabled: false
   quarantined: false
   allowed_nodes:
@@ -693,7 +836,54 @@ models:
   capability_tags:
   - coding
   - strong
-  priority: 29
+  priority: 31
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: qwen3.7-max (alias: opencode-qwen37max)'
+- id: opencode-go-qwen3-7-plus
+  alias:
+  - opencode-qwen37plus
+  - opencode-qwen3.7-plus
+  provider: opencode-go
+  model: qwen3.7-plus
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  priority: 32
+  fallback_policy: none
+  smoke_required: true
+  smoke_results: {}
+  source: hermes_provider_sync
+  notes: 'Hermes opencode-go model: qwen3.7-plus (alias: opencode-qwen37plus)'
+- id: opencode-go-mimo-v2-5-pro
+  alias:
+  - opencode-mimopro
+  - opencode-mimo-v2.5-pro
+  provider: opencode-go
+  model: mimo-v2.5-pro
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
+  enabled: false
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  - win
+  cost: free
+  capability_tags:
+  - coding
+  - strong
+  priority: 33
   fallback_policy: none
   smoke_required: true
   smoke_results: {}
@@ -705,8 +895,8 @@ models:
   - opencode-mimo-v2.5
   provider: opencode-go
   model: mimo-v2.5
-  key_env: ""
-  base_url_env: ""
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
   enabled: false
   quarantined: false
   allowed_nodes:
@@ -716,7 +906,7 @@ models:
   cost: free
   capability_tags:
   - coding
-  priority: 30
+  priority: 34
   fallback_policy: none
   smoke_required: true
   smoke_results: {}
