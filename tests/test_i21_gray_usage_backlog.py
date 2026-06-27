@@ -80,6 +80,109 @@ class TestBacklogExists:
             assert not re.search(pat, content), f"Secret pattern found: {pat}"
 
 
+class TestBacklogCountConsistency:
+    """Verify all counts in sections 1, 3, and 4 match actual issue data."""
+
+    def _parse_all_issues(self):
+        """Parse all issues from the backlog."""
+        content = load_backlog()
+        # Find all issue blocks
+        blocks = content.split('| **issue_id** |')
+        issues = []
+        for block in blocks[1:]:
+            block = '| **issue_id** |' + block
+            iid_m = re.search(r'\*\*issue_id\*\*\s*\|\s*(\S+)', block)
+            sev_m = re.search(r'\*\*severity\*\*\s*\|\s*(\S+)', block)
+            phase_m = re.search(r'\*\*proposed_fix_phase\*\*\s*\|\s*(\S+)', block)
+            cat_m = re.search(r'\*\*category\*\*', block)
+            if iid_m:
+                issues.append({
+                    'issue_id': iid_m.group(1),
+                    'severity': sev_m.group(1).lower() if sev_m else 'unknown',
+                    'proposed_fix_phase': phase_m.group(1) if phase_m else 'unknown',
+                })
+        return issues
+
+    def test_total_count_30_non_enhancement(self):
+        issues = self._parse_all_issues()
+        non_enh = [i for i in issues if not i['issue_id'].startswith('ENH')]
+        enh = [i for i in issues if i['issue_id'].startswith('ENH')]
+        assert len(non_enh) == 30, f"Expected 30 non-enhancement, got {len(non_enh)}"
+        assert len(enh) == 6, f"Expected 6 enhancement, got {len(enh)}"
+
+    def test_severity_counts_match(self):
+        issues = self._parse_all_issues()
+        non_enh = [i for i in issues if not i['issue_id'].startswith('ENH')]
+        actual = {}
+        for i in non_enh:
+            sev = i['severity']
+            actual[sev] = actual.get(sev, 0) + 1
+        # Read the executive summary table
+        content = load_backlog()
+        table_sev = {}
+        for line in content.split('\n'):
+            if 'Blockers' in line and '|' in line:
+                m = re.search(r'\|\s*(\d+)\s*\|', line)
+                if m: table_sev['blocker'] = int(m.group(1))
+            elif 'High priority' in line and '|' in line:
+                m = re.search(r'\|\s*(\d+)\s*\|', line)
+                if m: table_sev['high'] = int(m.group(1))
+            elif 'Medium priority' in line and '|' in line:
+                m = re.search(r'\|\s*(\d+)\s*\|', line)
+                if m: table_sev['medium'] = int(m.group(1))
+            elif 'Low priority' in line and '|' in line:
+                m = re.search(r'\|\s*(\d+)\s*\|', line)
+                if m: table_sev['low'] = int(m.group(1))
+        for sev in ['blocker', 'high', 'medium', 'low']:
+            assert table_sev.get(sev, -1) == actual.get(sev, -1), \
+                f"Severity {sev}: table says {table_sev.get(sev)}, actual={actual.get(sev)}"
+
+    def test_no_duplicate_ids(self):
+        issues = self._parse_all_issues()
+        ids = [i['issue_id'] for i in issues]
+        dupes = [x for x in ids if ids.count(x) > 1]
+        assert len(dupes) == 0, f"Duplicate issue_ids: {set(dupes)}"
+
+    def test_fix_order_refs_exist(self):
+        """All issue IDs in the fix order table exist in the catalog."""
+        issues = self._parse_all_issues()
+        all_ids = set(i['issue_id'] for i in issues)
+        content = load_backlog()
+        # Extract issues from fix order table
+        fix_section = content.split('## 4. Recommended Fix Order')[1].split('## 5.')[0]
+        fix_ids = re.findall(r'([A-Z]+-\d{3})', fix_section)
+        fix_ids = set(fix_ids)
+        missing = fix_ids - all_ids
+        assert not missing, f"Fix order references non-existent IDs: {missing}"
+
+    def test_fix_order_phase_consistency(self):
+        """Fix order table phase assignments match proposed_fix_phase."""
+        issues = self._parse_all_issues()
+        non_enh = [i for i in issues if not i['issue_id'].startswith('ENH')]
+        # Group by proposed_fix_phase
+        phase_groups = {}
+        for i in non_enh:
+            p = i['proposed_fix_phase']
+            if p not in phase_groups:
+                phase_groups[p] = set()
+            phase_groups[p].add(i['issue_id'])
+        # Check fix order table row counts vs proposed_fix_phase counts
+        content = load_backlog()
+        fix_section = content.split('## 4. Recommended Fix Order')[1].split('## 5.')[0]
+        for line in fix_section.split('\n'):
+            m = re.search(r'\*\*(I\d+)\*\*\s*\|\s*([A-Z,\s-]+?)\s*\|', line)
+            if m:
+                phase = m.group(1)
+                listed_ids = set(re.findall(r'([A-Z]+-\d{3})', m.group(2)))
+                if phase in phase_groups:
+                    # Every listed ID must have this phase
+                    for iid in listed_ids:
+                        assert iid in phase_groups[phase], \
+                            f"{iid} listed in {phase} but proposed_fix_phase says otherwise"
+                    # Some IDs in phase_groups may not be in fix order table
+                    # (that's OK for small ones) — only test listed IDs match
+
+
 class TestBacklogIssueFields:
     """Verify all issues have required fields and valid values."""
 

@@ -21,13 +21,13 @@ category. It distinguishes between:
 
 | Type | Count | Action |
 |------|:----:|--------|
-| **Blockers** (prevents gray usage) | 2 | Fix before first real dispatch |
-| **High priority** (significant risk) | 5 | Fix after blockers, before expansion |
-| **Medium priority** (quality gap) | 6 | Fix during stabilization |
-| **Low priority** (nice to have) | 4 | Fix as time permits |
-| **Technical debt** (no runtime impact) | 5 | Continuous improvement |
-| **Future enhancement** (new feature) | 6 | Deferred — not for current stabilization |
-| **Total (non-enhancement)** | **22** | — |
+|| **Blockers** (prevents gray usage) | 2 | Fix before first real dispatch |
+|| **High priority** (significant risk) | 8 | Fix after blockers, before expansion |
+|| **Medium priority** (quality gap) | 12 | Fix during stabilization |
+|| **Low priority** (nice to have) | 8 | Fix as time permits |
+|| **Technical debt** (no runtime impact) | 5 | Continuous improvement |
+|| **Future enhancement** (new feature) | 6 | Deferred — not for current stabilization |
+|| **Total (non-enhancement)** | **30** | — |
 
 ---
 
@@ -527,20 +527,21 @@ category. It distinguishes between:
 ## 3. Priority Matrix
 
 ```
-SEVERITY     | Blockers  | High      | Medium    | Low
--------------|-----------|-----------|-----------|-----------
-Count        | 2         | 5         | 6         | 4
-Types        | ARCH-001  | ARCH-003  | ARCH-002  | WRKR-003
-             | DSP-002   | WRKR-001  | DSP-001   | POOL-002
-             |           | WRKR-002  | DSP-004   | POOL-003
-             |           | DSP-003   | RSYNC-001 | GIT-002
-             |           | POOL-001  | RSYNC-002 | GIT-003
-             |           | WIN-001   | GIT-001   | DOC-002
-             |           | WIN-002   | RPT-001   |
-             |           | TEST-002  | RPT-002   |
-             |           |           | TEST-001  |
-             |           |           | WIN-003   |
-             |           |           | DOC-001   |
+SEVERITY     | Blockers  | High      | Medium     | Low
+-------------|-----------|-----------|------------|-----------
+Count        | 2         | 8         | 12         | 8
+Types        | ARCH-001  | ARCH-003  | ARCH-002   | WRKR-003
+             | DSP-002   | WRKR-001  | DSP-001    | POOL-002
+             |           | WRKR-002  | DSP-004    | POOL-003
+             |           | DSP-003   | RSYNC-001  | OCR-001
+             |           | POOL-001  | RSYNC-002  | OCR-003
+             |           | WIN-001   | OCR-002    | GIT-002
+             |           | WIN-002   | GIT-001    | GIT-003
+             |           | TEST-002  | WIN-003    | DOC-002
+             |           |           | RPT-001    |
+             |           |           | RPT-002    |
+             |           |           | TEST-001   |
+             |           |           | DOC-001    |
 ```
 
 **Known Blockers (must fix before first real dispatch):**
@@ -563,26 +564,28 @@ Types        | ARCH-001  | ARCH-003  | ARCH-002  | WRKR-003
 
 | Priority | Phase | Issues | Category | Effort |
 |:--------:|:-----:|--------|----------|:------:|
-| 1 | **I22** | ARCH-001, DSP-002, ARCH-003, POOL-001, WIN-001 | Core gates + hardening | Medium |
-| 2 | **I23** | WRKR-001, WRKR-002, DSP-003, RSYNC-001, RSYNC-002, WIN-002, WIN-003, RPT-001, RPT-002, TEST-001 | Runtime + reporting | Large |
-| 3 | **I24** | DSP-001, DSP-004, POOL-002, OCR-001, OCR-002, DOC-001 | Polish + documentation | Medium |
-| 4 | **I25** | ARCH-002, WRKR-003, POOL-003, GIT-002 | Low-priority hardening | Small |
+| 1 | **I22** | ARCH-001, ARCH-003, WRKR-001, DSP-002, POOL-001, WIN-001, TEST-001 | Core gates + hardening | Medium |
+| 2 | **I23** | ARCH-002, WRKR-002, DSP-003, RSYNC-001, RSYNC-002, GIT-001, WIN-002, WIN-003, RPT-001, RPT-002, TEST-002 | Runtime + reporting | Large |
+| 3 | **I24** | WRKR-003, DSP-001, DSP-004, POOL-002, OCR-001, OCR-002, DOC-001 | Polish + documentation | Medium |
+| 4 | **I25** | POOL-003, GIT-002 | Low-priority hardening | Small |
 | 5 | **future** | ENH-001 through ENH-006, GIT-003, OCR-003, DOC-002 | New features | Future |
 
 ### Phase I22 — Core Stabilization (gates + hardening)
 - ARCH-001: Add runtime SSH audit to architecture contract
-- DSP-002: Add operator approval gate before route-all dispatch
 - ARCH-003: Enforce manual_only flag in dispatcher
+- WRKR-001: Add SSH reachability probe to registry health check
+- DSP-002: Add operator approval gate before route-all dispatch
 - POOL-001: Block extra visible models in alias resolver
 - WIN-001: Fix python3→python on Windows (shebang/script fixes)
 - TEST-001: Systematically classify pre-existing failures
 
 ### Phase I23 — Runtime Reliability
-- WRKR-001: Add SSH reachability probe to registry health check
+- ARCH-002: Add health probe mechanism for all nodes
 - WRKR-002: Implement auto-retry / failover on worker failure
 - DSP-003: Enforce fallback_allowed at runtime
 - RSYNC-001: Add periodic node config drift detection
 - RSYNC-002: Automate rollback script
+- GIT-001: Implement auto-update workflow for PR base ref
 - WIN-002: Test 21bao as worker with opencode dispatch
 - WIN-003: Standardize path handling
 - RPT-001: Define phase report schema
@@ -590,6 +593,7 @@ Types        | ARCH-001  | ARCH-003  | ARCH-002  | WRKR-003
 - TEST-002: Add first runtime integration test
 
 ### Phase I24 — Polish
+- WRKR-003: Set explicit SSH key path in registry
 - DSP-001: Formal dispatch manifest schema + validation
 - DSP-004: Implement planned-vs-actual audit
 - POOL-002: Fix id→model_id consistency
