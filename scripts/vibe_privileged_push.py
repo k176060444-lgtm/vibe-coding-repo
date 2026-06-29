@@ -5,9 +5,8 @@ Reads an approved action from the approval directory, validates all
 constraints, and performs token-aware preflight before push.
 
 Repo Trust Policy:
-  - Self-repo (k176060444-lgtm/vibe-coding-repo): low-risk push allowed
-    WITHOUT human approval, subject to policy gate (forbidden paths,
-    no force push, no secrets/CI/workflow/provider/SSH).
+  - All repos (including self-repo k176060444-lgtm/vibe-coding-repo): push REQUIRES
+    human approval via privileged action. No auto-allow.
   - External repos: push REQUIRES human approval via privileged action.
     Fetch/diff/merge dry-run allowed without token or approval.
 
@@ -38,7 +37,7 @@ from pathlib import Path
 VERSION = "1.2.0"
 
 # ── Repo Trust Policy ──────────────────────────────────────────────────
-# Self-repo: VibeCoding dedicated work repo — low-risk push auto-allowed
+# All repos (including self-repo): human approval required
 SELF_REPO = "k176060444-lgtm/vibe-coding-repo"
 
 # Self-repo: any branch allowed for push (not just test prefix)
@@ -164,7 +163,7 @@ def _classify_repo_trust(repo):
         requires_human_approval: bool
     """
     if repo == SELF_REPO:
-        return "trusted-self", False
+        return "trusted-self", True  # baseline01: all repos require approval
     return "protected-external", True
 
 
@@ -183,18 +182,12 @@ def _validate_push(record):
     repo = record.get("repo", "")
     trust_level, requires_human_approval = _classify_repo_trust(repo)
 
-    # 1. For external repos: status must be approved
-    if requires_human_approval:
-        if record.get("status") != "approved":
-            blockers.append(
-                f"external repo '{repo}' requires human approval "
-                f"(status={record.get('status')}, expected=approved)"
-            )
-    else:
-        # Self-repo: status can be pending (auto-allow) or approved
-        status = record.get("status")
-        if status not in ("pending", "approved"):
-            blockers.append(f"status={status}, expected=pending or approved")
+    # 1. All repos: status must be approved
+    if record.get("status") != "approved":
+        blockers.append(
+            f"repo '{repo}' requires human approval "
+            f"(status={record.get('status')}, expected=approved)"
+        )
 
     # 2. Required fields completeness
     required = ["action_id", "repo", "branch", "action", "base_sha"]
@@ -234,7 +227,7 @@ def _validate_push(record):
 
     # 9. Add trust info to warnings
     if trust_level == "trusted-self":
-        warnings.append(f"repo trust: {trust_level} — push auto-allowed (no human approval required)")
+        warnings.append(f"repo trust: {trust_level} — push requires human approval (baseline01)")
     else:
         warnings.append(f"repo trust: {trust_level} — push requires human approval")
 
