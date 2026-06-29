@@ -185,6 +185,95 @@ def test_T11_sync_contract():
     print(f"  PASS: sync contract: {len(data['plans'])} operations, write_blocked=True")
     return True
 
+# --- baseline01 G4 schema 1.1 additive tests ---
+
+def test_T12_g4_self_check():
+    """T12: self-check reports schema_version=1.1 with full coverage of new + legacy fields."""
+    out, rc = run_cmd("self-check")
+    data = json.loads(out)
+    assert data["status"] == "ok", f"Expected ok, got {data['status']}: {data}"
+    assert data["schema_version"] == "1.1"
+    assert data["expected_schema_version"] == "1.1"
+    total = data["total_models"]
+    nfc = data["new_field_counts"]
+    lfc = data["legacy_field_counts"]
+    assert nfc["canonical_provider"] == total
+    assert nfc["provider_namespace"] == total
+    assert nfc["primary_alias"] == total
+    assert lfc["provider"] == total
+    assert lfc["alias"] == total
+    print(f"  PASS: self-check: schema_version=1.1, {total} models, new+legacy fields all populated")
+    return True
+
+def test_T13_g4_validate_schema():
+    """T13: validate-schema confirms schema_version==1.1 + all G4 fields present."""
+    out, rc = run_cmd("validate-schema")
+    data = json.loads(out)
+    assert data["status"] == "ok", f"Expected ok, got {data['status']}: {data}"
+    assert data["schema_version"] == "1.1"
+    ms = data["migration_state"]
+    total = data["total_models"]
+    assert ms["has_canonical_provider"] == total
+    assert ms["has_provider_namespace"] == total
+    assert ms["has_primary_alias"] == total
+    assert data["error_count"] == 0
+    print(f"  PASS: validate-schema: 1.1 + {total}/{total} coverage")
+    return True
+
+def test_T14_g4_validate_backward_compat():
+    """T14: validate-backward-compat confirms legacy provider + alias(list) fields still readable."""
+    out, rc = run_cmd("validate-backward-compat")
+    data = json.loads(out)
+    assert data["status"] == "ok", f"Expected ok, got {data['status']}: {data}"
+    assert data["error_count"] == 0
+    print(f"  PASS: validate-backward-compat: legacy fields preserved across {data['total_models']} models")
+    return True
+
+def test_T15_g4_yaml_field_shape():
+    """T15: yaml inspection — every model entry has the G4 fields and legacy fields co-exist."""
+    import yaml
+    with open(SCRIPTS_DIR / "model_pool.yaml") as f:
+        pool = yaml.safe_load(f)
+    assert pool["schema_version"] == "1.1", f"schema_version is {pool.get('schema_version')!r}"
+    for m in pool["models"]:
+        mid = m["id"]
+        assert "canonical_provider" in m and m["canonical_provider"], f"{mid}: missing canonical_provider"
+        assert "provider_namespace" in m and m["provider_namespace"], f"{mid}: missing provider_namespace"
+        assert "primary_alias" in m and m["primary_alias"], f"{mid}: missing primary_alias"
+        # Legacy fields preserved
+        assert "provider" in m and m["provider"], f"{mid}: legacy provider missing"
+        assert isinstance(m["alias"], list), f"{mid}: legacy alias must remain a list"
+    print(f"  PASS: yaml field shape: schema_version=1.1 + new fields appended + legacy preserved")
+    return True
+
+def test_T16_g4_provider_namespace_default_unknown():
+    """T16: provider_namespace defaults to 'unknown' when no source-of-truth (no alias-based inference)."""
+    import yaml
+    with open(SCRIPTS_DIR / "model_pool.yaml") as f:
+        pool = yaml.safe_load(f)
+    unknown_count = sum(1 for m in pool["models"] if m.get("provider_namespace") == "unknown")
+    total = len(pool["models"])
+    # All entries currently default to "unknown" since no namespace_mapping was supplied at migrate time.
+    assert unknown_count == total, f"Expected all {total} entries provider_namespace='unknown', got {unknown_count}"
+    # Verify NO entry has provider_namespace == alias[0] (would indicate alias-based inference, forbidden)
+    for m in pool["models"]:
+        ns = m.get("provider_namespace")
+        primary_alias = m["alias"][0] if m.get("alias") else None
+        assert ns != primary_alias or ns == "unknown", \
+            f"{m['id']}: provider_namespace appears to be inferred from alias ({ns} == {primary_alias})"
+    print(f"  PASS: provider_namespace: {unknown_count}/{total} entries default to 'unknown' (no alias inference)")
+    return True
+
+def test_T17_g4_migrate_idempotent():
+    """T17: re-running migrate --apply is idempotent (no double-write, count=0 second pass)."""
+    out, rc = run_cmd("migrate --apply")
+    data = json.loads(out)
+    assert data["status"] == "ok", f"Expected ok, got {data['status']}"
+    second_change_count = data["change_count"]
+    assert second_change_count == 0, f"Second migrate should be a no-op; got {second_change_count} changes"
+    print(f"  PASS: migrate idempotent: second apply produced 0 changes")
+    return True
+
 # Run all tests
 tests = [
     test_T1_validate_full,
@@ -198,6 +287,12 @@ tests = [
     test_T9_freeze_with_evidence,
     test_T10_add_schema_v1_1,
     test_T11_sync_contract,
+    test_T12_g4_self_check,
+    test_T13_g4_validate_schema,
+    test_T14_g4_validate_backward_compat,
+    test_T15_g4_yaml_field_shape,
+    test_T16_g4_provider_namespace_default_unknown,
+    test_T17_g4_migrate_idempotent,
 ]
 
 passed = 0

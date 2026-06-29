@@ -1,10 +1,10 @@
 {
-  "schema_version": "1.0",
-  "generated_at": "2026-06-27T16:06:26.595689+00:00",
+  "schema_version": "1.1",
+  "generated_at": "2026-06-29T23:29:17.359700+00:00",
   "files": {
     "model_pool.yaml": {
-      "sha256": "d94677ded149dabb6f41e6905f8995361cd1591fed96bad11e45649fbe0611a4",
-      "size": 26065
+      "sha256": "465ad3139f1b72f741e2b89a6fc373888efbbe5904067ee97ce5c470ff292976",
+      "size": 29526
     }
   }
 }
