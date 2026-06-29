@@ -505,6 +505,265 @@ def cmd_validate_full(args):
     return True
 
 
+# --- baseline01 G4 helpers (schema 1.1 additive) ---
+
+# Field name sets — kept module-level so both validate-schema / validate-backward-compat
+# and the migrate command share a single source of truth.
+G4_NEW_MODEL_FIELDS = ("canonical_provider", "provider_namespace", "alias_g4")
+G4_LEGACY_MODEL_FIELDS = ("provider", "alias")  # alias is reused as both list (legacy) and string (new); see notes.
+G4_REQUIRED_NEW = ("canonical_provider", "provider_namespace", "alias_g4")
+
+
+def _get_new_alias(entry):
+    """Return the explicit single alias introduced in schema 1.1 (alias_g4)."""
+    return entry.get("alias_g4")
+
+
+def _resolve_provider_namespace(entry, namespace_mapping=None):
+    """Resolve provider_namespace with strict source-of-truth priority.
+
+    Priority:
+      1. entry-level explicit `provider_namespace` / `namespace` field
+      2. namespace_mapping[alias] reverse lookup (if a mapping table is supplied)
+      3. otherwise "unknown" — DO NOT infer from alias.
+    """
+    explicit = entry.get("provider_namespace") or entry.get("namespace")
+    if explicit:
+        return explicit
+    primary_alias = None
+    if isinstance(entry.get("alias_g4"), str) and entry.get("alias_g4"):
+        primary_alias = entry["alias_g4"]
+    elif entry.get("alias") and isinstance(entry["alias"], list) and entry["alias"]:
+        primary_alias = entry["alias"][0]
+    if primary_alias and namespace_mapping and primary_alias in namespace_mapping:
+        return namespace_mapping[primary_alias]
+    return "unknown"
+
+
+def cmd_validate_schema(args):
+    """Validate schema_version == 1.1 + every model entry has the new G4 fields.
+
+    Schema 1.1 is purely additive: legacy `provider` / `alias` (list) fields MUST
+    remain present (validated separately by validate-backward-compat). This
+    command only checks the additive layer.
+    """
+    pool = _load_pool()
+    schema_version = str(pool.get("schema_version", "1.0"))
+    models = pool.get("models", [])
+
+    errors = []
+    warnings = []
+    seen_migration_state = {"has_canonical_provider": 0, "has_provider_namespace": 0, "has_alias_g4": 0}
+
+    for i, m in enumerate(models):
+        mid = m.get("id")
+        if "canonical_provider" in m and m["canonical_provider"]:
+            seen_migration_state["has_canonical_provider"] += 1
+        else:
+            errors.append({"type": "MISSING_CANONICAL_PROVIDER", "id": mid, "index": i})
+
+        if "provider_namespace" in m and m["provider_namespace"]:
+            seen_migration_state["has_provider_namespace"] += 1
+        else:
+            errors.append({"type": "MISSING_PROVIDER_NAMESPACE", "id": mid, "index": i})
+
+        if "alias_g4" in m and m["alias_g4"]:
+            seen_migration_state["has_alias_g4"] += 1
+        else:
+            errors.append({"type": "MISSING_ALIAS_G4", "id": mid, "index": i})
+
+        ns = m.get("provider_namespace")
+        if ns is not None and ns != "unknown" and not isinstance(ns, str):
+            errors.append({"type": "INVALID_PROVIDER_NAMESPACE", "id": mid, "value": ns, "index": i})
+
+    if schema_version != "1.1":
+        errors.append({"type": "SCHEMA_VERSION_NOT_1_1", "expected": "1.1", "actual": schema_version})
+
+    status = "ok" if not errors else "ERRORS_FOUND"
+    result = {
+        "status": status,
+        "schema_version": schema_version,
+        "total_models": len(models),
+        "migration_state": seen_migration_state,
+        "error_count": len(errors),
+        "warning_count": len(warnings),
+        "errors": errors,
+        "warnings": warnings,
+    }
+    _output(result)
+    return status == "ok"
+
+
+def cmd_validate_backward_compat(args):
+    """Verify that legacy `provider` and `alias` (list) fields are still readable.
+
+    Schema 1.1 is additive only: legacy fields must remain present and readable
+    for downstream renderers and existing tests. This command confirms that.
+    """
+    pool = _load_pool()
+    models = pool.get("models", [])
+
+    errors = []
+    warnings = []
+
+    for i, m in enumerate(models):
+        mid = m.get("id")
+        if "provider" not in m or not m["provider"]:
+            errors.append({"type": "LEGACY_PROVIDER_MISSING", "id": mid, "index": i})
+        if "alias" not in m or not isinstance(m["alias"], list):
+            errors.append({"type": "LEGACY_ALIAS_LIST_MISSING", "id": mid, "index": i})
+        if "canonical_provider" in m and "provider" in m:
+            if m["canonical_provider"] != m["provider"]:
+                warnings.append({
+                    "type": "CANONICAL_PROVIDER_DIVERGES_FROM_LEGACY",
+                    "id": mid,
+                    "canonical": m["canonical_provider"],
+                    "legacy": m["provider"],
+                    "index": i,
+                })
+
+    status = "ok" if not errors else "ERRORS_FOUND"
+    result = {
+        "status": status,
+        "total_models": len(models),
+        "error_count": len(errors),
+        "warning_count": len(warnings),
+        "errors": errors,
+        "warnings": warnings,
+    }
+    _output(result)
+    return status == "ok"
+
+
+def cmd_self_check(args):
+    """Top-level self-check: schema_version + new field coverage + backward compat.
+
+    Returns combined verdict. Exits 0 only if all checks pass.
+    """
+    pool = _load_pool()
+    schema_version = str(pool.get("schema_version", "1.0"))
+    models = pool.get("models", [])
+
+    new_field_counts = {"canonical_provider": 0, "provider_namespace": 0, "alias_g4": 0}
+    legacy_field_counts = {"provider": 0, "alias": 0}
+
+    for m in models:
+        for k in new_field_counts:
+            if m.get(k):
+                new_field_counts[k] += 1
+        if m.get("provider"):
+            legacy_field_counts["provider"] += 1
+        if isinstance(m.get("alias"), list):
+            legacy_field_counts["alias"] += 1
+
+    result = {
+        "status": "ok",
+        "schema_version": schema_version,
+        "expected_schema_version": "1.1",
+        "total_models": len(models),
+        "new_field_counts": new_field_counts,
+        "legacy_field_counts": legacy_field_counts,
+        "summary": (
+            f"schema_version={schema_version} (expected 1.1); "
+            f"new_fields coverage: canonical_provider={new_field_counts['canonical_provider']}/{len(models)}, "
+            f"provider_namespace={new_field_counts['provider_namespace']}/{len(models)}, "
+            f"alias_g4={new_field_counts['alias_g4']}/{len(models)}; "
+            f"legacy_fields retained: provider={legacy_field_counts['provider']}/{len(models)}, "
+            f"alias(list)={legacy_field_counts['alias']}/{len(models)}"
+        ),
+    }
+
+    coverage_ok = all(v == len(models) for v in new_field_counts.values())
+    legacy_ok = all(v == len(models) for v in legacy_field_counts.values())
+    schema_ok = schema_version == "1.1"
+    if not (coverage_ok and legacy_ok and schema_ok):
+        result["status"] = "WARN"
+        result["issues"] = {
+            "coverage_ok": coverage_ok,
+            "legacy_ok": legacy_ok,
+            "schema_ok": schema_ok,
+        }
+
+    _output(result)
+    return result["status"] == "ok"
+
+
+def cmd_migrate(args):
+    """Apply the G4 additive migration to model_pool.yaml in place.
+
+    Idempotent: entries that already have alias_g4 / canonical_provider /
+    provider_namespace set are not overwritten. Legacy fields (`provider`,
+    `alias` list) are NEVER removed.
+    """
+    pool = _load_pool()
+    if str(pool.get("schema_version", "1.0")) != "1.1":
+        pool["schema_version"] = "1.1"
+
+    namespace_mapping = None
+    if args.namespace_mapping:
+        mapping_path = _resolve_path(args.namespace_mapping)
+        if mapping_path and mapping_path.exists():
+            try:
+                import yaml
+                with open(mapping_path, "r", encoding="utf-8") as f:
+                    namespace_mapping = yaml.safe_load(f) or {}
+            except Exception as e:
+                _output({"status": "WARN", "message": f"namespace_mapping load failed: {e}"})
+
+    changes = []
+    for i, m in enumerate(pool.get("models", [])):
+        mid = m.get("id")
+        before = {k: m.get(k) for k in G4_NEW_MODEL_FIELDS}
+
+        if not m.get("canonical_provider") and m.get("provider"):
+            m["canonical_provider"] = m["provider"]
+
+        if not m.get("provider_namespace"):
+            m["provider_namespace"] = _resolve_provider_namespace(m, namespace_mapping)
+
+        if not m.get("alias_g4"):
+            legacy_aliases = m.get("alias")
+            if isinstance(legacy_aliases, list) and legacy_aliases:
+                m["alias_g4"] = legacy_aliases[0]
+            else:
+                m["alias_g4"] = "unknown"
+
+        after = {k: m.get(k) for k in G4_NEW_MODEL_FIELDS}
+        for k in G4_NEW_MODEL_FIELDS:
+            if before.get(k) != after.get(k):
+                changes.append({"id": mid, "field": k, "before": before.get(k), "after": after.get(k)})
+
+    if args.apply:
+        pass  # fall through to apply
+    elif args.dry_run:
+        _output({
+            "status": "DRY_RUN",
+            "change_count": len(changes),
+            "changes": changes[:50],
+            "message": "Use --apply to commit migration.",
+        })
+        return True
+    else:
+        # No flag given — default to dry-run for safety.
+        _output({
+            "status": "DRY_RUN",
+            "change_count": len(changes),
+            "changes": changes[:50],
+            "message": "Default mode is dry-run; pass --apply to commit.",
+        })
+        return True
+
+    _save_pool(pool)
+    _output({
+        "status": "ok",
+        "change_count": len(changes),
+        "applied": len(changes),
+        "schema_version": pool.get("schema_version"),
+        "message": "Migration applied; legacy fields preserved.",
+    })
+    return True
+
+
 def _check_tracked_repo_secrets(patterns):
     """Quick check for inline secrets in tracked files."""
     findings = []
@@ -825,6 +1084,27 @@ def main():
     p_val = sub.add_parser("validate-full", help="Run full validation")
     p_val.add_argument("--json", action="store_true", help="JSON output (default)")
     p_val.set_defaults(func=cmd_validate_full)
+
+    # --- baseline01 G4 schema 1.1 validators (additive) ---
+    # NOTE: legacy model entry uses `alias` as a list (e.g. - haiku); the
+    # new schema 1.1 single-alias field is named `alias_g4` to avoid a
+    # YAML key collision with the existing list-typed `alias` field.
+    p_vschema = sub.add_parser("validate-schema", help="Validate schema_version==1.1 + G4 field coverage")
+    p_vschema.set_defaults(func=cmd_validate_schema)
+
+    p_vbc = sub.add_parser("validate-backward-compat", help="Verify legacy provider/alias(list) fields are still readable")
+    p_vbc.set_defaults(func=cmd_validate_backward_compat)
+
+    p_sc = sub.add_parser("self-check", help="Top-level self-check: schema + coverage + backward compat")
+    p_sc.set_defaults(func=cmd_self_check)
+
+    # migrate: apply G4 schema 1.1 additive migration to model_pool.yaml.
+    # Idempotent. Backward compatible (legacy fields preserved).
+    p_mig = sub.add_parser("migrate", help="Apply G4 schema 1.1 additive migration in place")
+    p_mig.add_argument("--dry-run", action="store_true", help="Show changes without writing")
+    p_mig.add_argument("--apply", action="store_true", help="Apply migration to model_pool.yaml")
+    p_mig.add_argument("--namespace-mapping", help="Optional path to alias->namespace mapping YAML")
+    p_mig.set_defaults(func=cmd_migrate, dry_run=True, apply=False)
 
     # freeze
     p_frz = sub.add_parser("freeze", help="Generate capability freeze snapshot")
