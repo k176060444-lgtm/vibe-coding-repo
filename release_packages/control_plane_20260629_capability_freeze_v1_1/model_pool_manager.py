@@ -1,0 +1,806 @@
+#!/usr/bin/env python3
+"""
+VibeDev Model Pool Manager CLI — maintain the central model pool from the command line.
+
+Usage:
+    python scripts/model_pool_manager.py list [--json]
+    python scripts/model_pool_manager.py add --id ID --alias ALIAS [--alias ALIAS2 ...] --provider P --model M --key-env KEY [options]
+    python scripts/model_pool_manager.py update ID [--provider P] [--model M] [--key-env KEY] [--base-url-env URL]
+                                       [--enable|--disable] [--quarantine|--unquarantine]
+                                       [--nodes NODE,...] [--notes TEXT] [--priority N]
+                                       [--capability-tags TAG,...] [--cost COST]
+                                       [--internal-provider-id PID] [--key-env-aliases KEY,...]
+                                       [--smoke-required BOOL] [--add-alias ALIAS] [--remove-alias ALIAS]
+                                       [--dry-run] [--apply]
+    python scripts/model_pool_manager.py remove ID [--dry-run] [--force] [--reason TEXT]
+    python scripts/model_pool_manager.py deprecate ID [--reason TEXT]
+    python scripts/model_pool_manager.py enable ID
+    python scripts/model_pool_manager.py disable ID
+    python scripts/model_pool_manager.py validate-full [--json]
+    python scripts/model_pool_manager.py freeze [--evidence PATH] [--output PATH]
+    python scripts/model_pool_manager.py sync [--nodes N,...]
+
+Output: all commands return JSON to stdout for machine consumption.
+"""
+
+import argparse
+import copy
+import json
+import os
+import shutil
+import sys
+import tempfile
+import textwrap
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from collections import OrderedDict
+
+# --- Paths ---
+SCRIPTS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPTS_DIR.parent
+DEFAULT_POOL = SCRIPTS_DIR / "model_pool.yaml"
+DEFAULT_EVIDENCE = SCRIPTS_DIR / "fixtures" / "credential_evidence_live.json"
+KNOWN_NODES = {"5bao", "9bao", "21bao", "win"}
+
+# --- Helpers ---
+
+def _load_pool(path=None):
+    """Load the current model pool YAML."""
+    import yaml
+    path = path or DEFAULT_POOL
+    if not path.exists():
+        return {"schema_version": "1.0", "models": []}
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {"schema_version": "1.0", "models": []}
+
+
+def _save_pool(pool, path=None):
+    """Save the model pool back to YAML with backup."""
+    import yaml
+    from collections import OrderedDict
+    path = path or DEFAULT_POOL
+    # Create backup
+    if path.exists():
+        backup = path.with_suffix(".yaml.bak")
+        shutil.copy2(str(path), str(backup))
+    with open(path, "w", encoding="utf-8") as f:
+        # Use representer that handles all dict types cleanly
+        dumper = yaml.SafeDumper
+        dumper.add_representer(OrderedDict, dumper.represent_dict)
+        dumper.add_representer(dict, dumper.represent_dict)
+        yaml.dump(pool, f, default_flow_style=False, allow_unicode=True, sort_keys=False, Dumper=dumper)
+    return path
+
+
+def _find_model(pool, model_id):
+    """Find a model by ID in the pool list. Returns (index, model) or (None, None)."""
+    models = pool.get("models", [])
+    for i, m in enumerate(models):
+        if m.get("id") == model_id:
+            return i, m
+    return None, None
+
+
+def _resolve_path(path_str):
+    """Resolve relative path from SCRIPTS_DIR."""
+    if not path_str:
+        return None
+    p = Path(path_str)
+    if not p.is_absolute():
+        p = SCRIPTS_DIR / path_str
+    return p
+
+
+def _normalize_bool(val):
+    """Normalize various bool representations."""
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes", "y")
+    return bool(val)
+
+
+def _output(data):
+    """Print JSON output."""
+    print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+
+
+def _error(msg, status="ERROR"):
+    """Print error output and exit."""
+    _output({"status": status, "message": msg})
+    sys.exit(1)
+
+
+def _diff_dict(before, after, prefix=""):
+    """Generate a list of changed fields between two dicts."""
+    changes = []
+    all_keys = set(list(before.keys()) + list(after.keys()))
+    for k in sorted(all_keys):
+        vb = before.get(k)
+        va = after.get(k)
+        if vb != va:
+            changes.append({
+                "field": f"{prefix}{k}" if prefix else k,
+                "before": vb,
+                "after": va,
+            })
+    return changes
+
+
+def _load_evidence(path):
+    """Load credential evidence JSON."""
+    path = _resolve_path(path) if path else DEFAULT_EVIDENCE
+    if not path or not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+# --- Commands ---
+
+def cmd_list(args):
+    """List models in the pool."""
+    pool = _load_pool()
+    models = pool.get("models", [])
+    if args.json:
+        _output({"status": "ok", "total_models": len(models), "models": models})
+    else:
+        print(f"Total models: {len(models)}")
+        for m in models:
+            nodes = ",".join(m.get("allowed_nodes", [])) or "(none)"
+            enabled = "E" if m.get("enabled") else "D"
+            print(f"  [{enabled}] {m['id']:40s} {m.get('provider','?'):20s} {m.get('model','?'):30s} nodes=[{nodes}]")
+    return True
+
+
+def cmd_add(args):
+    """Add a new model to the pool."""
+    pool = _load_pool()
+    models = pool.setdefault("models", [])
+
+    # Check duplicate ID
+    idx, existing = _find_model(pool, args.id)
+    if existing:
+        _output({"status": "ERROR", "message": f"Model ID '{args.id}' already exists."})
+        sys.exit(1)
+
+    # Check duplicate alias
+    new_aliases = args.alias if args.alias else []
+    for m in models:
+        existing_aliases = set(m.get("alias", []) or [])
+        overlapping = existing_aliases & set(new_aliases)
+        if overlapping:
+            _output({"status": "ALIAS_CONFLICT", "message": f"Alias(es) already in use: {overlapping}", "conflicting_model": m["id"]})
+            sys.exit(1)
+
+    tags = []
+    if args.capability_tags:
+        tags = [t.strip() for t in args.capability_tags.split(",") if t.strip()]
+
+    key_env_aliases = []
+    if args.key_env_aliases:
+        key_env_aliases = [t.strip() for t in args.key_env_aliases.split(",") if t.strip()]
+
+    nodes = []
+    if args.nodes:
+        nodes = [n.strip() for n in args.nodes.split(",") if n.strip()]
+
+    entry = OrderedDict()
+    entry["id"] = args.id
+    entry["alias"] = new_aliases
+    entry["provider"] = args.provider
+    entry["model"] = args.model
+    entry["key_env"] = args.key_env
+    if args.base_url_env:
+        entry["base_url_env"] = args.base_url_env
+    entry["enabled"] = True
+    entry["quarantined"] = False
+    entry["allowed_nodes"] = nodes
+    entry["cost"] = args.cost or "unknown"
+    entry["capability_tags"] = tags
+    entry["priority"] = args.priority or 50
+    entry["fallback_policy"] = "none"
+    entry["smoke_required"] = False
+    if args.smoke_required:
+        entry["smoke_required"] = _normalize_bool(args.smoke_required)
+    entry["smoke_results"] = {}
+    entry["source"] = "add-command"
+    entry["notes"] = args.notes or ""
+    if args.internal_provider_id:
+        entry["internal_provider_id"] = args.internal_provider_id
+    if key_env_aliases:
+        entry["key_env_aliases"] = key_env_aliases
+
+    models.append(entry)
+    _save_pool(pool)
+
+    _output({
+        "status": "ok",
+        "message": f"Added model '{args.id}'",
+        "initial_status": "UNVERIFIED",
+        "id": args.id,
+    })
+    return True
+
+
+def cmd_update(args):
+    """Update a model entry."""
+    pool = _load_pool()
+    idx, model = _find_model(pool, args.id)
+    if not model:
+        _error(f"Model ID '{args.id}' not found.", "NOT_FOUND")
+
+    before = copy.deepcopy(model)
+    changes = []
+
+    # Simple field updates
+    for field, attr in [
+        ("provider", "provider"), ("model", "model"), ("key_env", "key_env"),
+        ("base_url_env", "base_url_env"), ("cost", "cost"),
+        ("priority", "priority"), ("notes", "notes"),
+        ("internal_provider_id", "internal_provider_id"),
+    ]:
+        val = getattr(args, attr, None)
+        if val is not None:
+            model[field] = val
+
+    # Bool fields
+    if args.enable is True:
+        model["enabled"] = True
+    elif args.disable is True:
+        model["enabled"] = False
+    if args.quarantine is True:
+        model["quarantined"] = True
+    elif args.unquarantine is True:
+        model["quarantined"] = False
+
+    # Smoke required
+    if args.smoke_required is not None:
+        model["smoke_required"] = _normalize_bool(args.smoke_required)
+
+    # Allowed nodes
+    if hasattr(args, "nodes") and args.nodes is not None:
+        model["allowed_nodes"] = [n.strip() for n in args.nodes.split(",") if n.strip()]
+
+    # Capability tags
+    if args.capability_tags is not None:
+        model["capability_tags"] = [t.strip() for t in args.capability_tags.split(",") if t.strip()]
+
+    # Key env aliases
+    if args.key_env_aliases is not None:
+        model["key_env_aliases"] = [t.strip() for t in args.key_env_aliases.split(",") if t.strip()]
+
+    # Aliases
+    if args.add_alias:
+        existing = set(model.get("alias", []) or [])
+        existing.add(args.add_alias)
+        model["alias"] = list(existing)
+    if args.remove_alias:
+        existing = set(model.get("alias", []) or [])
+        existing.discard(args.remove_alias)
+        model["alias"] = list(existing)
+
+    after = model
+    changes = _diff_dict(before, after)
+
+    is_dry_run = args.dry_run if (args.dry_run or args.apply) else True
+    if is_dry_run:
+        _output({
+            "status": "DRY_RUN",
+            "id": args.id,
+            "changes": changes,
+            "change_count": len(changes),
+            "message": "Use --apply to commit changes.",
+        })
+        return True
+
+    # Apply
+    pool["models"][idx] = model
+    _save_pool(pool)
+    _output({
+        "status": "ok",
+        "id": args.id,
+        "changes": changes,
+        "change_count": len(changes),
+        "message": "Changes applied.",
+    })
+    return True
+
+
+def _get_impact_report(pool, model_id, model):
+    """Generate impact report for a model removal."""
+    aliases = model.get("alias", [])
+    nodes = model.get("allowed_nodes", [])
+    smoke_results = model.get("smoke_results", {})
+    enabled = model.get("enabled", False)
+    quarantined = model.get("quarantined", False)
+    provider = model.get("provider", "?")
+    model_name = model.get("model", "?")
+
+    impact = {
+        "id": model_id,
+        "aliases": aliases,
+        "provider_model": f"{provider}/{model_name}",
+        "enabled": enabled,
+        "quarantined": quarantined,
+        "assigned_nodes": nodes,
+        "smoke_results": smoke_results,
+        "smoke_verified": bool(smoke_results),
+    }
+    return impact
+
+
+def cmd_remove(args):
+    """Remove or deprecate a model."""
+    pool = _load_pool()
+    idx, model = _find_model(pool, args.id)
+    if not model:
+        _error(f"Model ID '{args.id}' not found.", "NOT_FOUND")
+
+    impact = _get_impact_report(pool, args.id, model)
+
+    # Check if VERIFIED (has smoke_results)
+    is_verified = bool(model.get("smoke_results", {}))
+
+    if args.dry_run:
+        _output({
+            "status": "DRY_RUN",
+            "id": args.id,
+            "impact": impact,
+            "would_delete": True,
+            "verified": is_verified,
+            "blocked_without_force": is_verified,
+            "message": "Dry-run: use --force to bypass verified protection, or use 'deprecate' instead.",
+        })
+        return True
+
+    if is_verified and not args.force:
+        _output({
+            "status": "BLOCKED",
+            "id": args.id,
+            "impact": impact,
+            "message": "VERIFIED model cannot be removed without --force. Use 'deprecate' instead.",
+        })
+        sys.exit(1)
+
+    # Remove
+    removed = pool["models"].pop(idx)
+    _save_pool(pool)
+    _output({
+        "status": "ok",
+        "id": args.id,
+        "message": f"Removed model '{args.id}'." + (f" Reason: {args.reason}" if args.reason else ""),
+        "impact": impact,
+    })
+    return True
+
+
+def cmd_deprecate(args):
+    """Deprecate a model (disable + quarantine + note)."""
+    pool = _load_pool()
+    idx, model = _find_model(pool, args.id)
+    if not model:
+        _error(f"Model ID '{args.id}' not found.", "NOT_FOUND")
+
+    model["enabled"] = False
+    model["quarantined"] = True
+    reason = args.reason or "Deprecated by operator"
+    model["notes"] = (model.get("notes", "") + f" | DEPRECATED: {reason}").strip()
+    pool["models"][idx] = model
+    _save_pool(pool)
+
+    _output({
+        "status": "ok",
+        "id": args.id,
+        "message": f"Model '{args.id}' deprecated. Reason: {reason}",
+    })
+    return True
+
+
+def cmd_enable(args):
+    """Enable a model."""
+    pool = _load_pool()
+    idx, model = _find_model(pool, args.id)
+    if not model:
+        _error(f"Model ID '{args.id}' not found.", "NOT_FOUND")
+    model["enabled"] = True
+    model["quarantined"] = False
+    pool["models"][idx] = model
+    _save_pool(pool)
+    _output({"status": "ok", "id": args.id, "message": f"Model '{args.id}' enabled."})
+    return True
+
+
+def cmd_disable(args):
+    """Disable a model."""
+    pool = _load_pool()
+    idx, model = _find_model(pool, args.id)
+    if not model:
+        _error(f"Model ID '{args.id}' not found.", "NOT_FOUND")
+    model["enabled"] = False
+    pool["models"][idx] = model
+    _save_pool(pool)
+    _output({"status": "ok", "id": args.id, "message": f"Model '{args.id}' disabled."})
+    return True
+
+
+def cmd_validate_full(args):
+    """Run full validation on the model pool."""
+    pool = _load_pool()
+    models = pool.get("models", [])
+    errors = []
+    warnings = []
+
+    seen_ids = set()
+    seen_aliases = {}
+    node_set = KNOWN_NODES
+
+    for i, m in enumerate(models):
+        mid = m.get("id")
+        # Check duplicate IDs
+        if mid in seen_ids:
+            errors.append({"type": "DUPLICATE_ID", "id": mid, "index": i})
+        else:
+            seen_ids.add(mid)
+
+        # Check duplicate aliases (skip empty/none)
+        for alias in (m.get("alias") or []):
+            if not alias:
+                continue
+            if alias in seen_aliases:
+                errors.append({
+                    "type": "DUPLICATE_ALIAS",
+                    "alias": alias,
+                    "models": [seen_aliases[alias], mid],
+                })
+            else:
+                seen_aliases[alias] = mid
+
+        # Check missing key_env
+        if not m.get("key_env"):
+            errors.append({"type": "MISSING_KEY_ENV", "id": mid, "index": i})
+
+        # Check invalid nodes
+        for node in (m.get("allowed_nodes") or []):
+            if node not in node_set:
+                errors.append({"type": "UNKNOWN_NODE", "id": mid, "node": node, "index": i})
+
+        # Check enabled but no nodes
+        if m.get("enabled") and not m.get("allowed_nodes"):
+            warnings.append({"type": "ENABLED_NO_NODES", "id": mid, "index": i})
+
+        # Check internal_provider_id format
+        ipid = m.get("internal_provider_id")
+        if ipid and not isinstance(ipid, str):
+            errors.append({"type": "INVALID_INTERNAL_PROVIDER_ID", "id": mid, "value": ipid, "index": i})
+
+        # Check smoke_required vs smoke_results
+        if m.get("smoke_required") and not m.get("smoke_results"):
+            warnings.append({"type": "SMOKE_REQUIRED_NO_RESULTS", "id": mid, "index": i})
+
+        # Check base_url_env (recommended but not required)
+        if not m.get("base_url_env"):
+            warnings.append({"type": "MISSING_BASE_URL_ENV", "id": mid, "index": i})
+
+    # Check tracked repo for inline secrets
+    secret_patterns = ["OPENCODE_", "api_key", "apiKey"]
+    tracked_secrets_found = _check_tracked_repo_secrets(secret_patterns)
+    for item in tracked_secrets_found:
+        errors.append(item)
+
+    status = "ERRORS_FOUND" if errors else "ok"
+    result = {
+        "status": status,
+        "total_models": len(models),
+        "error_count": len(errors),
+        "warning_count": len(warnings),
+        "errors": errors,
+        "warnings": warnings,
+        "summary": f"{len(models)} models, {len(errors)} errors, {len(warnings)} warnings",
+    }
+    _output(result)
+    return True
+
+
+def _check_tracked_repo_secrets(patterns):
+    """Quick check for inline secrets in tracked files."""
+    findings = []
+    repo_git_dir = REPO_ROOT / ".git"
+    if not repo_git_dir.exists():
+        return findings
+
+    # Check model_pool.yaml itself — key_env should be var names, not values
+    pool = _load_pool()
+    for m in pool.get("models", []):
+        ke = m.get("key_env", "")
+        if ke and not ke.startswith("OPENCODE_") and not ke.startswith("XIAOMI_") and not ke.startswith("MINIMAX_") and not ke.startswith("DEEPSEEK_") and not ke.startswith("VOLCENGINE_") and not ke.startswith("ANTHROPIC_") and not ke.startswith("DASHSCOPE_") and not ke.startswith("GOOGLE_") and not ke.startswith("MOONSHOT_") and not ke.startswith("OPENAI_") and not ke.startswith("XAI_"):
+            findings.append({
+                "type": "SUSPICIOUS_KEY_ENV",
+                "id": m.get("id"),
+                "key_env": ke,
+            })
+    return findings
+
+
+def cmd_freeze(args):
+    """Generate a capability freeze snapshot from the pool and evidence."""
+    pool = _load_pool()
+    models = pool.get("models", [])
+
+    evidence = _load_evidence(args.evidence) if args.evidence else {}
+
+    nodes_data = OrderedDict()
+    # Map win -> 21bao for freeze output
+    node_alias_map = {"win": "21bao"}
+    for raw_node in sorted(KNOWN_NODES):
+        node = node_alias_map.get(raw_node, raw_node)
+        # Collect models for this node
+        # Also match raw_node for pool lookup
+        node_providers = OrderedDict()
+        node_verified = 0
+        for m in models:
+            if not m.get("enabled"):
+                continue
+            allowed = m.get("allowed_nodes", [])
+            # If allowed_nodes is empty, the model is enabled but not assigned — skip
+            if not allowed or raw_node not in allowed and node not in allowed:
+                continue
+            provider = m.get("provider", "other")
+            model_name = m.get("model", "?")
+            alias = m.get("alias", [m["id"]])[0]
+
+            if provider not in node_providers:
+                node_providers[provider] = {
+                    "internal_provider_id": m.get("internal_provider_id", provider),
+                    "key_env": m.get("key_env", "?"),
+                    "credential_source": evidence.get(node, {}).get(provider, {}).get("reason", "unknown"),
+                    "models": OrderedDict(),
+                }
+
+            # Determine status
+            smoke = m.get("smoke_results", {})
+            # Normalize provider key for evidence lookup
+            provider_map = {
+                "deepseek-plan": "deepseek",
+                "minimax-plan": "minimax",
+                "volcengine-plan": "volcengine",
+                "xiaomi": "xiaomi",
+                "xiaomi-plan": "xiaomi",
+            }
+            ev_provider_key = provider_map.get(provider, provider)
+            ev_status = evidence.get(node, {}).get(ev_provider_key, {}).get("status", "")
+            if ev_status == "VERIFIED":
+                status = "V"
+            elif ev_status == "VFV":
+                status = "VFV"
+            elif m.get("quarantined") or not m.get("enabled"):
+                status = "FROZEN"
+            elif m.get("id", "").startswith("xiaomi"):
+                status = "FROZEN"
+            else:
+                status = "UNVERIFIED"
+
+            if status in ("V", "VFV"):
+                node_verified += 1
+
+            entry = OrderedDict()
+            entry["model"] = model_name
+            entry["alias"] = alias
+            entry["status"] = status
+            if smoke:
+                entry["last_smoke"] = smoke.get("timestamp", list(smoke.keys())[0] if smoke else "?")
+                entry["duration_seconds"] = smoke.get("duration", list(smoke.values())[0].get("duration") if smoke else None)
+            node_providers[provider]["models"][m["id"]] = entry
+
+        if node_providers:
+            nodes_data[node] = OrderedDict()
+            nodes_data[node]["description"] = f"Worker {node}"
+            nodes_data[node]["opencode_version"] = "1.17.8"
+            nodes_data[node]["total_models_verified"] = node_verified
+            nodes_data[node]["providers"] = node_providers
+
+    # Cluster totals
+    totals = {
+        "5bao_verified": nodes_data.get("5bao", {}).get("total_models_verified", 0),
+        "9bao_verified": nodes_data.get("9bao", {}).get("total_models_verified", 0),
+        "21bao_verified": nodes_data.get("21bao", {}).get("total_models_verified", 0),
+    }
+    totals["total_verified_unique_model_entries"] = sum(
+        totals[k] for k in ["5bao_verified", "9bao_verified", "21bao_verified"]
+    )
+    # Count frozen xiaomi entries (by node)
+    totals["total_frozen_xiaomi"] = 0
+    for nname, ndata in nodes_data.items():
+        for pname, pdata in ndata.get("providers", {}).items():
+            for mid, mdata in pdata.get("models", {}).items():
+                if "xiaomi" in mid.lower() and mdata.get("status") == "FROZEN":
+                    totals["total_frozen_xiaomi"] += 1
+
+    result = OrderedDict()
+    result["meta"] = OrderedDict()
+    result["meta"]["snapshot_version"] = "1.1"
+    result["meta"]["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    result["meta"]["generated_by"] = "model_pool_manager.py freeze"
+    result["nodes"] = nodes_data
+    result["cluster_totals"] = totals
+    result["deferred_providers"] = []
+    result["recommended_scheduling"] = OrderedDict()
+    result["recommended_scheduling"]["description"] = "Manual operator approval required before each gray task."
+
+    output_path = args.output
+    if output_path:
+        out_path = _resolve_path(output_path)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        result["_saved_to"] = str(out_path)
+
+    _output(result)
+    return True
+
+
+def cmd_sync(args):
+    """Generate a sync plan (contract-only, no write)."""
+    pool = _load_pool()
+    models = pool.get("models", [])
+
+    target_nodes = args.nodes.split(",") if args.nodes else list(KNOWN_NODES - {"win"})
+    target_nodes = [n.strip() for n in target_nodes if n.strip() != "win"]
+
+    plans = []
+    for node in target_nodes:
+        node_models = [m for m in models if node in (m.get("allowed_nodes") or [])]
+
+        # Separate by provider type
+        providers = {}
+        for m in node_models:
+            prov = m.get("provider", "other")
+            if prov not in providers:
+                providers[prov] = []
+            providers[prov].append(m["id"])
+
+        plans.append({
+            "node": node,
+            "total_models": len(node_models),
+            "providers": providers,
+            "target_files": [
+                f"opencode.jsonc (partial update for {node})",
+                f"opencode.env (if key_env changes)",
+            ],
+            "backup_plan": ".bak file before write",
+            "credential_source": "central overlay -> worker env",
+            "needs_smoke": True,
+            "needs_manual_approval": True,
+        })
+
+    _output({
+        "status": "DRY_RUN",
+        "mode": "contract-only",
+        "contract": {
+            "write_blocked": True,
+            "description": "Sync is contract-only. Real writes require separate approved Work Order and --apply.",
+            "required_gates": ["operator_approval", "backup", "smoke_after_sync"],
+        },
+        "plans": plans,
+    })
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="VibeDev Model Pool Manager CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            Examples:
+              %(prog)s list --json
+              %(prog)s add --id my-model --alias my --provider my --model my-v1 --key-env MY_KEY --nodes 5bao
+              %(prog)s update my-model --notes "Updated notes" --dry-run
+              %(prog)s update my-model --notes "New notes" --apply
+              %(prog)s remove my-model --dry-run
+              %(prog)s deprecate my-model --reason "EOL"
+              %(prog)s validate-full
+              %(prog)s freeze --output freeze.json
+        """),
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    # list
+    p_list = sub.add_parser("list", help="List models")
+    p_list.add_argument("--json", action="store_true", help="JSON output")
+    p_list.set_defaults(func=cmd_list)
+
+    # add
+    p_add = sub.add_parser("add", help="Add a new model")
+    p_add.add_argument("--id", required=True, help="Unique model ID")
+    p_add.add_argument("--alias", action="append", default=[], help="Alias(es)")
+    p_add.add_argument("--provider", required=True, help="Provider (e.g. opencode-go)")
+    p_add.add_argument("--model", required=True, help="Model name (e.g. deepseek-v4-flash)")
+    p_add.add_argument("--key-env", required=True, help="Environment variable name for API key")
+    p_add.add_argument("--base-url-env", help="Environment variable name for base URL")
+    p_add.add_argument("--nodes", help="Comma-separated allowed nodes")
+    p_add.add_argument("--cost", help="Cost tier")
+    p_add.add_argument("--priority", type=int, help="Priority (higher = more preferred)")
+    p_add.add_argument("--notes", help="Notes")
+    p_add.add_argument("--capability-tags", help="Comma-separated tags")
+    p_add.add_argument("--internal-provider-id", help="Internal provider ID for the worker")
+    p_add.add_argument("--key-env-aliases", help="Comma-separated alternate key env names")
+    p_add.add_argument("--smoke-required", help="Whether smoke is required (true/false)")
+    p_add.set_defaults(func=cmd_add)
+
+    # update
+    p_upd = sub.add_parser("update", help="Update a model")
+    p_upd.add_argument("id", help="Model ID to update")
+    p_upd.add_argument("--provider", help="New provider")
+    p_upd.add_argument("--model", help="New model name")
+    p_upd.add_argument("--key-env", help="New key_env")
+    p_upd.add_argument("--base-url-env", help="New base_url_env")
+    p_upd.add_argument("--enable", action="store_true", help="Enable")
+    p_upd.add_argument("--disable", action="store_true", help="Disable")
+    p_upd.add_argument("--quarantine", action="store_true", help="Quarantine")
+    p_upd.add_argument("--unquarantine", action="store_true", help="Un-quarantine")
+    p_upd.add_argument("--nodes", help="Comma-separated allowed nodes")
+    p_upd.add_argument("--notes", help="New notes")
+    p_upd.add_argument("--priority", type=int, help="New priority")
+    p_upd.add_argument("--cost", help="New cost tier")
+    p_upd.add_argument("--capability-tags", help="Comma-separated capability tags")
+    p_upd.add_argument("--internal-provider-id", help="New internal provider ID")
+    p_upd.add_argument("--key-env-aliases", help="Comma-separated key env aliases")
+    p_upd.add_argument("--smoke-required", help="Smoke required (true/false)")
+    p_upd.add_argument("--add-alias", help="Add an alias")
+    p_upd.add_argument("--remove-alias", help="Remove an alias")
+    group_mode = p_upd.add_mutually_exclusive_group()
+    group_mode.add_argument("--dry-run", action="store_true", help="Show changes (default)")
+    group_mode.add_argument("--apply", action="store_true", help="Commit changes")
+    p_upd.set_defaults(func=cmd_update)
+
+    # remove
+    p_rem = sub.add_parser("remove", help="Remove a model")
+    p_rem.add_argument("id", help="Model ID to remove")
+    p_rem.add_argument("--dry-run", action="store_true", help="Show impact without deleting")
+    p_rem.add_argument("--force", action="store_true", help="Force remove even if VERIFIED")
+    p_rem.add_argument("--reason", help="Reason for removal")
+    p_rem.set_defaults(func=cmd_remove)
+
+    # deprecate
+    p_dep = sub.add_parser("deprecate", help="Deprecate a model (disable + quarantine)")
+    p_dep.add_argument("id", help="Model ID to deprecate")
+    p_dep.add_argument("--reason", help="Deprecation reason")
+    p_dep.set_defaults(func=cmd_deprecate)
+
+    # enable
+    p_en = sub.add_parser("enable", help="Enable a model")
+    p_en.add_argument("id", help="Model ID")
+    p_en.set_defaults(func=cmd_enable)
+
+    # disable
+    p_dis = sub.add_parser("disable", help="Disable a model")
+    p_dis.add_argument("id", help="Model ID")
+    p_dis.set_defaults(func=cmd_disable)
+
+    # validate-full
+    p_val = sub.add_parser("validate-full", help="Run full validation")
+    p_val.add_argument("--json", action="store_true", help="JSON output (default)")
+    p_val.set_defaults(func=cmd_validate_full)
+
+    # freeze
+    p_frz = sub.add_parser("freeze", help="Generate capability freeze snapshot")
+    p_frz.add_argument("--evidence", help="Path to credential evidence JSON")
+    p_frz.add_argument("--output", help="Path to save the freeze JSON")
+    p_frz.set_defaults(func=cmd_freeze)
+
+    # sync
+    p_syn = sub.add_parser("sync", help="Dry-run sync plan (contract only)")
+    p_syn.add_argument("--nodes", help="Comma-separated target nodes")
+    p_syn.set_defaults(func=cmd_sync)
+
+    args = parser.parse_args()
+    try:
+        args.func(args)
+    except Exception as e:
+        _error(str(e), "COMMAND_ERROR")
+
+
+if __name__ == "__main__":
+    main()

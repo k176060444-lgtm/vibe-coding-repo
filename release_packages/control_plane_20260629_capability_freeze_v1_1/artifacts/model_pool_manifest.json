@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-06-29T12:15:00Z",
+  "files": {
+    "model_pool.yaml": {
+      "sha256": "141a260c61ee892d0e3c569a4d7bb21d6a1796f9c38514c1e13e4b58dd193ac6",
+      "size": 17441
+    }
+  },
+  "notes": "21bao allowed_nodes expanded: opencode-go ds4flash/ds4pro, deepseek-plan, minimax-plan/M3. xiaomi/volcengine NOT expanded."
+}

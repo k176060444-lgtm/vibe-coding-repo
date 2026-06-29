@@ -1,0 +1,38 @@
+# Core Test Results — 2026-06-29 (Final)
+
+## Maintenance CLI Tests
+
+| Test | Result |
+|------|:------:|
+| T1: validate-full structured JSON | ✅ PASS |
+| T2: validate-full duplicate alias detection | ✅ PASS |
+| T3: remove --dry-run impact report | ✅ PASS |
+| T4: remove VERIFIED blocked without --force | ✅ PASS |
+| T5: update --dry-run before/after diff | ✅ PASS |
+| T6: update --apply commit & verify | ✅ PASS |
+| T7: deprecate disable+quarantine+note | ✅ PASS |
+| T8: freeze 3-node snapshot | ✅ PASS |
+| T9: freeze with evidence | ✅ PASS |
+| T10: add schema v1.1 (internal_provider_id, capability_tags) | ✅ PASS |
+| T11: sync contract-only with write_blocked | ✅ PASS |
+| **Subtotal** | **11/11 PASS** |
+
+## Core Credential/Sync Tests (Recorded from prior session)
+
+| Suite | Result |
+|-------|:------:|
+| test_credential_gate.py (8/8) | ✅ PASS |
+| test_derive_worker_config_dryrun.py (10/10) | ✅ PASS |
+| test_sync_semantics_dryrun.py (10/10) | ✅ PASS |
+| **Subtotal** | **28/28 PASS** |
+
+## Combined Summary
+
+**Total: 39/39 PASS (100%)**
+Date: 2026-06-29
+
+## Release Package Checksums (10 files)
+
+All 10 package files SHA256 verify OK.
+model_pool_manager.py created with 10 commands (list, add, update, remove, deprecate, enable, disable, validate-full, freeze, sync).
+capability_freeze_20260629.json corrected: 21bao_verified=10 (was 7), total=30 (was 27).

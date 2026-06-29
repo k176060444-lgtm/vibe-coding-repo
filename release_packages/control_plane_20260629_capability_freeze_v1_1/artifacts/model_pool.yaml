@@ -1,4 +1,4 @@
-schema_version: '1.0'
+schema_version: '1.1'
 phase: transitional-local
 source_of_truth: win:C:/Users/KK/AppData/Local/hermes/profiles/vibedev/scripts/model_pool.yaml
 generated_from:
@@ -123,6 +123,7 @@ models:
   enabled: true
   quarantined: false
   allowed_nodes:
+  - 21bao
   - 5bao
   - 9bao
   cost: unknown
@@ -147,6 +148,7 @@ models:
       invocation: null
   source: migrated-from-model_alias_config.yaml
   notes: 'Migrated alias group: deepseek, ds, ds4, deepseek-chat'
+  internal_provider_id: deepseek-plan
 - id: deepseek-deepseek-coder
   alias:
   - deepseek-coder
@@ -167,6 +169,7 @@ models:
   smoke_results: {}
   source: migrated-from-model_alias_config.yaml
   notes: 'Migrated alias group: deepseek-coder'
+  internal_provider_id: deepseek-plan
 - id: deepseek-deepseek-reasoner
   alias:
   - deepseek-r1
@@ -187,6 +190,7 @@ models:
   smoke_results: {}
   source: migrated-from-model_alias_config.yaml
   notes: 'Migrated alias group: deepseek-r1'
+  internal_provider_id: deepseek-plan
 - id: google-gemini-2-5-flash
   alias:
   - gemini-flash
@@ -231,17 +235,18 @@ models:
 - id: minimax-minimax-m2-5
   alias:
   - minimax
-  - minimax-m2.5
   - minimax-m2
+  - minimax-m2.5
+  - minimax-m3
   provider: minimax
-  model: MiniMax-M2.5
+  model: MiniMax-M3
   key_env: OPENCODE_MINIMAX_API_KEY
   base_url_env: OPENCODE_MINIMAX_BASE_URL
   enabled: true
   quarantined: false
   allowed_nodes:
+  - 21bao
   - 5bao
-  - 9bao
   cost: paid
   capability_tags:
   - chat
@@ -251,13 +256,14 @@ models:
   smoke_required: true
   smoke_results:
     5bao:
-      status: unverified
-      last_verified: null
-      smoke_phase: null
-      wrapper: null
-      invocation: null
+      status: confirmed
+      last_verified: '2026-06-29T12:00:00Z'
+      smoke_phase: ROUTE_B_STATE_CONSOLIDATION
+      wrapper: ~/bin/vibedev-opencode
+      invocation: minimax-plan/MiniMax-M3
   source: migrated-from-model_alias_config.yaml
-  notes: 'Migrated alias group: minimax, minimax-m2.5, minimax-m2'
+  notes: Migrated from MiniMax-M2.5 (not in OpenCode) to MiniMax-M3 (confirmed via minimax-plan). MiniMax-M2.5 retained as deprecated alias.
+  internal_provider_id: minimax-plan
 - id: moonshot-moonshot-v1-128k
   alias:
   - kimi
@@ -393,7 +399,6 @@ models:
   quarantined: false
   allowed_nodes:
   - 5bao
-  - 9bao
   cost: paid
   capability_tags:
   - chat
@@ -410,6 +415,7 @@ models:
       invocation: null
   source: migrated-from-model_alias_config.yaml
   notes: 'Migrated alias group: doubao, doubao-pro, doubao-1.5'
+  internal_provider_id: volcengine-plan
 - id: xai-grok-3
   alias:
   - grok
@@ -431,196 +437,6 @@ models:
   smoke_results: {}
   source: migrated-from-model_alias_config.yaml
   notes: 'Migrated alias group: grok, grok-3'
-- id: deepseek-plan-deepseek-v4-pro
-  alias:
-  - deepseek-v4-pro
-  - ds-v4-pro
-  - deepseek-pro
-  provider: deepseek-plan
-  model: deepseek-v4-pro
-  key_env: OPENCODE_DEEPSEEK_API_KEY
-  base_url_env: OPENCODE_DEEPSEEK_BASE_URL
-  enabled: true
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  cost: paid
-  capability_tags:
-  - code
-  - strong
-  priority: 20
-  fallback_policy: none
-  smoke_required: true
-  smoke_results:
-    5bao:
-      status: unverified
-      last_verified: null
-      smoke_phase: null
-      wrapper: null
-      invocation: null
-    9bao:
-      status: unverified
-      last_verified: null
-      smoke_phase: null
-      wrapper: null
-      invocation: null
-  source: i15-pool-correction
-  notes: 'Added by I15: node-configured model from 5bao/9bao opencode.jsonc'
-- id: minimax-plan-minimax-m3
-  alias:
-  - minimax-m3
-  - m3
-  - minimax-m3
-  provider: minimax-plan
-  model: MiniMax-M3
-  key_env: OPENCODE_MINIMAX_CN_API_KEY
-  base_url_env: OPENCODE_MINIMAX_BASE_URL
-  enabled: true
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  cost: paid
-  capability_tags:
-  - code
-  - chat
-  priority: 21
-  fallback_policy: none
-  smoke_required: true
-  smoke_results:
-    5bao:
-      status: unverified
-      last_verified: null
-      smoke_phase: null
-      wrapper: null
-      invocation: null
-    9bao:
-      status: unverified
-      last_verified: null
-      smoke_phase: null
-      wrapper: null
-      invocation: null
-  source: i15-pool-correction
-  notes: 'Added by I15: route-all 8/9 roles use minimax-m3; matches 5bao/9bao opencode.jsonc'
-- id: opencode-deepseek-v4-flash-free
-  alias:
-  - opencode-ds4flash-free
-  - deepseek-v4-flash-free
-  provider: opencode
-  model: deepseek-v4-flash-free
-  key_env: ''
-  base_url_env: ''
-  enabled: false
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  cost: free
-  capability_tags:
-  - code
-  - fast
-  - free
-  priority: 22
-  fallback_policy: none
-  smoke_required: false
-  smoke_results: {}
-  source: i15-pool-correction
-  notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
-- id: opencode-mimo-v2-5-free
-  alias:
-  - opencode-mimo-free
-  - mimo-v2.5-free
-  provider: opencode
-  model: mimo-v2.5-free
-  key_env: ''
-  base_url_env: ''
-  enabled: false
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  cost: free
-  capability_tags:
-  - code
-  - free
-  priority: 23
-  fallback_policy: none
-  smoke_required: false
-  smoke_results: {}
-  source: i15-pool-correction
-  notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
-- id: opencode-nemotron-3-ultra-free
-  alias:
-  - opencode-nemotron-free
-  - nemotron-3-ultra-free
-  provider: opencode
-  model: nemotron-3-ultra-free
-  key_env: ''
-  base_url_env: ''
-  enabled: false
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  cost: free
-  capability_tags:
-  - code
-  - strong
-  - free
-  priority: 24
-  fallback_policy: none
-  smoke_required: false
-  smoke_results: {}
-  source: i15-pool-correction
-  notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
-- id: opencode-north-mini-code-free
-  alias:
-  - opencode-north-free
-  - north-mini-code-free
-  provider: opencode
-  model: north-mini-code-free
-  key_env: ''
-  base_url_env: ''
-  enabled: false
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  cost: free
-  capability_tags:
-  - code
-  - fast
-  - free
-  priority: 25
-  fallback_policy: none
-  smoke_required: false
-  smoke_results: {}
-  source: i15-pool-correction
-  notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
-- id: opencode-big-pickle
-  alias:
-  - opencode-big-pickle
-  - big-pickle
-  provider: opencode
-  model: big-pickle
-  key_env: ''
-  base_url_env: ''
-  enabled: false
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  cost: free
-  capability_tags:
-  - general
-  - free
-  priority: 26
-  fallback_policy: none
-  smoke_required: false
-  smoke_results: {}
-  source: i15-pool-correction
-  notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
 - id: xiaomi-mimo-v2-5-pro
   alias:
   - mimo
@@ -635,7 +451,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - chat
@@ -656,7 +472,7 @@ models:
       smoke_phase: V1.21.30Z_NODE_MODEL_SMOKE
       wrapper: ~/bin/vibedev-opencode
       invocation: xiaomi-plan/mimo-v2.5-pro
-    win:
+    21bao:
       status: confirmed
       last_verified: null
       smoke_phase: null
@@ -664,8 +480,7 @@ models:
       invocation: null
   source: migrated-from-model_alias_config.yaml
   notes: 'Migrated alias group: mimo, mimo-v2.5, mimo-v2.5-pro'
-  status: temporary_unavailable
-  reason: HTTP_401_INVALID_API_KEY
+  internal_provider_id: xiaomi-plan
 - id: xiaomi-mimo-v2-5-pro-payg
   alias:
   - xmipro
@@ -678,7 +493,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: paid
   capability_tags:
   - chat
@@ -693,8 +508,7 @@ models:
   smoke_results: {}
   source: operator-add-v1.21.31H
   notes: 'Xiaomi MiMo V2.5 Pro (pay-as-you-go). Base URL: https://api.xiaomimimo.com/v1'
-  status: temporary_unavailable
-  reason: HTTP_401_INVALID_API_KEY
+  internal_provider_id: xiaomi-plan
 - id: xiaomi-mimo-v2-5-payg
   alias:
   - xmi
@@ -707,7 +521,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: paid
   capability_tags:
   - chat
@@ -722,85 +536,11 @@ models:
   smoke_required: true
   smoke_results: {}
   source: operator-add-v1.21.31H
-  notes: ''''''
-  status: temporary_unavailable
-  reason: HTTP_401_INVALID_API_KEY
-- id: opencode-go-glm-5-2
-  alias:
-  - opencode-glm52
-  - opencode-glm-5.2
-  provider: opencode-go
-  model: glm-5.2
-  key_env: OPENCODE_GO_API_KEY
-  base_url_env: OPENCODE_GO_BASE_URL
-  enabled: true
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  - win
-  cost: free
-  capability_tags:
-  - coding
-  priority: 27
-  fallback_policy: none
-  smoke_required: false
-  smoke_results:
-    5bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/glm-5.2
-    9bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/glm-5.2
-  health_status: ok
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: glm-5.2 (alias: opencode-glm52)'
-- id: opencode-go-glm-5-1
-  alias:
-  - opencode-glm51
-  - opencode-glm-5.1
-  provider: opencode-go
-  model: glm-5.1
-  key_env: OPENCODE_GO_API_KEY
-  base_url_env: OPENCODE_GO_BASE_URL
-  enabled: true
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  - win
-  cost: free
-  capability_tags:
-  - coding
-  priority: 28
-  fallback_policy: none
-  smoke_required: false
-  smoke_results:
-    5bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/glm-5.1
-    9bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/glm-5.1
-  health_status: ok
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: glm-5.1 (alias: opencode-glm51)'
+  notes: 'Xiaomi MiMo V2.5 Omni (pay-as-you-go). Base URL: https://api.xiaomimimo.com/v1'
+  internal_provider_id: xiaomi-plan
 - id: opencode-go-deepseek-v4-flash
   alias:
   - opencode-ds4flash
-  - opencode-deepseek-v4-flash
   provider: opencode-go
   model: deepseek-v4-flash
   key_env: OPENCODE_GO_API_KEY
@@ -808,36 +548,59 @@ models:
   enabled: true
   quarantined: false
   allowed_nodes:
+  - 21bao
   - 5bao
   - 9bao
-  - win
-  cost: free
+  cost: paid
   capability_tags:
-  - coding
-  - fast
-  priority: 29
+  - chat
+  - code
+  priority: 22
   fallback_policy: none
-  smoke_required: false
+  smoke_required: true
+  smoke_results: {}
+  source: phase4b-reconcile
+  notes: Reconciled from model_alias_config.yaml alias opencode-ds4flash. Confirmed on 5bao+9bao per node_model_capability.yaml (2026-06-28).
+  internal_provider_id: opencode-go
+- id: opencode-go-deepseek-v4-pro
+  alias:
+  - opencode-ds4pro
+  provider: opencode-go
+  model: deepseek-v4-pro
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 21bao
+  - 5bao
+  - 9bao
+  cost: paid
+  capability_tags:
+  - chat
+  - code
+  priority: 23
+  fallback_policy: none
+  smoke_required: true
   smoke_results:
     5bao:
       status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      last_verified: '2026-06-29T12:00:00Z'
+      smoke_phase: ROUTE_B
       wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/deepseek-v4-flash
+      invocation: deepseek-plan/deepseek-v4-pro
     9bao:
       status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+      last_verified: '2026-06-29T12:00:00Z'
+      smoke_phase: ROUTE_B
       wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/deepseek-v4-flash
-  health_status: ok
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: deepseek-v4-flash (alias: opencode-ds4flash)'
+      invocation: deepseek-plan/deepseek-v4-pro
+  source: phase4b-reconcile
+  notes: Reconciled from model_alias_config.yaml alias opencode-ds4pro.
+  internal_provider_id: opencode-go
 - id: opencode-go-kimi-k2-6
   alias:
   - opencode-kimi26
-  - opencode-kimi-k2.6
   provider: opencode-go
   model: kimi-k2.6
   key_env: OPENCODE_GO_API_KEY
@@ -847,33 +610,43 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
-  cost: free
+  cost: paid
   capability_tags:
-  - coding
-  priority: 30
+  - chat
+  - code
+  priority: 24
   fallback_policy: none
   smoke_required: false
-  smoke_results:
-    5bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/kimi-k2.6
-    9bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/kimi-k2.6
-  health_status: ok
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: kimi-k2.6 (alias: opencode-kimi26)'
+  smoke_results: {}
+  source: phase4b-reconcile
+  notes: Reconciled from model_alias_config.yaml alias opencode-kimi26.
+  internal_provider_id: opencode-go
+- id: opencode-go-glm-5-2
+  alias:
+  - opencode-glm52
+  provider: opencode-go
+  model: glm-5.2
+  key_env: OPENCODE_GO_API_KEY
+  base_url_env: OPENCODE_GO_BASE_URL
+  enabled: true
+  quarantined: false
+  allowed_nodes:
+  - 5bao
+  - 9bao
+  cost: paid
+  capability_tags:
+  - chat
+  - code
+  priority: 25
+  fallback_policy: none
+  smoke_required: false
+  smoke_results: {}
+  source: phase4b-reconcile
+  notes: Reconciled from model_alias_config.yaml alias opencode-glm52.
+  internal_provider_id: opencode-go
 - id: opencode-go-qwen3-7-max
   alias:
   - opencode-qwen37max
-  - opencode-qwen3.7-max
   provider: opencode-go
   model: qwen3.7-max
   key_env: OPENCODE_GO_API_KEY
@@ -883,70 +656,20 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
-  cost: free
+  cost: paid
   capability_tags:
-  - coding
-  - strong
-  priority: 31
+  - chat
+  - code
+  priority: 26
   fallback_policy: none
   smoke_required: false
-  smoke_results:
-    5bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/qwen3.7-max
-    9bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/qwen3.7-max
-  health_status: ok
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: qwen3.7-max (alias: opencode-qwen37max)'
-- id: opencode-go-qwen3-7-plus
-  alias:
-  - opencode-qwen37plus
-  - opencode-qwen3.7-plus
-  provider: opencode-go
-  model: qwen3.7-plus
-  key_env: OPENCODE_GO_API_KEY
-  base_url_env: OPENCODE_GO_BASE_URL
-  enabled: true
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  - win
-  cost: free
-  capability_tags:
-  - coding
-  priority: 32
-  fallback_policy: none
-  smoke_required: false
-  smoke_results:
-    5bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/qwen3.7-plus
-    9bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/qwen3.7-plus
-  health_status: ok
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: qwen3.7-plus (alias: opencode-qwen37plus)'
+  smoke_results: {}
+  source: phase4b-reconcile
+  notes: Reconciled from model_alias_config.yaml alias opencode-qwen37max.
+  internal_provider_id: opencode-go
 - id: opencode-go-mimo-v2-5-pro
   alias:
   - opencode-mimopro
-  - opencode-mimo-v2.5-pro
   provider: opencode-go
   model: mimo-v2.5-pro
   key_env: OPENCODE_GO_API_KEY
@@ -956,34 +679,20 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
-  cost: free
+  cost: paid
   capability_tags:
-  - coding
-  - strong
-  priority: 33
+  - chat
+  - code
+  priority: 27
   fallback_policy: none
   smoke_required: false
-  smoke_results:
-    5bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/mimo-v2.5-pro
-    9bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/mimo-v2.5-pro
-  health_status: ok
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: mimo-v2.5-pro (alias: opencode-mimopro)'
+  smoke_results: {}
+  source: phase4b-reconcile
+  notes: 'Reconciled from model_alias_config.yaml alias opencode-mimopro. Note: xiaomi/mimo-v2.5-pro retains its own alias (mimo/xmipro/xmi).'
+  internal_provider_id: opencode-go
 - id: opencode-go-mimo-v2-5
   alias:
   - opencode-mimo
-  - opencode-mimo-v2.5
   provider: opencode-go
   model: mimo-v2.5
   key_env: OPENCODE_GO_API_KEY
@@ -993,63 +702,15 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
-  cost: free
+  cost: paid
   capability_tags:
-  - coding
-  priority: 34
+  - chat
+  - code
+  priority: 28
   fallback_policy: none
   smoke_required: false
-  smoke_results:
-    5bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/mimo-v2.5
-    9bao:
-      status: confirmed
-      last_verified: '2026-06-27T10:00:00Z'
-      smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/mimo-v2.5
-  health_status: ok
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: mimo-v2.5 (alias: opencode-mimo)'
-- id: opencode-go-deepseek-v4-pro
-  alias:
-  - opencode-ds4pro
-  - opencode-deepseek-v4-pro
-  provider: opencode-go
-  model: deepseek-v4-pro
-  key_env: OPENCODE_GO_API_KEY
-  base_url_env: OPENCODE_GO_BASE_URL
-  enabled: true
-  quarantined: false
-  allowed_nodes:
-  - 5bao
-  - 9bao
-  - win
-  cost: free
-  capability_tags:
-  - coding
-  - strong
-  priority: 35
-  fallback_policy: none
-  smoke_required: false
-  smoke_results:
-    5bao:
-      status: confirmed
-      last_verified: '2026-06-27T22:46:00Z'
-      smoke_phase: v1.21.33I19_ENABLE_ALL_AND_ADD_DEEPSEEK_V4_PRO
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/deepseek-v4-pro
-    9bao:
-      status: confirmed
-      last_verified: '2026-06-27T22:46:00Z'
-      smoke_phase: v1.21.33I19_ENABLE_ALL_AND_ADD_DEEPSEEK_V4_PRO
-      wrapper: ~/bin/vibedev-opencode
-      invocation: opencode-go/deepseek-v4-pro
-  health_status: ok
-  source: hermes_provider_sync
-  notes: 'Hermes opencode-go model: deepseek-v4-pro (alias: opencode-ds4pro)'
+  smoke_results: {}
+  source: microfix-001
+  notes: Added per PRE_RELEASE_MODEL_POOL_TEST_REMEDIATION_MICROFIX_ONLY. opencode alias for xiaomi mimo-v2.5 (non-pro).
+  internal_provider_id: opencode-go
+notes: 'Additive: schema 1.0 -> 1.1; added internal_provider_id to 15 entries'
