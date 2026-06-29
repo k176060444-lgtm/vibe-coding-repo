@@ -35,7 +35,7 @@ Control plane baseline complete. 30 model×node entries across 3 nodes verified,
 
 **Legend**: `V` = exact-match PASS | `VFV` = VERIFIED_WITH_FORMAT_VARIANCE (stdout format variance, prior evidence + exit=0) | `—` = BLOCKED_ALLOWED_NODES / not expanded
 
-**Totals**: 5bao=11 VFV | 9bao=9 V | 21bao=7 V | **Total=27**
+**Totals**: 5bao=11 VFV | 9bao=9 V | 21bao=10 V | **Total=30** *(corrected 2026-06-29; canonical counts are in `artifacts/fixtures/capability_freeze_20260629.json` cluster_totals: 5bao_verified=11, 9bao_verified=9, 21bao_verified=10, total_verified_unique_model_entries=30; prior line "21bao=7 V / Total=27" was the pre-correction summary and is now superseded.)*
 
 ---
 
