@@ -509,14 +509,14 @@ def cmd_validate_full(args):
 
 # Field name sets — kept module-level so both validate-schema / validate-backward-compat
 # and the migrate command share a single source of truth.
-G4_NEW_MODEL_FIELDS = ("canonical_provider", "provider_namespace", "alias_g4")
+G4_NEW_MODEL_FIELDS = ("canonical_provider", "provider_namespace", "primary_alias")
 G4_LEGACY_MODEL_FIELDS = ("provider", "alias")  # alias is reused as both list (legacy) and string (new); see notes.
-G4_REQUIRED_NEW = ("canonical_provider", "provider_namespace", "alias_g4")
+G4_REQUIRED_NEW = ("canonical_provider", "provider_namespace", "primary_alias")
 
 
 def _get_new_alias(entry):
-    """Return the explicit single alias introduced in schema 1.1 (alias_g4)."""
-    return entry.get("alias_g4")
+    """Return the explicit single alias introduced in schema 1.1 (primary_alias)."""
+    return entry.get("primary_alias")
 
 
 def _resolve_provider_namespace(entry, namespace_mapping=None):
@@ -531,8 +531,8 @@ def _resolve_provider_namespace(entry, namespace_mapping=None):
     if explicit:
         return explicit
     primary_alias = None
-    if isinstance(entry.get("alias_g4"), str) and entry.get("alias_g4"):
-        primary_alias = entry["alias_g4"]
+    if isinstance(entry.get("primary_alias"), str) and entry.get("primary_alias"):
+        primary_alias = entry["primary_alias"]
     elif entry.get("alias") and isinstance(entry["alias"], list) and entry["alias"]:
         primary_alias = entry["alias"][0]
     if primary_alias and namespace_mapping and primary_alias in namespace_mapping:
@@ -553,7 +553,7 @@ def cmd_validate_schema(args):
 
     errors = []
     warnings = []
-    seen_migration_state = {"has_canonical_provider": 0, "has_provider_namespace": 0, "has_alias_g4": 0}
+    seen_migration_state = {"has_canonical_provider": 0, "has_provider_namespace": 0, "has_primary_alias": 0}
 
     for i, m in enumerate(models):
         mid = m.get("id")
@@ -567,8 +567,8 @@ def cmd_validate_schema(args):
         else:
             errors.append({"type": "MISSING_PROVIDER_NAMESPACE", "id": mid, "index": i})
 
-        if "alias_g4" in m and m["alias_g4"]:
-            seen_migration_state["has_alias_g4"] += 1
+        if "primary_alias" in m and m["primary_alias"]:
+            seen_migration_state["has_primary_alias"] += 1
         else:
             errors.append({"type": "MISSING_ALIAS_G4", "id": mid, "index": i})
 
@@ -644,7 +644,7 @@ def cmd_self_check(args):
     schema_version = str(pool.get("schema_version", "1.0"))
     models = pool.get("models", [])
 
-    new_field_counts = {"canonical_provider": 0, "provider_namespace": 0, "alias_g4": 0}
+    new_field_counts = {"canonical_provider": 0, "provider_namespace": 0, "primary_alias": 0}
     legacy_field_counts = {"provider": 0, "alias": 0}
 
     for m in models:
@@ -667,7 +667,7 @@ def cmd_self_check(args):
             f"schema_version={schema_version} (expected 1.1); "
             f"new_fields coverage: canonical_provider={new_field_counts['canonical_provider']}/{len(models)}, "
             f"provider_namespace={new_field_counts['provider_namespace']}/{len(models)}, "
-            f"alias_g4={new_field_counts['alias_g4']}/{len(models)}; "
+            f"primary_alias={new_field_counts['primary_alias']}/{len(models)}; "
             f"legacy_fields retained: provider={legacy_field_counts['provider']}/{len(models)}, "
             f"alias(list)={legacy_field_counts['alias']}/{len(models)}"
         ),
@@ -691,7 +691,7 @@ def cmd_self_check(args):
 def cmd_migrate(args):
     """Apply the G4 additive migration to model_pool.yaml in place.
 
-    Idempotent: entries that already have alias_g4 / canonical_provider /
+    Idempotent: entries that already have primary_alias / canonical_provider /
     provider_namespace set are not overwritten. Legacy fields (`provider`,
     `alias` list) are NEVER removed.
     """
@@ -721,12 +721,12 @@ def cmd_migrate(args):
         if not m.get("provider_namespace"):
             m["provider_namespace"] = _resolve_provider_namespace(m, namespace_mapping)
 
-        if not m.get("alias_g4"):
+        if not m.get("primary_alias"):
             legacy_aliases = m.get("alias")
             if isinstance(legacy_aliases, list) and legacy_aliases:
-                m["alias_g4"] = legacy_aliases[0]
+                m["primary_alias"] = legacy_aliases[0]
             else:
-                m["alias_g4"] = "unknown"
+                m["primary_alias"] = "unknown"
 
         after = {k: m.get(k) for k in G4_NEW_MODEL_FIELDS}
         for k in G4_NEW_MODEL_FIELDS:
@@ -1087,7 +1087,7 @@ def main():
 
     # --- baseline01 G4 schema 1.1 validators (additive) ---
     # NOTE: legacy model entry uses `alias` as a list (e.g. - haiku); the
-    # new schema 1.1 single-alias field is named `alias_g4` to avoid a
+    # new schema 1.1 single-alias field is named `primary_alias` to avoid a
     # YAML key collision with the existing list-typed `alias` field.
     p_vschema = sub.add_parser("validate-schema", help="Validate schema_version==1.1 + G4 field coverage")
     p_vschema.set_defaults(func=cmd_validate_schema)

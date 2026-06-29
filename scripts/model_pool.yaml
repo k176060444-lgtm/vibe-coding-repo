@@ -28,7 +28,7 @@ models:
   notes: 'Migrated alias group: haiku'
   canonical_provider: anthropic
   provider_namespace: unknown
-  alias_g4: haiku
+  primary_alias: haiku
 - id: anthropic-claude-opus-4
   alias:
   - opus
@@ -52,7 +52,7 @@ models:
   notes: 'Migrated alias group: opus, opus-4'
   canonical_provider: anthropic
   provider_namespace: unknown
-  alias_g4: opus
+  primary_alias: opus
 - id: anthropic-claude-sonnet-4
   alias:
   - claude
@@ -77,7 +77,7 @@ models:
   notes: 'Migrated alias group: claude, sonnet, sonnet-4'
   canonical_provider: anthropic
   provider_namespace: unknown
-  alias_g4: claude
+  primary_alias: claude
 - id: dashscope-qwen-max
   alias:
   - qwen
@@ -101,7 +101,7 @@ models:
   notes: 'Migrated alias group: qwen, qwen-max'
   canonical_provider: dashscope
   provider_namespace: unknown
-  alias_g4: qwen
+  primary_alias: qwen
 - id: dashscope-qwen-plus
   alias:
   - qwen-plus
@@ -124,7 +124,7 @@ models:
   notes: 'Migrated alias group: qwen-plus'
   canonical_provider: dashscope
   provider_namespace: unknown
-  alias_g4: qwen-plus
+  primary_alias: qwen-plus
 - id: deepseek-deepseek-chat
   alias:
   - deepseek
@@ -164,7 +164,7 @@ models:
   notes: 'Migrated alias group: deepseek, ds, ds4, deepseek-chat'
   canonical_provider: deepseek
   provider_namespace: unknown
-  alias_g4: deepseek
+  primary_alias: deepseek
 - id: deepseek-deepseek-coder
   alias:
   - deepseek-coder
@@ -187,7 +187,7 @@ models:
   notes: 'Migrated alias group: deepseek-coder'
   canonical_provider: deepseek
   provider_namespace: unknown
-  alias_g4: deepseek-coder
+  primary_alias: deepseek-coder
 - id: deepseek-deepseek-reasoner
   alias:
   - deepseek-r1
@@ -210,7 +210,7 @@ models:
   notes: 'Migrated alias group: deepseek-r1'
   canonical_provider: deepseek
   provider_namespace: unknown
-  alias_g4: deepseek-r1
+  primary_alias: deepseek-r1
 - id: google-gemini-2-5-flash
   alias:
   - gemini-flash
@@ -233,7 +233,7 @@ models:
   notes: 'Migrated alias group: gemini-flash'
   canonical_provider: google
   provider_namespace: unknown
-  alias_g4: gemini-flash
+  primary_alias: gemini-flash
 - id: google-gemini-2-5-pro
   alias:
   - gemini
@@ -257,7 +257,7 @@ models:
   notes: 'Migrated alias group: gemini, gemini-pro'
   canonical_provider: google
   provider_namespace: unknown
-  alias_g4: gemini
+  primary_alias: gemini
 - id: minimax-minimax-m2-5
   alias:
   - minimax
@@ -290,7 +290,7 @@ models:
   notes: 'Migrated alias group: minimax, minimax-m2.5, minimax-m2'
   canonical_provider: minimax
   provider_namespace: unknown
-  alias_g4: minimax
+  primary_alias: minimax
 - id: moonshot-moonshot-v1-128k
   alias:
   - kimi
@@ -313,7 +313,7 @@ models:
   notes: 'Migrated alias group: kimi'
   canonical_provider: moonshot
   provider_namespace: unknown
-  alias_g4: kimi
+  primary_alias: kimi
 - id: openai-gpt-4o
   alias:
   - gpt4o
@@ -338,7 +338,7 @@ models:
   notes: 'Migrated alias group: gpt4o, gpt-4o, gpt4'
   canonical_provider: openai
   provider_namespace: unknown
-  alias_g4: gpt4o
+  primary_alias: gpt4o
 - id: openai-o1
   alias:
   - o1
@@ -361,7 +361,7 @@ models:
   notes: 'Migrated alias group: o1'
   canonical_provider: openai
   provider_namespace: unknown
-  alias_g4: o1
+  primary_alias: o1
 - id: openai-o3
   alias:
   - o3
@@ -384,7 +384,7 @@ models:
   notes: 'Migrated alias group: o3'
   canonical_provider: openai
   provider_namespace: unknown
-  alias_g4: o3
+  primary_alias: o3
 - id: openai-o3-mini
   alias:
   - o3-mini
@@ -407,7 +407,7 @@ models:
   notes: 'Migrated alias group: o3-mini'
   canonical_provider: openai
   provider_namespace: unknown
-  alias_g4: o3-mini
+  primary_alias: o3-mini
 - id: openai-o4-mini
   alias:
   - o4-mini
@@ -430,7 +430,7 @@ models:
   notes: 'Migrated alias group: o4-mini'
   canonical_provider: openai
   provider_namespace: unknown
-  alias_g4: o4-mini
+  primary_alias: o4-mini
 - id: volcengine-doubao-1-5-pro-256k
   alias:
   - doubao
@@ -463,7 +463,7 @@ models:
   notes: 'Migrated alias group: doubao, doubao-pro, doubao-1.5'
   canonical_provider: volcengine
   provider_namespace: unknown
-  alias_g4: doubao
+  primary_alias: doubao
 - id: xai-grok-3
   alias:
   - grok
@@ -487,7 +487,7 @@ models:
   notes: 'Migrated alias group: grok, grok-3'
   canonical_provider: xai
   provider_namespace: unknown
-  alias_g4: grok
+  primary_alias: grok
 - id: deepseek-plan-deepseek-v4-pro
   alias:
   - deepseek-v4-pro
@@ -526,7 +526,7 @@ models:
   notes: 'Added by I15: node-configured model from 5bao/9bao opencode.jsonc'
   canonical_provider: deepseek-plan
   provider_namespace: unknown
-  alias_g4: deepseek-v4-pro
+  primary_alias: deepseek-v4-pro
 - id: minimax-plan-minimax-m3
   alias:
   - minimax-m3
@@ -565,7 +565,7 @@ models:
   notes: 'Added by I15: route-all 8/9 roles use minimax-m3; matches 5bao/9bao opencode.jsonc'
   canonical_provider: minimax-plan
   provider_namespace: unknown
-  alias_g4: minimax-m3
+  primary_alias: minimax-m3
 - id: opencode-deepseek-v4-flash-free
   alias:
   - opencode-ds4flash-free
@@ -592,7 +592,7 @@ models:
   notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
   canonical_provider: opencode
   provider_namespace: unknown
-  alias_g4: opencode-ds4flash-free
+  primary_alias: opencode-ds4flash-free
 - id: opencode-mimo-v2-5-free
   alias:
   - opencode-mimo-free
@@ -618,7 +618,7 @@ models:
   notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
   canonical_provider: opencode
   provider_namespace: unknown
-  alias_g4: opencode-mimo-free
+  primary_alias: opencode-mimo-free
 - id: opencode-nemotron-3-ultra-free
   alias:
   - opencode-nemotron-free
@@ -645,7 +645,7 @@ models:
   notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
   canonical_provider: opencode
   provider_namespace: unknown
-  alias_g4: opencode-nemotron-free
+  primary_alias: opencode-nemotron-free
 - id: opencode-north-mini-code-free
   alias:
   - opencode-north-free
@@ -672,7 +672,7 @@ models:
   notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
   canonical_provider: opencode
   provider_namespace: unknown
-  alias_g4: opencode-north-free
+  primary_alias: opencode-north-free
 - id: opencode-big-pickle
   alias:
   - opencode-big-pickle
@@ -698,7 +698,7 @@ models:
   notes: 'Added by I15: native opencode free model from KNOWN_MODELS_SEED'
   canonical_provider: opencode
   provider_namespace: unknown
-  alias_g4: opencode-big-pickle
+  primary_alias: opencode-big-pickle
 - id: xiaomi-mimo-v2-5-pro
   alias:
   - mimo
@@ -746,7 +746,7 @@ models:
   reason: HTTP_401_INVALID_API_KEY
   canonical_provider: xiaomi
   provider_namespace: unknown
-  alias_g4: mimo
+  primary_alias: mimo
 - id: xiaomi-mimo-v2-5-pro-payg
   alias:
   - xmipro
@@ -778,7 +778,7 @@ models:
   reason: HTTP_401_INVALID_API_KEY
   canonical_provider: xiaomi
   provider_namespace: unknown
-  alias_g4: xmipro
+  primary_alias: xmipro
 - id: xiaomi-mimo-v2-5-payg
   alias:
   - xmi
@@ -811,7 +811,7 @@ models:
   reason: HTTP_401_INVALID_API_KEY
   canonical_provider: xiaomi
   provider_namespace: unknown
-  alias_g4: xmi
+  primary_alias: xmi
 - id: opencode-go-glm-5-2
   alias:
   - opencode-glm52
@@ -850,7 +850,7 @@ models:
   notes: 'Hermes opencode-go model: glm-5.2 (alias: opencode-glm52)'
   canonical_provider: opencode-go
   provider_namespace: unknown
-  alias_g4: opencode-glm52
+  primary_alias: opencode-glm52
 - id: opencode-go-glm-5-1
   alias:
   - opencode-glm51
@@ -889,7 +889,7 @@ models:
   notes: 'Hermes opencode-go model: glm-5.1 (alias: opencode-glm51)'
   canonical_provider: opencode-go
   provider_namespace: unknown
-  alias_g4: opencode-glm51
+  primary_alias: opencode-glm51
 - id: opencode-go-deepseek-v4-flash
   alias:
   - opencode-ds4flash
@@ -929,7 +929,7 @@ models:
   notes: 'Hermes opencode-go model: deepseek-v4-flash (alias: opencode-ds4flash)'
   canonical_provider: opencode-go
   provider_namespace: unknown
-  alias_g4: opencode-ds4flash
+  primary_alias: opencode-ds4flash
 - id: opencode-go-kimi-k2-6
   alias:
   - opencode-kimi26
@@ -968,7 +968,7 @@ models:
   notes: 'Hermes opencode-go model: kimi-k2.6 (alias: opencode-kimi26)'
   canonical_provider: opencode-go
   provider_namespace: unknown
-  alias_g4: opencode-kimi26
+  primary_alias: opencode-kimi26
 - id: opencode-go-qwen3-7-max
   alias:
   - opencode-qwen37max
@@ -1008,7 +1008,7 @@ models:
   notes: 'Hermes opencode-go model: qwen3.7-max (alias: opencode-qwen37max)'
   canonical_provider: opencode-go
   provider_namespace: unknown
-  alias_g4: opencode-qwen37max
+  primary_alias: opencode-qwen37max
 - id: opencode-go-qwen3-7-plus
   alias:
   - opencode-qwen37plus
@@ -1047,7 +1047,7 @@ models:
   notes: 'Hermes opencode-go model: qwen3.7-plus (alias: opencode-qwen37plus)'
   canonical_provider: opencode-go
   provider_namespace: unknown
-  alias_g4: opencode-qwen37plus
+  primary_alias: opencode-qwen37plus
 - id: opencode-go-mimo-v2-5-pro
   alias:
   - opencode-mimopro
@@ -1087,7 +1087,7 @@ models:
   notes: 'Hermes opencode-go model: mimo-v2.5-pro (alias: opencode-mimopro)'
   canonical_provider: opencode-go
   provider_namespace: unknown
-  alias_g4: opencode-mimopro
+  primary_alias: opencode-mimopro
 - id: opencode-go-mimo-v2-5
   alias:
   - opencode-mimo
@@ -1126,7 +1126,7 @@ models:
   notes: 'Hermes opencode-go model: mimo-v2.5 (alias: opencode-mimo)'
   canonical_provider: opencode-go
   provider_namespace: unknown
-  alias_g4: opencode-mimo
+  primary_alias: opencode-mimo
 - id: opencode-go-deepseek-v4-pro
   alias:
   - opencode-ds4pro
@@ -1166,4 +1166,4 @@ models:
   notes: 'Hermes opencode-go model: deepseek-v4-pro (alias: opencode-ds4pro)'
   canonical_provider: opencode-go
   provider_namespace: unknown
-  alias_g4: opencode-ds4pro
+  primary_alias: opencode-ds4pro

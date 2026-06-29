@@ -199,7 +199,7 @@ def test_T12_g4_self_check():
     lfc = data["legacy_field_counts"]
     assert nfc["canonical_provider"] == total
     assert nfc["provider_namespace"] == total
-    assert nfc["alias_g4"] == total
+    assert nfc["primary_alias"] == total
     assert lfc["provider"] == total
     assert lfc["alias"] == total
     print(f"  PASS: self-check: schema_version=1.1, {total} models, new+legacy fields all populated")
@@ -215,7 +215,7 @@ def test_T13_g4_validate_schema():
     total = data["total_models"]
     assert ms["has_canonical_provider"] == total
     assert ms["has_provider_namespace"] == total
-    assert ms["has_alias_g4"] == total
+    assert ms["has_primary_alias"] == total
     assert data["error_count"] == 0
     print(f"  PASS: validate-schema: 1.1 + {total}/{total} coverage")
     return True
@@ -239,7 +239,7 @@ def test_T15_g4_yaml_field_shape():
         mid = m["id"]
         assert "canonical_provider" in m and m["canonical_provider"], f"{mid}: missing canonical_provider"
         assert "provider_namespace" in m and m["provider_namespace"], f"{mid}: missing provider_namespace"
-        assert "alias_g4" in m and m["alias_g4"], f"{mid}: missing alias_g4"
+        assert "primary_alias" in m and m["primary_alias"], f"{mid}: missing primary_alias"
         # Legacy fields preserved
         assert "provider" in m and m["provider"], f"{mid}: legacy provider missing"
         assert isinstance(m["alias"], list), f"{mid}: legacy alias must remain a list"
