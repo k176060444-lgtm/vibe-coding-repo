@@ -134,15 +134,29 @@ All 6 maintainability gaps closed by `WO-MODEL-POOL-MAINTENANCE-CLI-001`.
 
 ---
 
-## 8. Core Test Results
+## 8. Core Test Results (Reconciled 2026-06-29)
 
-| Suite | Result | Notes |
-|-------|:------:|-------|
-| test_model_pool_maintenance.py (new) | ✅ **11/11 PASS** | Maintenance CLI: add/update/remove/deprecate/freeze/validate/sync |
-| test_credential_gate.py | ✅ **8/8 PASS** | Gate logic, status enum, defense-in-depth |
-| test_derive_worker_config_dryrun.py | ✅ **10/10 PASS** | Dry-run semantics |
-| test_sync_semantics_dryrun.py | ✅ **10/10 PASS** | Decoupled sync plan |
-| **Combined** | **39/39 PASS** | All core + maintenance tests |
+Pre-merge test set reconciled against actual working tree inventory. The
+prior "8/8 + 10/10 + 10/10 = 28/28" entries below were retracted because
+the three named files (`test_credential_gate.py`,
+`test_derive_worker_config_dryrun.py`, `test_sync_semantics_dryrun.py`)
+do **not exist** in the repo. The replacement files below are real and
+were re-executed on 2026-06-29.
+
+| File (real, exists) | Role | Tests | Result |
+|---------------------|------|:-----:|:------:|
+| scripts/test_model_pool_maintenance.py | maintenance CLI (custom runner) | 11 | **11/11 PASS** |
+| tests/test_credential_status_resolver.py | credential status/gate | 60 | **60/60 PASS** |
+| tests/test_opencode_config_renderer.py | worker config render/derive | 48 | **48/48 PASS** |
+| tests/test_node_sync_dryrun_planner.py | sync semantics (dry-run planner) | 51 | **51/51 PASS** |
+| **Combined (post-reconciliation)** | | **170** | **170/170 PASS** |
+
+Note: The three formerly claimed files (test_credential_gate.py,
+test_derive_worker_config_dryrun.py, test_sync_semantics_dryrun.py) are
+**not** present in the working tree and must not be referenced. The
+replacement files above provide broader functional coverage (170 tests
+vs the previously-claimed 28). See
+`tests/test_results_summary.txt` for the audit trail.
 ---
 
 ## 9. Secret Safety Confirmation
