@@ -159,44 +159,42 @@ def recommend_iteration(task_type, risk_level, is_read_only=False,
                         is_multi_wo=False, is_external=False):
     """Recommend iteration profile based on task characteristics.
 
-    baseline01 (G3): default fail-closed. ``auto_approve`` is only True when
-    ``requires_approval`` is False (i.e. genuinely read-only/low-risk/no
-    side-effects). Any path that previously assumed implicit operator
-    approval must obtain an explicit operator approval before proceeding.
-    Operator approval must be recorded by the caller; this function only
-    returns the recommendation.
+    baseline01 (G3): fully fail-closed. **Every** branch returns
+    ``auto_approve=False`` and ``requires_approval=True``. The caller
+    must obtain explicit operator approval before invoking any execution
+    role (planner / explorer / implementer / reviewer / validator),
+    triggering any model call, opening any SSH connection, performing
+    any git write, or modifying any file. This function returns only
+    the recommended iteration profile metadata; it does NOT constitute
+    an approval.
     """
-    # is_read_only + low-risk: only path still allowed to auto-approve,
-    # and even then only if there is no external action, no multi-WO,
-    # and no test/mutation surface.
+    # Read-only low-risk + no external + no multi-WO: now also requires
+    # explicit operator approval. There is no path that auto-approves.
     if is_read_only and risk_level == "low" and not is_external \
             and not is_multi_wo:
-        return {"profile": "short", "steps": 200, "auto_approve": True,
-                "requires_approval": False,
-                "reason": "Read-only low-risk task, no external/multi-WO surface"}
+        return {"profile": "short", "steps": 200, "auto_approve": False,
+                "requires_approval": True,
+                "reason": "Read-only low-risk task — operator approval required"}
     # External actions at any non-low risk: explicit operator approval required.
     if is_external and risk_level in ("medium", "high", "critical"):
         return {"profile": "standard", "steps": 300, "auto_approve": False,
                 "requires_approval": True,
                 "reason": f"External {risk_level}-risk — operator approval required"}
-    # Multi-WO / batch / test-inclusive paths: never auto-approve, require
-    # explicit operator approval of the batch scope.
+    # Multi-WO / batch / test-inclusive paths: explicit operator approval
+    # required of the batch scope.
     if is_multi_wo:
         return {"profile": "long", "steps": 500, "auto_approve": False,
                 "requires_approval": True,
                 "reason": "Multi-WO batch or test-inclusive — operator approval required"}
-    # Self repo standard task paths: previously defaulted True; now require
-    # explicit operator approval before proceeding.
+    # Self repo standard task paths: explicit operator approval required.
     if not is_external and risk_level in ("low", "medium"):
         return {"profile": "standard", "steps": 300, "auto_approve": False,
                 "requires_approval": True,
                 "reason": "Self repo standard task — operator approval required"}
-    # Catch-all: previously defaulted True; baseline01 requires explicit
-    # operator approval rather than implicit auto-approval.
+    # Catch-all: explicit operator approval required.
     return {"profile": "standard", "steps": 300, "auto_approve": False,
             "requires_approval": True,
             "reason": "Default recommendation — operator approval required"}
-
 def self_check(output_json=False):
     checks = []
     checks.append({"name": "version", "passed": True, "message": VERSION})
