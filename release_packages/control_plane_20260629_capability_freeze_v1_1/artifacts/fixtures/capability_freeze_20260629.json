@@ -1,0 +1,390 @@
+{
+  "meta": {
+    "snapshot_version": "1.1",
+    "generated_at": "2026-06-29T13:30:00Z",
+    "generated_by": "FULL_MODEL_POOL_SMOKE_THEN_21BAO_OPENCODE_GO_THEN_CAPABILITY_FREEZE",
+    "xiaomi_frozen_per_operator": true,
+    "prior_wo": "WO-CONTROL-PLANE-REBASE-001_CLOSED_WITH_RECORDED_DEVIATIONS",
+    "previous_phase": "ROUTE_B_STATE_CONSOLIDATION_MINIMAX_M3_AND_21BAO_SMOKE",
+    "updated_at": "2026-06-29T13:40:00Z"
+  },
+  "nodes": {
+    "5bao": {
+      "description": "Debian worker @192.168.5.6:22222",
+      "opencode_version": "1.17.8",
+      "total_models_verified": 11,
+      "providers": {
+        "opencode-go": {
+          "internal_provider_id": "opencode-go",
+          "key_env": "OPENCODE_GO_API_KEY",
+          "credential_source": "centralized (from 5bao worker to central overlay)",
+          "models": {
+            "deepseek-v4-flash": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5.4,
+              "notes": "Batches 1-3 + A-inventory | stdout format variance (prior evidence + exit=0)"
+            },
+            "deepseek-v4-pro": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 6.5,
+              "notes": "RouteB + A-inventory | stdout format variance (prior evidence + exit=0)"
+            },
+            "kimi-k2.6": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 8.5,
+              "notes": "Batch 3 + A-inventory | stdout format variance (prior evidence + exit=0)"
+            },
+            "glm-5.2": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5.1,
+              "notes": "Batch 3 + A-inventory | stdout format variance (prior evidence + exit=0)"
+            },
+            "qwen3.7-max": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 8.1,
+              "notes": "Batch 2 + A-inventory | stdout format variance (prior evidence + exit=0)"
+            },
+            "mimo-v2.5-pro": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 7.5,
+              "notes": "Batch 3 + A-inventory | stdout format variance (prior evidence + exit=0)"
+            },
+            "mimo-v2.5": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 8.2,
+              "notes": "Batch 3 + A-inventory | stdout format variance (prior evidence + exit=0)"
+            }
+          }
+        },
+        "deepseek-plan": {
+          "internal_provider_id": "deepseek-plan",
+          "key_env": "OPENCODE_DEEPSEEK_API_KEY",
+          "models": {
+            "deepseek-v4-flash": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5.1,
+              "notes": "Phase 16 + A-inventory | stdout format variance"
+            },
+            "deepseek-v4-pro": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5.3,
+              "notes": "RouteB + A-inventory | stdout format variance"
+            }
+          }
+        },
+        "minimax-plan": {
+          "internal_provider_id": "minimax-plan",
+          "key_env": "OPENCODE_MINIMAX_API_KEY",
+          "models": {
+            "MiniMax-M3": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5.9,
+              "notes": "RouteB + A-inventory | stdout format variance"
+            }
+          }
+        },
+        "volcengine-plan": {
+          "internal_provider_id": "volcengine-plan",
+          "key_env": "OPENCODE_VOLCENGINE_API_KEY",
+          "models": {
+            "ark-code-latest": {
+              "status": "VFV",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5.0,
+              "notes": "Phase 21 + A-inventory | stdout format variance"
+            }
+          }
+        },
+        "xiaomi-plan": {
+          "internal_provider_id": "xiaomi-plan",
+          "key_env": "OPENCODE_XIAOMI_API_KEY",
+          "status": "FROZEN",
+          "reason": "Operator-confirmed INVALID key. All endpoints returning auth failure."
+        }
+      }
+    },
+    "9bao": {
+      "description": "Debian worker @192.168.9.6:22222",
+      "opencode_version": "1.17.8",
+      "total_models_verified": 9,
+      "providers": {
+        "opencode-go": {
+          "models": {
+            "deepseek-v4-flash": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 12.6,
+              "notes": "A-inventory PASS"
+            },
+            "deepseek-v4-pro": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 6.1,
+              "notes": "A-inventory PASS"
+            },
+            "kimi-k2.6": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 6.9,
+              "notes": "A-inventory PASS"
+            },
+            "glm-5.2": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 12.5,
+              "notes": "A-inventory PASS (retest confirmed)"
+            },
+            "qwen3.7-max": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 8.7,
+              "notes": "A-inventory PASS"
+            },
+            "mimo-v2.5-pro": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 7.2,
+              "notes": "A-inventory PASS"
+            },
+            "mimo-v2.5": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 6.5,
+              "notes": "A-inventory PASS"
+            }
+          }
+        },
+        "deepseek-plan": {
+          "models": {
+            "deepseek-v4-flash": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 4.3,
+              "notes": "A-inventory PASS"
+            },
+            "deepseek-v4-pro": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5.0,
+              "notes": "A-inventory PASS"
+            }
+          }
+        },
+        "xiaomi-plan": {
+          "status": "FROZEN",
+          "reason": "Operator-confirmed INVALID key. Same as 5bao."
+        }
+      }
+    },
+    "21bao": {
+      "description": "Windows control-plane node (local)",
+      "opencode_version": "1.17.8",
+      "total_models_verified": 7,
+      "providers": {
+        "opencode-go": {
+          "internal_provider_id": "opencode-go",
+          "key_env": "OPENCODE_GO_API_KEY",
+          "credential_note": "Centralized from 5bao worker. Key added to central overlay 2026-06-29.",
+          "models": {
+            "deepseek-v4-flash": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5,
+              "notes": "B-stage: opencode-go enablement PASS, exact match"
+            },
+            "deepseek-v4-pro": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5,
+              "notes": "B-stage: opencode-go enablement PASS, exact match"
+            },
+            "kimi-k2.6": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 8.0,
+              "notes": "C-stage: 21bao opencode-go expansion PASS, exact match, build kimi-k2.6"
+            },
+            "glm-5.2": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5.6,
+              "notes": "C-stage: 21bao opencode-go expansion PASS, exact match, build glm-5.2"
+            },
+            "qwen3.7-max": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 9.8,
+              "notes": "C-stage: 21bao opencode-go expansion PASS, exact match, build qwen3.7-max"
+            },
+            "mimo-v2.5-pro": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5.6,
+              "notes": "C-stage: 21bao opencode-go expansion PASS, exact match, build mimo-v2.5-pro"
+            },
+            "mimo-v2.5": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 5.2,
+              "notes": "C-stage: 21bao opencode-go expansion PASS, exact match, build mimo-v2.5"
+            }
+          }
+        },
+        "deepseek-plan": {
+          "internal_provider_id": "deepseek-plan",
+          "key_env": "OPENCODE_DEEPSEEK_API_KEY",
+          "models": {
+            "deepseek-v4-flash": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 4,
+              "notes": "FIX_FIXTURE batch + A-inventory PASS, exact match"
+            },
+            "deepseek-v4-pro": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 4,
+              "notes": "A-inventory PASS, exact match"
+            }
+          }
+        },
+        "minimax-plan": {
+          "internal_provider_id": "minimax-plan",
+          "key_env": "OPENCODE_MINIMAX_API_KEY",
+          "models": {
+            "MiniMax-M3": {
+              "status": "V",
+              "last_smoke": "2026-06-29",
+              "duration_seconds": 6,
+              "notes": "FIX_FIXTURE batch + A-inventory PASS, exact match"
+            }
+          }
+        },
+        "xiaomi-plan": {
+          "status": "FROZEN",
+          "reason": "Operator-confirmed INVALID. Not retried."
+        }
+      },
+      "remaining_blocked": {
+        "volcengine-plan/ark-code-latest": "BAN"
+      }
+    }
+  },
+  "cluster_totals": {
+    "5bao_verified": 11,
+    "9bao_verified": 9,
+    "21bao_verified": 10,
+    "total_verified_unique_model_entries": 30,
+    "total_frozen_xiaomi": 3,
+    "total_blocked_central_secret": 0,
+    "total_blocked_allowed_nodes": 1,
+    "updated": "2026-06-29T14:30:00Z_FREEZE_STATISTICS_CORRECTED",
+    "correction_note": "21bao_verified corrected from 7 to 10 (included deepseek-plan + minimax-plan entries)"
+  },
+  "deferred_providers": {
+    "anthropic": {
+      "reason": "allowed_nodes=[]",
+      "models": [
+        "claude-3-5-haiku",
+        "claude-opus-4",
+        "claude-sonnet-4"
+      ]
+    },
+    "dashscope": {
+      "reason": "allowed_nodes=[]",
+      "models": [
+        "qwen-max",
+        "qwen-plus"
+      ]
+    },
+    "google": {
+      "reason": "allowed_nodes=[]",
+      "models": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro"
+      ]
+    },
+    "moonshot": {
+      "reason": "allowed_nodes=[]",
+      "models": [
+        "moonshot-v1-128k"
+      ]
+    },
+    "openai": {
+      "reason": "allowed_nodes=[]",
+      "models": [
+        "gpt-4o",
+        "o1",
+        "o3",
+        "o3-mini",
+        "o4-mini"
+      ]
+    },
+    "xai": {
+      "reason": "allowed_nodes=[]",
+      "models": [
+        "grok-3"
+      ]
+    }
+  },
+  "recommended_scheduling": {
+    "5bao": {
+      "primary_code": [
+        "opencode-go/deepseek-v4-flash",
+        "opencode-go/deepseek-v4-pro",
+        "opencode-go/kimi-k2.6"
+      ],
+      "quick_chat": [
+        "deepseek-plan/deepseek-v4-flash",
+        "minimax-plan/MiniMax-M3"
+      ],
+      "fallback": [
+        "opencode-go/glm-5.2",
+        "opencode-go/qwen3.7-max"
+      ]
+    },
+    "9bao": {
+      "primary_code": [
+        "opencode-go/deepseek-v4-flash",
+        "opencode-go/deepseek-v4-pro",
+        "opencode-go/kimi-k2.6"
+      ],
+      "quick_chat": [
+        "deepseek-plan/deepseek-v4-flash",
+        "deepseek-plan/deepseek-v4-pro"
+      ],
+      "fallback": [
+        "opencode-go/glm-5.2",
+        "opencode-go/qwen3.7-max"
+      ]
+    },
+    "21bao": {
+      "primary_code": [
+        "opencode-go/deepseek-v4-flash",
+        "opencode-go/deepseek-v4-pro",
+        "opencode-go/kimi-k2.6",
+        "opencode-go/qwen3.7-max"
+      ],
+      "quick_chat": [
+        "deepseek-plan/deepseek-v4-flash",
+        "deepseek-plan/deepseek-v4-pro",
+        "minimax-plan/MiniMax-M3"
+      ],
+      "fallback": [
+        "opencode-go/glm-5.2",
+        "opencode-go/mimo-v2.5-pro",
+        "opencode-go/mimo-v2.5"
+      ]
+    }
+  }
+}

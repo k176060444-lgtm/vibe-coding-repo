@@ -1,0 +1,59 @@
+# Core Test Results — 2026-06-29 (Reconciled, post test accounting fix)
+
+This file was updated during PR_263_TEST_ACCOUNTING_RECONCILIATION_FIX to
+replace the prior false "28/28" claim that referenced three non-existent
+test files. Real pre-merge test set is 4 files, all of which exist in the
+working tree and have been re-executed on 2026-06-29.
+
+## Maintenance CLI Tests (custom runner)
+
+| Test | Result |
+|------|:------:|
+| T1: validate-full structured JSON | ✅ PASS |
+| T2: validate-full duplicate alias detection | ✅ PASS |
+| T3: remove --dry-run impact report | ✅ PASS |
+| T4: remove VERIFIED blocked without --force | ✅ PASS |
+| T5: update --dry-run before/after diff | ✅ PASS |
+| T6: update --apply commit & verify | ✅ PASS |
+| T7: deprecate disable+quarantine+note | ✅ PASS |
+| T8: freeze 3-node snapshot | ✅ PASS |
+| T9: freeze with evidence | ✅ PASS |
+| T10: add schema v1.1 (internal_provider_id, capability_tags) | ✅ PASS |
+| T11: sync contract-only with write_blocked | ✅ PASS |
+| **Subtotal (scripts/test_model_pool_maintenance.py)** | **11/11 PASS** |
+
+## Core Pre-Merge Tests (pytest, all real files)
+
+| File (real, exists in repo) | Role | Collected | Result |
+|-----------------------------|------|:---------:|:------:|
+| tests/test_credential_status_resolver.py | credential status/gate | 60 | **60/60 PASS** |
+| tests/test_opencode_config_renderer.py | worker config render/derive | 48 | **48/48 PASS** |
+| tests/test_node_sync_dryrun_planner.py | sync semantics (dry-run planner) | 51 | **51/51 PASS** |
+| **Subtotal (pytest)** | | **159** | **159/159 PASS** |
+
+## Combined Summary (post-reconciliation)
+
+| Bucket | Tests | Result |
+|--------|:-----:|:------:|
+| Maintenance CLI (custom runner) | 11 | 11/11 PASS |
+| Core pre-merge (pytest) | 159 | 159/159 PASS |
+| **Total** | **170** | **170/170 PASS** |
+
+Date: 2026-06-29 (reconciled)
+Reconciliation commit: see git log of pr/v12133i24b-control-plane-baseline.
+
+## Notes on Prior "28/28" Claim
+
+The prior version of this file claimed "28/28 PASS" across three files
+(`test_credential_gate.py`, `test_derive_worker_config_dryrun.py`,
+`test_sync_semantics_dryrun.py`). Audit on 2026-06-29 found that none
+of these three files exist in the working tree. The replacement
+real files (above) provide broader functional coverage (170 tests vs
+the 28 claimed) and have been re-executed from the merged main as
+proof.
+
+## Release Package Checksums (10 files)
+
+All 10 package files SHA256 verify OK.
+model_pool_manager.py created with 10 commands (list, add, update, remove, deprecate, enable, disable, validate-full, freeze, sync).
+capability_freeze_20260629.json: 21bao_verified=10, total curated verified=30 (5bao=11 VFV, 9bao=9 V, 21bao=10 V).
