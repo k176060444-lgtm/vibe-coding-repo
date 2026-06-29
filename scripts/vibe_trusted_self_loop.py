@@ -6,8 +6,8 @@ Defines and validates the trusted-self repo auto-loop contract:
   smoke/qg/rr/v1-freeze → freeze baseline
 
 For trusted-self repos (k176060444-lgtm/vibe-coding-repo):
-  Low-risk Work Orders auto-execute without human approval.
-  Policy gate, wrapper, smoke, QG, V1-freeze still required.
+  All Work Orders require explicit human approval before execution.
+  Policy gate, wrapper, smoke, QG, V1-freeze are additional gates, not substitutes.
 
 For protected-external repos:
   Write operations require human approval via privileged action.
@@ -92,7 +92,7 @@ def _check_path_forbidden(path_str):
 def _classify_repo(repo):
     """Classify repo trust level."""
     if repo == SELF_REPO:
-        return "trusted-self", False
+        return "trusted-self", True  # baseline01: all repos require approval
     return "protected-external", True
 
 
@@ -132,7 +132,7 @@ def _cmd_check(args):
     result = {
         "repo": SELF_REPO,
         "repo_trust_level": "trusted-self",
-        "requires_human_approval": False,
+        "requires_human_approval": True,  # baseline01: all repos require approval
         "auto_loop_steps": AUTO_LOOP_STEPS,
         "checks": {},
     }
@@ -224,7 +224,7 @@ def _cmd_contract(args):
         "version": VERSION,
         "repo": SELF_REPO,
         "repo_trust_level": "trusted-self",
-        "requires_human_approval": False,
+        "requires_human_approval": True,  # baseline01: all repos require approval
         "auto_loop_steps": AUTO_LOOP_STEPS,
         "policy_gate": {
             "forbidden_paths": FORBIDDEN_PATH_PREFIXES,

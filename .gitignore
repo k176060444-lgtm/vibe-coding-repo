@@ -10,3 +10,7 @@ __pycache__/
 *.bak
 .opencode_model_pool.json
 .vibe/
+# Env/secret files
+.env
+.env.*
+!.env.example
