@@ -274,6 +274,107 @@ def test_T17_g4_migrate_idempotent():
     print(f"  PASS: migrate idempotent: second apply produced 0 changes")
     return True
 
+# --- baseline01 G5 node capability matrix tests ---
+
+def test_T18_g5_file_exists_and_yaml():
+    """T18: node_model_capability.yaml exists and parses as valid YAML."""
+    import yaml
+    g5_path = SCRIPTS_DIR / "node_model_capability.yaml"
+    assert g5_path.exists(), f"File not found: {g5_path}"
+    with open(g5_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    assert data.get("schema_version") == "1.1", f"schema_version is {data.get('schema_version')!r}"
+    assert "nodes" in data, "Missing 'nodes' key"
+    for n in ("21bao", "5bao", "9bao"):
+        assert n in data["nodes"], f"Missing node: {n}"
+    print(f"  PASS: node_model_capability.yaml exists, valid YAML, schema_version=1.1, 3 nodes")
+    return True
+
+def test_T19_g5_13_fields_per_entry():
+    """T19: every matrix entry has all 13 required fields."""
+    import yaml
+    with open(SCRIPTS_DIR / "node_model_capability.yaml", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    required = {
+        "model_id", "canonical_provider", "provider_namespace", "primary_alias",
+        "runtime_provider", "declared", "synced", "wrapper_valid",
+        "model_call_verified", "operator_approved", "runtime_visible", "env_loaded",
+    }
+    total_entries = 0
+    missing = []
+    for nid, nd in data.get("nodes", {}).items():
+        for i, entry in enumerate(nd.get("matrix", [])):
+            total_entries += 1
+            for field in required:
+                if field not in entry:
+                    missing.append(f"{nid}[{i}]: missing {field}")
+    assert not missing, f"Missing fields: {missing[:10]}"
+    assert total_entries > 0, "No entries found"
+    print(f"  PASS: {total_entries} entries × 13 fields, all present")
+    return True
+
+def test_T20_g5_unknown_status_fields():
+    """T20: 6 runtime/approval status fields are all 'unknown' (no bool)."""
+    import yaml
+    with open(SCRIPTS_DIR / "node_model_capability.yaml", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    unknown_fields = {"synced", "wrapper_valid", "model_call_verified",
+                      "operator_approved", "runtime_visible", "env_loaded"}
+    violations = []
+    for nid, nd in data.get("nodes", {}).items():
+        for i, entry in enumerate(nd.get("matrix", [])):
+            for uf in unknown_fields:
+                val = entry.get(uf)
+                if val != "unknown":
+                    violations.append(f"{nid}[{i}].{uf}={val!r}")
+    assert not violations, f"Non-unknown values: {violations}"
+    print(f"  PASS: all {len(unknown_fields)} status fields = 'unknown' across all entries")
+    return True
+
+def test_T21_g5_no_bool_in_runtime_fields():
+    """T21: no true/false prematurely written into the 6 runtime/approval fields."""
+    import yaml
+    with open(SCRIPTS_DIR / "node_model_capability.yaml", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    unknown_fields = {"synced", "wrapper_valid", "model_call_verified",
+                      "operator_approved", "runtime_visible", "env_loaded"}
+    bool_found = []
+    for nid, nd in data.get("nodes", {}).items():
+        for i, entry in enumerate(nd.get("matrix", [])):
+            for uf in unknown_fields:
+                if isinstance(entry.get(uf), bool):
+                    bool_found.append(f"{nid}[{i}].{uf}={entry[uf]}")
+    assert not bool_found, f"Premature bool found: {bool_found}"
+    print(f"  PASS: 0 premature bool values in runtime/approval fields")
+    return True
+
+def test_T22_g5_cross_ref_model_pool():
+    """T22: cross-reference: model_ids, canonical_provider, provider_namespace,
+    primary_alias all match model_pool.yaml."""
+    import yaml
+    with open(SCRIPTS_DIR / "node_model_capability.yaml", encoding="utf-8") as f:
+        g5 = yaml.safe_load(f)
+    with open(SCRIPTS_DIR / "model_pool.yaml", encoding="utf-8") as f:
+        pool = yaml.safe_load(f)
+    pool_models = {m["id"]: m for m in pool.get("models", [])}
+    errors = []
+    for nid, nd in g5.get("nodes", {}).items():
+        for entry in nd.get("matrix", []):
+            mid = entry["model_id"]
+            pm = pool_models.get(mid)
+            if not pm:
+                errors.append(f"{nid}: model_id={mid} not in model_pool.yaml")
+                continue
+            if entry["canonical_provider"] != pm.get("canonical_provider"):
+                errors.append(f"{nid}/{mid}: canonical_provider mismatch ({entry['canonical_provider']} vs {pm.get('canonical_provider')})")
+            if entry["provider_namespace"] != pm.get("provider_namespace"):
+                errors.append(f"{nid}/{mid}: provider_namespace mismatch ({entry['provider_namespace']} vs {pm.get('provider_namespace')})")
+            if entry["primary_alias"] != pm.get("primary_alias"):
+                errors.append(f"{nid}/{mid}: primary_alias mismatch ({entry['primary_alias']} vs {pm.get('primary_alias')})")
+    assert not errors, f"Cross-ref errors: {errors[:10]}"
+    print(f"  PASS: all model_ids, canonical_provider, provider_namespace, primary_alias cross-referenced OK")
+    return True
+
 # Run all tests
 tests = [
     test_T1_validate_full,
@@ -293,6 +394,11 @@ tests = [
     test_T15_g4_yaml_field_shape,
     test_T16_g4_provider_namespace_default_unknown,
     test_T17_g4_migrate_idempotent,
+    test_T18_g5_file_exists_and_yaml,
+    test_T19_g5_13_fields_per_entry,
+    test_T20_g5_unknown_status_fields,
+    test_T21_g5_no_bool_in_runtime_fields,
+    test_T22_g5_cross_ref_model_pool,
 ]
 
 passed = 0
