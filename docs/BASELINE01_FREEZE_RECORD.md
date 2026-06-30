@@ -150,11 +150,14 @@ The original baseline01 closure (PR #265–#269) was subsequently audited by **`
 
 **PR #270** fix/baseline01-audit-p1-approval-bypass → main at `c734d7cd93eb63a8bf18853d86f9c3bc2e2805c3`. All three P1 blockers closed.
 
-### P2 Finding — Closed by PR #271 (this record)
+### P2 Finding — Addressed by PR #271
 
 | ID | Module | Finding | Fix |
 |---|---|---|---|
-| **F4** | `scripts/vibe_task_intake.py` | `classify_task()` top-level `requires_approval` used pre-G3 logic, returning `False` for self-repo low-risk tasks | Standardized to `requires_approval = True` for all paths; merge commit `<PR271_MERGE_SHA>` |
+| **F4** | `scripts/vibe_task_intake.py` | `classify_task()` top-level `requires_approval` used pre-G3 logic, returning `False` for self-repo low-risk tasks | Standardized to `requires_approval = True` for all paths; intake consistency fix in PR #271 |
+| **F5** | `docs/BASELINE01_FREEZE_RECORD.md` | Original freeze record did not cover cross-file bypass modules discovered by `BASELINE01_FULL_AUDIT_READONLY` | Added `## Audit Supersession` section in PR #271 documenting P1/P2/P3 findings and remediation |
+
+**Note**: After PR #271 is merged, F4 and F5 are closed by this record and the intake consistency fix.
 
 ### Remaining P3 Cleanup Items
 
