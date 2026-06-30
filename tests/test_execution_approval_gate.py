@@ -643,10 +643,23 @@ class TestIntakeGateWiring:
 
 
 class TestGitPrGate0:
-    """T-10/T-11/T-12/T-13/T-17/T-19: git_pr_approval_gate Gate 0 wiring."""
+    """T-10/T-11/T-12/T-13/T-17/T-19: git_pr_approval_gate Gate 0 wiring.
+
+    baseline01 (PR #270): push_feature_branch, create_draft_pr, update_draft_pr
+    are OPERATOR_REQUIRED. Even with a valid execution_approval binding, these
+    actions must return OPERATOR_APPROVAL_REQUIRED with allowed=False. Gate 0
+    exists to surface explicit binding requirements; it never auto-allows the
+    operator-required actions.
+    """
 
     def test_push_without_execution_approval_blocked(self):
-        """T-11: push_feature_branch without execution approval -> BLOCKED."""
+        """T-11: push_feature_branch without operator approval -> OPERATOR_APPROVAL_REQUIRED.
+
+        Pre-baseline01 this case resolved to BLOCKED_EXECUTION_APPROVAL_REQUIRED
+        (Gate 0). After PR #270 the operator gate runs first; with no
+        operator_approval_id the action is blocked at the operator gate
+        regardless of execution_approval status.
+        """
         from git_pr_approval_gate import check_git_pr_action
         r = check_git_pr_action(
             action="push_feature_branch",
@@ -657,10 +670,18 @@ class TestGitPrGate0:
             execution_approval=None,
         )
         assert r["allowed"] is False
-        assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r.get("requires_operator_approval") is True
 
-    def test_push_with_execution_approval_allowed(self):
-        """T-12: push_feature_branch with execution approval -> AUTO_ALLOWED."""
+    def test_push_with_execution_approval_still_operator_required(self):
+        """T-12: push_feature_branch with execution approval -> OPERATOR_APPROVAL_REQUIRED (fail-closed).
+
+        Pre-baseline01 this case returned AUTO_ALLOWED_WITH_GATES / allowed=True.
+        After PR #270 push_feature_branch is OPERATOR_REQUIRED; even with a
+        valid execution_approval the action must NOT auto-allow. The
+        operator_approval_id kwarg (operator gate) is the only thing that
+        flips allowed=True; execution_approval alone is insufficient.
+        """
         from git_pr_approval_gate import check_git_pr_action
         approval = _make_approval(
             approved_actions=["push_feature_branch", "create_draft_pr"],
@@ -674,11 +695,18 @@ class TestGitPrGate0:
             execution_approval=approval,
             proposal_hash="abc123def456",
         )
-        assert r["allowed"] is True
-        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
+        # Without operator_approval_id, the operator gate blocks the action
+        assert r["allowed"] is False
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r.get("requires_operator_approval") is True
 
     def test_draft_pr_without_execution_approval_blocked(self):
-        """T-13: create_draft_pr without execution approval -> BLOCKED."""
+        """T-13: create_draft_pr without operator approval -> OPERATOR_APPROVAL_REQUIRED.
+
+        Pre-baseline01 this case resolved to BLOCKED_EXECUTION_APPROVAL_REQUIRED
+        (Gate 0). After PR #270 the operator gate runs first; with no
+        operator_approval_id the action is blocked at the operator gate.
+        """
         from git_pr_approval_gate import check_git_pr_action
         r = check_git_pr_action(
             action="create_draft_pr",
@@ -687,10 +715,17 @@ class TestGitPrGate0:
             execution_approval=None,
         )
         assert r["allowed"] is False
-        assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r.get("requires_operator_approval") is True
 
-    def test_draft_pr_with_execution_approval_allowed(self):
-        """T-14 git: create_draft_pr with execution approval -> AUTO_ALLOWED."""
+    def test_draft_pr_with_execution_approval_still_operator_required(self):
+        """T-14 git: create_draft_pr with execution approval -> OPERATOR_APPROVAL_REQUIRED (fail-closed).
+
+        Pre-baseline01 this case returned AUTO_ALLOWED_WITH_GATES / allowed=True.
+        After PR #270 create_draft_pr is OPERATOR_REQUIRED; execution_approval
+        only satisfies Gate 0 binding (which is no longer the binding gate),
+        not the operator gate.
+        """
         from git_pr_approval_gate import check_git_pr_action
         approval = _make_approval(
             approved_actions=["push_feature_branch", "create_draft_pr"],
@@ -702,8 +737,10 @@ class TestGitPrGate0:
             execution_approval=approval,
             proposal_hash="abc123def456",
         )
-        assert r["allowed"] is True
-        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
+        # Without operator_approval_id, the operator gate blocks the action
+        assert r["allowed"] is False
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r.get("requires_operator_approval") is True
 
     def test_gate0_high_risk_no_hash_blocked(self):
         """T-19: high risk + missing hash via git flow -> BLOCKED."""
