@@ -180,3 +180,5 @@ None of the P3 items affect baseline01 gate closure. They are documentation-only
 > No further modifications to baseline01 scope are permitted without a new operator-approved baseline cycle.
 >
 > **Post-baseline01 remediation**: PRs #270, #271, and #272 supersede the original freeze SHA for audit-remediated code. The remediated `github/main` is at SHA `7a5d946ca567b2223a9a7f5ad90db7e973f27c6a`. See ## Audit Supersession above for details.
+>
+> **Further cleanup (PR-C)**: PR #273 closed PR-C1 (docstring/catalog/freeze-record wording cleanup for F6/F7/N6). PR #274 closed PR-C2 (deprecation notes for legacy approval policy modules N3/N5). As of PR #274 merge, the audit-remediated main reached SHA `00945aa1eafedd4fdc5ca31db58c3516248bb769`. This does not alter the historical original freeze SHA.
