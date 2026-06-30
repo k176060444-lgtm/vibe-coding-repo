@@ -88,7 +88,9 @@ def classify_task(text, repo=None):
         repo_scope = "protected-external"
 
     # Approval/token
-    requires_approval = risk in ("critical", "high") or (repo_scope == "protected-external" and op_type in ("push", "remediation"))
+    # baseline01: all tasks require operator approval.
+    # The iteration_policy.auto_approve=False is enforced by recommend_iteration.
+    requires_approval = True
     requires_token = op_type in ("push", "remediation") and repo_scope == "protected-external"
 
     # Forbidden actions
