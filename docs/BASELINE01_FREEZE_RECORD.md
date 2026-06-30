@@ -136,6 +136,38 @@ These fields are set to `"unknown"` by design to prevent premature `true`/`false
 
 ---
 
+## Audit Supersession
+
+The original baseline01 closure (PR #265–#269) was subsequently audited by **`BASELINE01_FULL_AUDIT_READONLY`** (2026-06-30), which identified additional modules with independent operator approval bypass paths not covered by the original G3 closure.
+
+### P1 Findings — Closed by PR #270
+
+| ID | Module | Finding | Fix |
+|---|---|---|---|
+| **F1** | `scripts/vibe_batch_runner.py` | Self-repo batch auto-approval bypassing operator approval | Removed auto-approval path; all operations require `requires_approval=True`, `approved=False`; merge commit `c734d7cd` |
+| **F2** | `scripts/vibe_wo_compiler.py` | WO profiles / `compile_wo()` could propagate `requires_approval=False` | All 7 profiles set to `requires_approval=True`; `compile_wo()` always outputs `True`; `iteration_policy.auto_approve` defaults to `False` |
+| **F3** | `scripts/git_pr_approval_gate.py` | `AUTO_ALLOWED_ACTIONS` allowed git write actions without operator approval | Removed auto-allowed set; all git actions now require `OPERATOR_APPROVAL_REQUIRED`, `allowed=False`; merge commit `c734d7cd` |
+
+**PR #270** fix/baseline01-audit-p1-approval-bypass → main at `c734d7cd93eb63a8bf18853d86f9c3bc2e2805c3`. All three P1 blockers closed.
+
+### P2 Finding — Closed by PR #271 (this record)
+
+| ID | Module | Finding | Fix |
+|---|---|---|---|
+| **F4** | `scripts/vibe_task_intake.py` | `classify_task()` top-level `requires_approval` used pre-G3 logic, returning `False` for self-repo low-risk tasks | Standardized to `requires_approval = True` for all paths; merge commit `<PR271_MERGE_SHA>` |
+
+### Remaining P3 Cleanup Items
+
+| ID | Module | Finding | Status |
+|---|---|---|---|
+| **F6** | `scripts/vibe_privileged_push.py` | Docstring line 173 still says "Self-repo: low-risk push allowed without human approval" | Pending PR-C |
+| **F7** | `scripts/vibe_tool_registry.py` | Description line 42 still says "self-repo auto-allow" | Pending PR-C |
+| **F8** | GitHub | Stale open PRs #236/#235/#150 pre-date baseline01 | Pending operator decision |
+
+None of the P3 items affect baseline01 gate closure. They are documentation-only or stale-branch management.
+
+---
+
 ## Final Statement
 
 > **baseline01 is the accepted frozen baseline for the Vibe Coding Agent 小集群.**
