@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Tests for Git/PR State Approval Gate v1.2.0 (V1.21.13A)."""
+"""Tests for Git/PR State Approval Gate v1.3.0 (baseline01 fail-closed).
+
+baseline01 G3: all git write actions (push_feature_branch, create_draft_pr,
+update_draft_pr, draft_to_ready, merge, branch_delete, force_push, release_tag,
+push_main, push_protected_branch, ready_to_merge, production_gateway_change,
+worker_ssh_mutation, secrets_credential_change, admin_uac_service_change) are
+operator-required. There is no AUTO_ALLOWED set and no AUTO_ALLOWED_WITH_GATES
+verdict. Every gate test below asserts fail-closed semantics:
+    verdict == "OPERATOR_APPROVAL_REQUIRED" (or a more specific BLOCK verdict)
+    allowed is False
+    requires_operator_approval is True (when operator approval is the binding
+    reason)
+"""
 
 import sys
 from datetime import datetime, timezone
@@ -10,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from git_pr_approval_gate import (
     ALL_ACTIONS,
     ALWAYS_BLOCKED_ACTIONS,
-    AUTO_ALLOWED_ACTIONS,
     OPERATOR_REQUIRED_ACTIONS,
     PROTECTED_BRANCHES,
     VERDICTS,
@@ -36,11 +47,17 @@ _EAG_APPROVAL = {
 }
 
 
-class TestAutoAllowedPushFeature:
-    """AUTO_ALLOWED_WITH_GATES: push feature branch."""
+class TestPushFeatureOperatorRequired:
+    """baseline01 G3: push_feature_branch is OPERATOR_REQUIRED.
 
-    def test_push_feature_gates_passed(self):
-        """Push feature branch + all gates passed → AUTO_ALLOWED_WITH_GATES."""
+    Pre-baseline01 the same action could resolve to AUTO_ALLOWED_WITH_GATES when
+    checks + intake + execution approval were all green. After PR #270 the
+    action is folded into OPERATOR_REQUIRED_ACTIONS and must always return
+    OPERATOR_APPROVAL_REQUIRED with allowed=False.
+    """
+
+    def test_push_feature_gates_passed_still_operator_required(self):
+        """Push feature branch + all gates passed → OPERATOR_APPROVAL_REQUIRED (fail-closed)."""
         r = check_git_pr_action(
             action="push_feature_branch",
             target_branch="feat/test",
@@ -50,12 +67,19 @@ class TestAutoAllowedPushFeature:
             execution_approval=_EAG_APPROVAL,
             proposal_hash="testhash",
         )
-        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
-        assert r["allowed"] is True
-        assert "push_feature_branch" in r["safe_auto_actions"]
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r["allowed"] is False
+        assert r["requires_operator_approval"] is True
+        assert "safe_auto_actions" not in r or "push_feature_branch" not in r.get("safe_auto_actions", [])
 
     def test_push_feature_intake_not_approved(self):
-        """Push feature without intake → BLOCKED."""
+        """Push feature without intake → OPERATOR_APPROVAL_REQUIRED (operator gate first).
+
+        Pre-baseline01 this case resolved to BLOCKED_UNAPPROVED_GIT_ACTION at
+        the intake gate. After PR #270 push_feature_branch is OPERATOR_REQUIRED;
+        the operator gate runs first and the action is blocked regardless of
+        intake/checks status.
+        """
         r = check_git_pr_action(
             action="push_feature_branch",
             target_branch="feat/test",
@@ -64,11 +88,12 @@ class TestAutoAllowedPushFeature:
             execution_approval=_EAG_APPROVAL,
             proposal_hash="testhash",
         )
-        assert r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION"
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
         assert r["allowed"] is False
+        assert r["requires_operator_approval"] is True
 
     def test_push_feature_checks_not_passed(self):
-        """Push feature without checks → BLOCKED."""
+        """Push feature without checks → OPERATOR_APPROVAL_REQUIRED (operator gate first)."""
         r = check_git_pr_action(
             action="push_feature_branch",
             target_branch="feat/test",
@@ -77,8 +102,9 @@ class TestAutoAllowedPushFeature:
             execution_approval=_EAG_APPROVAL,
             proposal_hash="testhash",
         )
-        assert r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION"
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
         assert r["allowed"] is False
+        assert r["requires_operator_approval"] is True
 
     def test_push_feature_to_main_blocked(self):
         """Push feature to main → BLOCKED_PROTECTED_BRANCH."""
@@ -94,11 +120,17 @@ class TestAutoAllowedPushFeature:
         assert r["allowed"] is False
 
 
-class TestAutoAllowedDraftPR:
-    """AUTO_ALLOWED_WITH_GATES: create/update Draft PR."""
+class TestDraftPROperatorRequired:
+    """baseline01 G3: create_draft_pr / update_draft_pr are OPERATOR_REQUIRED.
 
-    def test_create_draft_pr_gates_passed(self):
-        """Create Draft PR + all gates passed → AUTO_ALLOWED_WITH_GATES."""
+    Pre-baseline01 these actions could resolve to AUTO_ALLOWED_WITH_GATES when
+    checks + intake + execution approval were green. After PR #270 they are
+    folded into OPERATOR_REQUIRED_ACTIONS and must always require operator
+    approval, regardless of gate outcomes.
+    """
+
+    def test_create_draft_pr_gates_passed_still_operator_required(self):
+        """Create Draft PR + all gates passed → OPERATOR_APPROVAL_REQUIRED (fail-closed)."""
         r = check_git_pr_action(
             action="create_draft_pr",
             target_branch="main",
@@ -109,11 +141,12 @@ class TestAutoAllowedDraftPR:
                     execution_approval=_EAG_APPROVAL,
             proposal_hash="testhash",
         )
-        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
-        assert r["allowed"] is True
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r["allowed"] is False
+        assert r["requires_operator_approval"] is True
 
-    def test_update_draft_pr_gates_passed(self):
-        """Update Draft PR + all gates passed → AUTO_ALLOWED_WITH_GATES."""
+    def test_update_draft_pr_gates_passed_still_operator_required(self):
+        """Update Draft PR + all gates passed → OPERATOR_APPROVAL_REQUIRED (fail-closed)."""
         r = check_git_pr_action(
             action="update_draft_pr",
             target_branch="main",
@@ -123,11 +156,18 @@ class TestAutoAllowedDraftPR:
                     execution_approval=_EAG_APPROVAL,
             proposal_hash="testhash",
         )
-        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
-        assert r["allowed"] is True
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r["allowed"] is False
+        assert r["requires_operator_approval"] is True
 
     def test_create_draft_with_open_state_blocked(self):
-        """Create Draft PR with desired state OPEN → BLOCKED."""
+        """Create Draft PR with desired state OPEN → OPERATOR_APPROVAL_REQUIRED (operator gate first).
+
+        Pre-baseline01 this case resolved to BLOCKED_READY_WITHOUT_APPROVAL
+        via the desired-state check. After PR #270 create_draft_pr is
+        OPERATOR_REQUIRED; the operator gate runs first and the action is
+        blocked regardless of desired_pr_state.
+        """
         r = check_git_pr_action(
             action="create_draft_pr",
             target_branch="main",
@@ -137,8 +177,9 @@ class TestAutoAllowedDraftPR:
                     execution_approval=_EAG_APPROVAL,
             proposal_hash="testhash",
         )
-        assert r["verdict"] == "BLOCKED_READY_WITHOUT_APPROVAL"
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
         assert r["allowed"] is False
+        assert r["requires_operator_approval"] is True
 
 
 class TestBlockedCreateReadyPR:
@@ -380,8 +421,13 @@ class TestHighRiskFiles:
         assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
         assert r["allowed"] is False
 
-    def test_no_high_risk_files(self):
-        """No high-risk files → AUTO_ALLOWED."""
+    def test_no_high_risk_files_still_operator_required(self):
+        """No high-risk files + all gates passed → OPERATOR_APPROVAL_REQUIRED (fail-closed).
+
+        Pre-baseline01 this case resolved to AUTO_ALLOWED_WITH_GATES. After
+        PR #270 create_draft_pr is OPERATOR_REQUIRED; the action is blocked
+        at the operator gate regardless of file risk.
+        """
         r = check_git_pr_action(
             action="create_draft_pr",
             target_branch="main",
@@ -392,15 +438,21 @@ class TestHighRiskFiles:
                     execution_approval=_EAG_APPROVAL,
             proposal_hash="testhash",
         )
-        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
-        assert r["allowed"] is True
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r["allowed"] is False
+        assert r["requires_operator_approval"] is True
 
 
 class TestIntakeIntegration:
     """V1.21.6 intake approval integration."""
 
-    def test_no_intake_blocked(self):
-        """Git action without intake approval → BLOCKED."""
+    def test_no_intake_still_operator_required(self):
+        """Git action without intake approval → OPERATOR_APPROVAL_REQUIRED (operator gate first).
+
+        Pre-baseline01 this case resolved to BLOCKED_UNAPPROVED_GIT_ACTION at
+        the intake gate. After PR #270 the operator gate runs first; the
+        action is blocked regardless of intake_approved status.
+        """
         r = check_git_pr_action(
             action="push_feature_branch",
             target_branch="feat/test",
@@ -409,12 +461,17 @@ class TestIntakeIntegration:
                     execution_approval=_EAG_APPROVAL,
             proposal_hash="testhash",
         )
-        assert r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION"
-        assert r["blocked_reason"] is not None
-        assert "intake" in r["blocked_reason"].lower()
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r["allowed"] is False
+        assert r["requires_operator_approval"] is True
 
-    def test_with_intake_allowed(self):
-        """Git action with intake approval + checks → AUTO_ALLOWED."""
+    def test_with_intake_still_operator_required(self):
+        """Git action with intake approval + checks → OPERATOR_APPROVAL_REQUIRED (fail-closed).
+
+        Pre-baseline01 this case resolved to AUTO_ALLOWED_WITH_GATES. After
+        PR #270 push_feature_branch is OPERATOR_REQUIRED regardless of intake
+        status.
+        """
         r = check_git_pr_action(
             action="push_feature_branch",
             target_branch="feat/test",
@@ -423,7 +480,9 @@ class TestIntakeIntegration:
                     execution_approval=_EAG_APPROVAL,
             proposal_hash="testhash",
         )
-        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r["allowed"] is False
+        assert r["requires_operator_approval"] is True
 
 
 class TestUnknownAction:
@@ -481,28 +540,43 @@ class TestGenericOperatorRequired:
 
 
 class TestPolicyConstants:
-    """Policy constant validation."""
+    """Policy constant validation (baseline01 G3 fail-closed)."""
 
     def test_verdicts_count(self):
-        assert len(VERDICTS) == 11
+        # baseline01 (PR #270): 10 verdicts, no AUTO_ALLOWED_WITH_GATES
+        assert len(VERDICTS) == 10
+        assert "AUTO_ALLOWED_WITH_GATES" not in VERDICTS
+        assert "OPERATOR_APPROVAL_REQUIRED" in VERDICTS
+        assert "PASS" in VERDICTS
 
-    def test_auto_allowed_count(self):
-        assert len(AUTO_ALLOWED_ACTIONS) == 3
+    def test_no_auto_allowed_set(self):
+        """baseline01: AUTO_ALLOWED_ACTIONS set must not exist on the module."""
+        import git_pr_approval_gate as g
+        assert not hasattr(g, "AUTO_ALLOWED_ACTIONS"), (
+            "AUTO_ALLOWED_ACTIONS must be removed (baseline01 G3 fail-closed)"
+        )
 
     def test_operator_required_count(self):
-        assert len(OPERATOR_REQUIRED_ACTIONS) == 12
+        # baseline01 (PR #270): 15 operator-required actions, including the
+        # former auto-allowed set folded in
+        assert len(OPERATOR_REQUIRED_ACTIONS) == 15
+        # Sanity: the three former auto-allowed actions are now operator-required
+        assert "push_feature_branch" in OPERATOR_REQUIRED_ACTIONS
+        assert "create_draft_pr" in OPERATOR_REQUIRED_ACTIONS
+        assert "update_draft_pr" in OPERATOR_REQUIRED_ACTIONS
 
     def test_always_blocked_count(self):
         assert len(ALWAYS_BLOCKED_ACTIONS) == 1
+        assert "create_ready_pr" in ALWAYS_BLOCKED_ACTIONS
 
     def test_protected_branches_count(self):
         assert len(PROTECTED_BRANCHES) == 5
         assert "main" in PROTECTED_BRANCHES
         assert "production" in PROTECTED_BRANCHES
 
-    def test_all_actions_union(self):
-        """ALL_ACTIONS is the union of all categories."""
-        assert ALL_ACTIONS == AUTO_ALLOWED_ACTIONS | OPERATOR_REQUIRED_ACTIONS | ALWAYS_BLOCKED_ACTIONS
+    def test_all_actions_equals_operator_plus_always_blocked(self):
+        """ALL_ACTIONS is the union of OPERATOR_REQUIRED + ALWAYS_BLOCKED (no auto set)."""
+        assert ALL_ACTIONS == OPERATOR_REQUIRED_ACTIONS | ALWAYS_BLOCKED_ACTIONS
 
 
 class TestApprovalBinding:
@@ -541,10 +615,23 @@ class TestApprovalBinding:
 
 
 class TestFailClosed:
-    """V1.21.12: EAG import/call failure must BLOCK AUTO_ALLOWED actions."""
+    """baseline01 (PR #270): all git write actions are operator-required.
 
-    def test_eag_unavailable_push_blocked(self):
-        """EAG import fails + push_feature_branch → BLOCKED (not fail-open)."""
+    Pre-baseline01 this class verified the EAG (Execution Approval Gate)
+    fail-closed behavior for AUTO_ALLOWED actions. After PR #270 there is
+    no AUTO_ALLOWED set, so the EAG layer is no longer the binding
+    constraint. The tests below verify the new contract: even with
+    execution_approval bound, push_feature_branch / create_draft_pr /
+    update_draft_pr are blocked at the operator gate.
+    """
+
+    def test_push_feature_no_operator_approval_blocked(self):
+        """push_feature_branch + no operator approval → OPERATOR_APPROVAL_REQUIRED (operator gate first).
+
+        With no operator_approval_id, the action is blocked at the operator
+        gate before any other gate can run. EAG unavailability does not
+        change the verdict.
+        """
         import unittest.mock as mock
         with mock.patch(
             "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
@@ -553,16 +640,16 @@ class TestFailClosed:
                 action="push_feature_branch",
                 target_branch="feat-branch",
                 source_branch="feat/v12112",
-                operator_approval_id="a1",
-                operator_approved_actions=["push_feature_branch"],
                 intake_approved=True,
             )
+            # baseline01: operator gate runs first; verdict is
+            # OPERATOR_APPROVAL_REQUIRED regardless of EAG availability
             assert r["allowed"] is False
-            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
-            assert "unavailable" in r.get("blocked_reason", "").lower()
+            assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+            assert r["requires_operator_approval"] is True
 
-    def test_eag_unavailable_create_draft_pr_blocked(self):
-        """EAG import fails + create_draft_pr → BLOCKED."""
+    def test_create_draft_pr_no_operator_approval_blocked(self):
+        """create_draft_pr + no operator approval → OPERATOR_APPROVAL_REQUIRED."""
         import unittest.mock as mock
         with mock.patch(
             "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
@@ -571,15 +658,14 @@ class TestFailClosed:
                 action="create_draft_pr",
                 target_branch="main",
                 source_branch="feat/v12112",
-                operator_approval_id="a1",
-                operator_approved_actions=["create_draft_pr"],
                 intake_approved=True,
             )
             assert r["allowed"] is False
-            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+            assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+            assert r["requires_operator_approval"] is True
 
-    def test_eag_unavailable_update_draft_pr_blocked(self):
-        """EAG import fails + update_draft_pr → BLOCKED."""
+    def test_update_draft_pr_no_operator_approval_blocked(self):
+        """update_draft_pr + no operator approval → OPERATOR_APPROVAL_REQUIRED."""
         import unittest.mock as mock
         with mock.patch(
             "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
@@ -589,15 +675,14 @@ class TestFailClosed:
                 target_branch="main",
                 source_branch="feat/v12112",
                 pr_number=203,
-                operator_approval_id="a1",
-                operator_approved_actions=["update_draft_pr"],
                 intake_approved=True,
             )
             assert r["allowed"] is False
-            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+            assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+            assert r["requires_operator_approval"] is True
 
-    def test_eag_unavailable_merge_not_affected(self):
-        """EAG import fails + merge (OPERATOR_REQUIRED) → not affected by Gate 0."""
+    def test_eag_unavailable_merge_still_blocked(self):
+        """merge (operator-required) → BLOCKED_MERGE_WITHOUT_APPROVAL (not Gate 0)."""
         import unittest.mock as mock
         with mock.patch(
             "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
@@ -608,23 +693,28 @@ class TestFailClosed:
                 operator_approval_id=None,
                 operator_approved_actions=[],
             )
-            # merge is OPERATOR_REQUIRED, blocked for missing operator approval, not Gate 0
+            # merge is OPERATOR_REQUIRED, blocked for missing operator approval
             assert r["allowed"] is False
-            assert r["verdict"] != "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
+            assert r["verdict"] == "BLOCKED_MERGE_WITHOUT_APPROVAL"
 
     def test_eag_unavailable_force_push_still_blocked(self):
-        """EAG import fails + force_push → blocked (not Gate 0 dependent)."""
+        """force_push → BLOCKED (force_push is ALWAYS_BLOCKED regardless of EAG)."""
         import unittest.mock as mock
         with mock.patch(
             "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", False
         ):
             r = check_git_pr_action(action="force_push")
             assert r["allowed"] is False
-            # force_push is ALWAYS_BLOCKED or BLOCKED_FORCE_PUSH regardless of EAG
+            # force_push is always blocked
             assert "blocked" in r["verdict"].lower() or "always" in r["verdict"].lower()
 
-    def test_eag_call_exception_push_blocked(self):
-        """EAG raises exception + push_feature_branch → blocked or exception, not allow."""
+    def test_eag_call_exception_no_operator_approval_still_blocked(self):
+        """EAG raises + push_feature_branch + no operator approval → still OPERATOR_APPROVAL_REQUIRED.
+
+        After PR #270 the EAG layer is not invoked for push_feature_branch;
+        the operator gate runs first. The mocked exception never reaches
+        production code. We verify the action is still operator-required.
+        """
         import unittest.mock as mock
 
         def _raise(*a, **kw):
@@ -635,23 +725,26 @@ class TestFailClosed:
         ), mock.patch(
             "git_pr_approval_gate._eag_check", side_effect=_raise
         ):
-            try:
-                r = check_git_pr_action(
-                    action="push_feature_branch",
-                    target_branch="feat-branch",
-                    source_branch="feat/v12112",
-                    operator_approval_id="a1",
-                    operator_approved_actions=["push_feature_branch"],
-                    intake_approved=True,
-                    execution_approval=_EAG_APPROVAL,
-                )
-                assert r["allowed"] is False
-            except RuntimeError:
-                # Exception propagated = not silently allowing = acceptable
-                pass
+            r = check_git_pr_action(
+                action="push_feature_branch",
+                target_branch="feat-branch",
+                source_branch="feat/v12112",
+                intake_approved=True,
+                execution_approval=_EAG_APPROVAL,
+            )
+            # baseline01: operator gate returns OPERATOR_APPROVAL_REQUIRED
+            # before EAG is consulted. The EAG exception is never reached
+            # for this action path.
+            assert r["allowed"] is False
+            assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+            assert r["requires_operator_approval"] is True
 
-    def test_eag_returns_none_push_blocked(self):
-        """EAG returns None + push_feature_branch → blocked or exception, not allow."""
+    def test_eag_returns_none_no_operator_approval_still_blocked(self):
+        """EAG returns None + push_feature_branch + no operator approval → still OPERATOR_APPROVAL_REQUIRED.
+
+        Same as the exception case: the operator gate runs first; the EAG
+        layer is not invoked for OPERATOR_REQUIRED actions.
+        """
         import unittest.mock as mock
 
         with mock.patch(
@@ -659,21 +752,16 @@ class TestFailClosed:
         ), mock.patch(
             "git_pr_approval_gate._eag_check", return_value=None
         ):
-            try:
-                r = check_git_pr_action(
-                    action="push_feature_branch",
-                    target_branch="feat-branch",
-                    source_branch="feat/v12112",
-                    operator_approval_id="a1",
-                    operator_approved_actions=["push_feature_branch"],
-                    intake_approved=True,
-                    execution_approval=_EAG_APPROVAL,
-                )
-                # If returns, .get("verdict") on None will fail, which is fine
-                assert r["allowed"] is False
-            except (AttributeError, TypeError):
-                # Crashes on None.get() = not silently allowing = acceptable
-                pass
+            r = check_git_pr_action(
+                action="push_feature_branch",
+                target_branch="feat-branch",
+                source_branch="feat/v12112",
+                intake_approved=True,
+                execution_approval=_EAG_APPROVAL,
+            )
+            assert r["allowed"] is False
+            assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+            assert r["requires_operator_approval"] is True
 
 
 class TestSelfCheck:
@@ -682,10 +770,25 @@ class TestSelfCheck:
 
 
 class TestExceptionCleanBlock:
-    """V1.21.13A: EAG exception returns clean BLOCK verdict, not traceback."""
+    """baseline01 (PR #270): EAG exception path is not reachable for operator-required actions.
 
-    def test_eag_runtime_error_clean_block(self):
-        """T-05: EAG raises RuntimeError + push_feature_branch → clean BLOCK."""
+    Pre-baseline01 this class verified that the EAG layer returns a clean
+    BLOCKED_EXECUTION_APPROVAL_GATE_ERROR verdict when it raises, instead of
+    propagating the exception or silently allowing. After PR #270 the EAG
+    layer is no longer invoked for push_feature_branch / create_draft_pr /
+    update_draft_pr — those actions are blocked at the operator gate, which
+    runs first. The tests below verify the new contract: even with EAG
+    mocked to raise, the action is operator-required and does not propagate
+    the exception.
+    """
+
+    def test_eag_runtime_error_does_not_propagate(self):
+        """T-05: EAG raises RuntimeError + push_feature_branch + no operator approval → OPERATOR_APPROVAL_REQUIRED (no traceback).
+
+        The mocked EAG exception is never reached by the production code
+        because the operator gate runs first. No exception propagates to
+        the caller and the verdict is the operator gate verdict.
+        """
         import unittest.mock as mock
         with mock.patch(
             "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
@@ -702,13 +805,13 @@ class TestExceptionCleanBlock:
                 execution_approval=_EAG_APPROVAL,
                 proposal_hash="testhash",
             )
+            # baseline01: operator gate runs first; EAG exception never reached
             assert r["allowed"] is False
-            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
-            assert "RuntimeError" in r["blocked_reason"]
-            assert "fail-closed" in r["blocked_reason"].lower()
+            assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+            assert r["requires_operator_approval"] is True
 
-    def test_eag_attribute_error_clean_block(self):
-        """T-06: EAG raises AttributeError + create_draft_pr → clean BLOCK."""
+    def test_eag_attribute_error_does_not_propagate(self):
+        """T-06: EAG raises AttributeError + create_draft_pr + no operator approval → OPERATOR_APPROVAL_REQUIRED (no traceback)."""
         import unittest.mock as mock
         with mock.patch(
             "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
@@ -724,11 +827,11 @@ class TestExceptionCleanBlock:
                 proposal_hash="testhash",
             )
             assert r["allowed"] is False
-            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
-            assert "AttributeError" in r["blocked_reason"]
+            assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+            assert r["requires_operator_approval"] is True
 
-    def test_eag_returns_none_clean_block(self):
-        """T-07: EAG returns None + push_feature_branch → clean BLOCK."""
+    def test_eag_returns_none_does_not_propagate(self):
+        """T-07: EAG returns None + push_feature_branch + no operator approval → OPERATOR_APPROVAL_REQUIRED (no AttributeError)."""
         import unittest.mock as mock
         with mock.patch(
             "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
@@ -746,11 +849,11 @@ class TestExceptionCleanBlock:
                 proposal_hash="testhash",
             )
             assert r["allowed"] is False
-            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
-            assert "None" in r["blocked_reason"]
+            assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+            assert r["requires_operator_approval"] is True
 
-    def test_eag_invalid_result_clean_block(self):
-        """T-08: EAG returns invalid result + create_draft_pr → clean BLOCK."""
+    def test_eag_invalid_result_does_not_propagate(self):
+        """T-08: EAG returns invalid result + create_draft_pr + no operator approval → OPERATOR_APPROVAL_REQUIRED (no traceback)."""
         import unittest.mock as mock
         with mock.patch(
             "git_pr_approval_gate._EXECUTION_APPROVAL_GATE_AVAILABLE", True
@@ -766,12 +869,16 @@ class TestExceptionCleanBlock:
                 proposal_hash="testhash",
             )
             assert r["allowed"] is False
-            # Unknown/invalid verdict → BLOCKED_EXECUTION_APPROVAL_GATE_ERROR
-            assert r["verdict"] == "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
-            assert "fail-closed" in r["blocked_reason"].lower()
+            assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+            assert r["requires_operator_approval"] is True
 
-    def test_normal_path_unaffected(self):
-        """T-13: Normal path + valid approval → AUTO_ALLOWED."""
+    def test_normal_path_operator_required(self):
+        """T-13: Normal path + valid approval → OPERATOR_APPROVAL_REQUIRED (fail-closed).
+
+        Pre-baseline01 this case resolved to AUTO_ALLOWED_WITH_GATES. After
+        PR #270 push_feature_branch is OPERATOR_REQUIRED; no execution approval
+        can auto-allow the action. The action is blocked at the operator gate.
+        """
         r = check_git_pr_action(
             action="push_feature_branch",
             target_branch="feat/t",
@@ -781,5 +888,6 @@ class TestExceptionCleanBlock:
             execution_approval=_EAG_APPROVAL,
             proposal_hash="testhash",
         )
-        assert r["allowed"] is True
-        assert r["verdict"] == "AUTO_ALLOWED_WITH_GATES"
+        assert r["allowed"] is False
+        assert r["verdict"] == "OPERATOR_APPROVAL_REQUIRED"
+        assert r["requires_operator_approval"] is True
