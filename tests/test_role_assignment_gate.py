@@ -548,7 +548,9 @@ class TestSelfCheck(unittest.TestCase):
 
     def test_self_check_version(self):
         result = self_check()
-        self.assertEqual(result["version"], "1.0.0")
+        # v1.1.0 minor bump (Baseline02 Stage 3): adds spec §4.2 7-field
+        # validation on top of the v1.0.0 baseline. Public API is preserved.
+        self.assertEqual(result["version"], "1.1.0")
 
 
 class TestFullValidMatrix(unittest.TestCase):
