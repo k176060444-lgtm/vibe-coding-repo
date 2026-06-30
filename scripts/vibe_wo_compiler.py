@@ -24,7 +24,7 @@ WO_TEMPLATES = {
         "final_validation": ["smoke", "qg", "v1_freeze", "dashboard", "resume_gate"],
         "stop_conditions": ["smoke_fail", "qg_block", "freeze_fail", "dirty_worktree", "forbidden_path"],
         "resume_strategy": "clean_resume_from_current_main",
-        "requires_approval": False,
+        "requires_approval": True,
     },
     "protected-external-read": {
         "execution_node": "debian",
@@ -33,7 +33,7 @@ WO_TEMPLATES = {
         "final_validation": ["report_schema"],
         "stop_conditions": ["write_detected", "token_access_detected"],
         "resume_strategy": "re_fetch_and_retry",
-        "requires_approval": False,
+        "requires_approval": True,
     },
     "protected-external-push": {
         "execution_node": "debian",
@@ -51,7 +51,7 @@ WO_TEMPLATES = {
         "final_validation": ["gateway_health"],
         "stop_conditions": ["session_conflict", "both_profiles_offline"],
         "resume_strategy": "restart_default_first_then_vibedev",
-        "requires_approval": False,
+        "requires_approval": True,
     },
     "dependency-install": {
         "execution_node": "debian",
@@ -65,7 +65,7 @@ WO_TEMPLATES = {
     "windows-worker-task": {
         "execution_node": "windows",
         "tools": ["terminal", "file"],
-        "requires_approval": False,
+        "requires_approval": True,
         "per_wo_validation": ["exit_code"],
         "final_validation": ["exit_code"],
         "stop_conditions": ["timeout_exceeded", "exit_code_nonzero", "gateway_blocked"],
@@ -74,7 +74,7 @@ WO_TEMPLATES = {
     "dual-node-task": {
         "execution_node": "dual-node",
         "tools": ["terminal", "file"],
-        "requires_approval": False,
+        "requires_approval": True,
         "per_wo_validation": ["exit_code"],
         "final_validation": ["exit_code"],
         "stop_conditions": ["windows_phase_failed", "debian_phase_failed", "timeout_exceeded"],
@@ -177,7 +177,7 @@ def compile_wo(task_spec):
         "final_validation": template["final_validation"],
         "stop_conditions": template["stop_conditions"],
         "resume_strategy": template["resume_strategy"],
-        "requires_approval": task_spec.get("requires_approval", template["requires_approval"]),
+        "requires_approval": True,  # baseline01: all WOs require operator approval
         "requires_token": task_spec.get("requires_token", False),
         "validation_mode": task_spec.get("validation_mode", "auto"),
         "node_attribution": {
@@ -192,12 +192,12 @@ def compile_wo(task_spec):
         plan["iteration_policy"] = {
             "profile": iter_policy.get("recommended_profile", "standard"),
             "steps": iter_policy.get("recommended_steps", 300),
-            "auto_approve": iter_policy.get("auto_approve", True),
+            "auto_approve": iter_policy.get("auto_approve", False),
             "source": "task_intake_recommendation",
         }
     else:
         plan["iteration_policy"] = {
-            "profile": "standard", "steps": 300, "auto_approve": True,
+            "profile": "standard", "steps": 300, "auto_approve": False,
             "source": "default",
         }
 
@@ -226,7 +226,7 @@ def self_check(output_json=False):
         "message": f"profile={plan.get('iteration_policy', {}).get('profile', 'missing')}",
     })
 
-    # Self repo low-risk compilation
+    # Self repo low-risk compilation — compile_wo forces requires_approval=True
     spec = {"task_id": "task-test-001", "summary": "update docs", "repo": SELF_REPO,
             "repo_scope": "trusted-self", "risk_level": "low", "operation_type": "write-local",
             "requires_approval": False, "requires_token": False,
@@ -234,7 +234,7 @@ def self_check(output_json=False):
     plan = compile_wo(spec)
     checks.append({
         "name": "self_repo_low_risk",
-        "passed": plan["template"] == "self-repo-low-risk" and not plan["requires_approval"],
+        "passed": plan["template"] == "self-repo-low-risk" and plan["requires_approval"] is True,
         "message": f"template={plan['template']} approval={plan['requires_approval']}",
     })
 

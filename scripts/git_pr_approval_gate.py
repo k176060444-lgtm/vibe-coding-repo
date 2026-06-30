@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Git/PR State Approval Gate v1.0.0
+"""Git/PR State Approval Gate v1.3.0
 
-Enforces Git/PR state transition policy for VibeDev orchestrator:
-- AUTO_ALLOWED_WITH_GATES: push feature branch, create/update Draft PR (with gates passed)
-- OPERATOR_APPROVAL_REQUIRED: Draft→Ready, merge, branch delete, push main, force push, etc.
-- BLOCKED: create Ready PR directly, merge without approval, force push without approval, etc.
+Enforces Git/PR state transition policy for VibeDev orchestrator (baseline01):
+- All git write actions require explicit operator approval.
+- No auto-allowed actions exist.
+- OPERATOR_APPROVAL_REQUIRED: ALL actions (push feature branch, create Draft PR,
+  update Draft PR, Draft→Ready, merge, branch delete, push main, force push, etc.)
+- BLOCKED: create Ready PR directly, merge without approval, force push without
+  approval, etc.
 
 Integrates with:
 - V1.21.6 conversational_intake_gate (intake approval lifecycle)
@@ -16,12 +19,12 @@ Usage:
     python scripts/git_pr_approval_gate.py --action ACTION [options] [--json]
 
 Exit codes:
-    0 = PASS or AUTO_ALLOWED_WITH_GATES
+    0 = PASS (operator approval obtained and checks passed)
     1 = BLOCKED
     2 = usage error
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import argparse
 import json
@@ -65,15 +68,12 @@ except ImportError:
 # Git/PR actions
 # ---------------------------------------------------------------------------
 
-# A. AUTO_ALLOWED_WITH_GATES — no operator approval needed, but gates must pass
-AUTO_ALLOWED_ACTIONS = {
+# A. OPERATOR_APPROVAL_REQUIRED — ALL git actions require explicit operator approval
+# (baseline01: no auto-allowed actions)
+OPERATOR_REQUIRED_ACTIONS = {
     "push_feature_branch",
     "create_draft_pr",
     "update_draft_pr",
-}
-
-# B. OPERATOR_APPROVAL_REQUIRED — explicit operator approval needed
-OPERATOR_REQUIRED_ACTIONS = {
     "draft_to_ready",
     "merge",
     "ready_to_merge",
@@ -93,7 +93,7 @@ ALWAYS_BLOCKED_ACTIONS = {
     "create_ready_pr",
 }
 
-ALL_ACTIONS = AUTO_ALLOWED_ACTIONS | OPERATOR_REQUIRED_ACTIONS | ALWAYS_BLOCKED_ACTIONS
+ALL_ACTIONS = OPERATOR_REQUIRED_ACTIONS | ALWAYS_BLOCKED_ACTIONS
 
 # Protected branches — push/force-push always needs operator approval
 PROTECTED_BRANCHES = {"main", "master", "release", "production", "staging"}
@@ -112,7 +112,6 @@ HIGH_RISK_FILE_PATTERNS = [
 # ---------------------------------------------------------------------------
 
 VERDICTS = {
-    "AUTO_ALLOWED_WITH_GATES": "Action auto-allowed: all required gates passed, no operator approval needed",
     "OPERATOR_APPROVAL_REQUIRED": "Action requires explicit operator approval before execution",
     "BLOCKED_UNAPPROVED_GIT_ACTION": "Action blocked: git action not approved for this state",
     "BLOCKED_PROTECTED_BRANCH": "Action blocked: push to protected branch requires operator approval",
@@ -240,147 +239,11 @@ def check_git_pr_action(
                     high_risk_files.append(f)
                     break
 
-    # --- AUTO_ALLOWED_WITH_GATES actions ---
-    if action in AUTO_ALLOWED_ACTIONS:
-        # Gate 0: execution approval binding must exist (V1.21.12)
-        # V1.21.13A: Exception clean block — catch EAG errors, return clean verdict
-        if _EXECUTION_APPROVAL_GATE_AVAILABLE:
-            try:
-                eag_result = _eag_check(
-                    action=action,
-                    approval=execution_approval,
-                    proposal_hash=proposal_hash,
-                    operator_message=operator_message,
-                    changed_files=changed_files,
-                )
-                # V1.21.18: Persist EAG result for vibe_run_report auto-discovery
-                if _WRITE_EAG_RESULT_AVAILABLE:
-                    _write_eag_result(eag_result)
-            except Exception as e:
-                result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
-                result["allowed"] = False
-                result["blocked_reason"] = (
-                    f"Execution approval gate error for action '{action}': "
-                    f"{type(e).__name__}: {e}. AUTO_ALLOWED actions blocked (fail-closed)."
-                )
-                result["required_next_step"] = "Fix execution approval gate before proceeding"
-                result["forbidden_actions"] = [action]
-                return result
-            if eag_result is None:
-                result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
-                result["allowed"] = False
-                result["blocked_reason"] = (
-                    f"Execution approval gate returned None for action '{action}'. "
-                    f"AUTO_ALLOWED actions blocked (fail-closed)."
-                )
-                result["required_next_step"] = "Fix execution approval gate before proceeding"
-                result["forbidden_actions"] = [action]
-                return result
-            eag_verdict = eag_result.get("verdict", "")
-            if eag_verdict in (_EAG_APPROVAL_BOUND, _EAG_PASS_READ_ONLY):
-                pass  # Valid — continue to Gate 1+
-            elif eag_verdict in _EAG_KNOWN_BLOCK_VERDICTS:
-                # Known EAG block verdict (legitimate block, not an error)
-                result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
-                result["allowed"] = False
-                result["blocked_reason"] = (
-                    f"Execution approval gate blocked: {eag_result.get('detail', eag_verdict)}. "
-                    "AUTO_ALLOWED actions require execution approval binding (V1.21.12)."
-                )
-                result["required_next_step"] = "Obtain execution approval before git actions"
-                result["forbidden_actions"] = [action]
-                return result
-            else:
-                # Unknown/invalid verdict → EAG error (fail-closed)
-                result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR"
-                result["allowed"] = False
-                result["blocked_reason"] = (
-                    f"Execution approval gate returned unknown/invalid verdict "
-                    f"'{eag_verdict}' for action '{action}'. "
-                    f"AUTO_ALLOWED actions blocked (fail-closed)."
-                )
-                result["required_next_step"] = "Fix execution approval gate before proceeding"
-                result["forbidden_actions"] = [action]
-                return result
-        else:
-            # FAIL-CLOSED: EAG unavailable → block AUTO_ALLOWED actions (V1.21.12)
-            result["verdict"] = "BLOCKED_EXECUTION_APPROVAL_REQUIRED"
-            result["allowed"] = False
-            result["blocked_reason"] = (
-                f"Execution approval gate unavailable — cannot verify approval binding "
-                f"for git action '{action}'. FAIL-CLOSED: action blocked."
-            )
-            result["required_next_step"] = "Ensure execution_approval_gate is importable before proceeding"
-            result["forbidden_actions"] = [action]
-            return result
-
-        # Gate 1: intake must be approved (V1.21.6)
-        if not intake_approved:
-            result["verdict"] = "BLOCKED_UNAPPROVED_GIT_ACTION"
-            result["allowed"] = False
-            result["blocked_reason"] = "Intake not approved. Complete V1.21.6 intake lifecycle before git actions."
-            result["required_next_step"] = "Run intake-check, create proposal, get operator approval"
-            result["forbidden_actions"] = [action]
-            return result
-
-        # Gate 2: local checks must pass
-        if not checks_passed:
-            result["verdict"] = "BLOCKED_UNAPPROVED_GIT_ACTION"
-            result["allowed"] = False
-            result["blocked_reason"] = "Local checks not passed (py_compile, self-check, pytest)."
-            result["required_next_step"] = "Run all local checks and ensure PASS"
-            result["forbidden_actions"] = [action]
-            return result
-
-        # Gate 3: cannot target protected branch (only for push actions, not PR creation)
-        if is_protected and action == "push_feature_branch":
-            result["verdict"] = "BLOCKED_PROTECTED_BRANCH"
-            result["allowed"] = False
-            result["blocked_reason"] = f"Cannot auto-allow action targeting protected branch '{target_branch}'"
-            result["forbidden_actions"] = [action]
-            return result
-
-        # Gate 4: cannot be force push
-        if force_push:
-            result["verdict"] = "BLOCKED_FORCE_PUSH"
-            result["allowed"] = False
-            result["blocked_reason"] = "Force push never auto-allowed"
-            result["forbidden_actions"] = [action]
-            return result
-
-        # Gate 5: if desired state is not Draft, block
-        if desired_pr_state and desired_pr_state != "DRAFT":
-            result["verdict"] = "BLOCKED_READY_WITHOUT_APPROVAL"
-            result["allowed"] = False
-            result["blocked_reason"] = (
-                f"Cannot auto-allow PR in state '{desired_pr_state}'. "
-                "Only Draft PRs can be auto-created/updated."
-            )
-            result["required_next_step"] = "Create as Draft, then request operator approval for Draft→Ready"
-            result["forbidden_actions"] = [action]
-            return result
-
-        # Gate 6: high-risk files require operator approval
-        if high_risk_files:
-            result["verdict"] = "OPERATOR_APPROVAL_REQUIRED"
-            result["allowed"] = False
-            result["requires_operator_approval"] = True
-            result["blocked_reason"] = (
-                f"Changed files include high-risk items: {high_risk_files}. "
-                "Operator approval required."
-            )
-            result["required_next_step"] = "Request operator approval for high-risk file changes"
-            result["forbidden_actions"] = [action]
-            result["approval_binding_fields"] = {
-                "high_risk_files": high_risk_files,
-            }
-            return result
-
-        # All gates passed — auto-allow
-        result["verdict"] = "AUTO_ALLOWED_WITH_GATES"
-        result["allowed"] = True
-        result["safe_auto_actions"] = [action]
-        return result
+    # --- ALL actions require operator approval (baseline01) ---
+    # The former AUTO_ALLOWED_ACTIONS block (push_feature_branch, create_draft_pr,
+    # update_draft_pr) has been removed. All actions now fall through to the
+    # OPERATOR_REQUIRED_ACTIONS path below. No git action may execute without
+    # explicit operator consent.
 
     # --- OPERATOR_REQUIRED_ACTIONS ---
     if action in OPERATOR_REQUIRED_ACTIONS:
@@ -572,12 +435,12 @@ def self_check(output_json=False):
         proposal_hash="selfcheckhash",
     )
     checks.append({
-        "name": "gpac-02-push-feature-auto-allowed",
-        "passed": r["verdict"] == "AUTO_ALLOWED_WITH_GATES" and r["allowed"],
+        "name": "gpac-02-push-feature-requires-approval",
+        "passed": r["verdict"] == "OPERATOR_APPROVAL_REQUIRED" and not r["allowed"],
         "message": f"verdict={r['verdict']}",
     })
 
-    # Auto-allowed: create draft PR + all gates passed
+    # Operator-required: create draft PR + all gates passed
     r = check_git_pr_action(
         action="create_draft_pr",
         target_branch="main",
@@ -590,12 +453,12 @@ def self_check(output_json=False):
         proposal_hash="selfcheckhash",
     )
     checks.append({
-        "name": "gpac-03-create-draft-auto-allowed",
-        "passed": r["verdict"] == "AUTO_ALLOWED_WITH_GATES" and r["allowed"],
+        "name": "gpac-03-create-draft-requires-approval",
+        "passed": r["verdict"] == "OPERATOR_APPROVAL_REQUIRED" and not r["allowed"],
         "message": f"verdict={r['verdict']}",
     })
 
-    # Auto-allowed: update draft PR + all gates passed
+    # Operator-required: update draft PR + all gates passed
     r = check_git_pr_action(
         action="update_draft_pr",
         target_branch="main",
@@ -608,8 +471,8 @@ def self_check(output_json=False):
         proposal_hash="selfcheckhash",
     )
     checks.append({
-        "name": "gpac-04-update-draft-auto-allowed",
-        "passed": r["verdict"] == "AUTO_ALLOWED_WITH_GATES" and r["allowed"],
+        "name": "gpac-04-update-draft-requires-approval",
+        "passed": r["verdict"] == "OPERATOR_APPROVAL_REQUIRED" and not r["allowed"],
         "message": f"verdict={r['verdict']}",
     })
 
@@ -796,7 +659,7 @@ def self_check(output_json=False):
         "message": f"verdict={r['verdict']}",
     })
 
-    # Blocked: auto-allowed but intake not approved
+    # Blocked: operator approval required (intake status is subsumed by operator gate)
     r = check_git_pr_action(
         action="push_feature_branch",
         target_branch="feat/test",
@@ -806,12 +669,12 @@ def self_check(output_json=False):
         proposal_hash="selfcheckhash",
     )
     checks.append({
-        "name": "gpac-19-no-intake-blocked",
-        "passed": r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION" and not r["allowed"],
+        "name": "gpac-19-requires-approval-no-intake",
+        "passed": r["verdict"] == "OPERATOR_APPROVAL_REQUIRED" and not r["allowed"],
         "message": f"verdict={r['verdict']}",
     })
 
-    # Blocked: auto-allowed but checks not passed
+    # Blocked: operator approval required (checks status is subsumed by operator gate)
     r = check_git_pr_action(
         action="create_draft_pr",
         target_branch="main",
@@ -822,8 +685,8 @@ def self_check(output_json=False):
         proposal_hash="selfcheckhash",
     )
     checks.append({
-        "name": "gpac-20-no-checks-blocked",
-        "passed": r["verdict"] == "BLOCKED_UNAPPROVED_GIT_ACTION" and not r["allowed"],
+        "name": "gpac-20-requires-approval-no-checks",
+        "passed": r["verdict"] == "OPERATOR_APPROVAL_REQUIRED" and not r["allowed"],
         "message": f"verdict={r['verdict']}",
     })
 
@@ -885,7 +748,7 @@ def self_check(output_json=False):
     )
     checks.append({
         "name": "gpac-24-create-draft-with-open-state-blocked",
-        "passed": r["verdict"] == "BLOCKED_READY_WITHOUT_APPROVAL" and not r["allowed"],
+        "passed": r["verdict"] == "OPERATOR_APPROVAL_REQUIRED" and not r["allowed"],
         "message": f"verdict={r['verdict']}",
     })
 
@@ -900,21 +763,21 @@ def self_check(output_json=False):
     # Verdict count
     checks.append({
         "name": "gpac-26-verdicts-count",
-        "passed": len(VERDICTS) == 11,
+        "passed": len(VERDICTS) == 10,
         "message": f"count={len(VERDICTS)}",
     })
 
-    # Auto-allowed actions count
+    # Auto-allowed actions count (removed in baseline01 — all actions require approval)
     checks.append({
-        "name": "gpac-27-auto-allowed-count",
-        "passed": len(AUTO_ALLOWED_ACTIONS) == 3,
-        "message": f"count={len(AUTO_ALLOWED_ACTIONS)}",
+        "name": "gpac-27-no-auto-allowed-actions",
+        "passed": True,
+        "message": "baseline01: all actions require operator approval (no auto-allowed set)",
     })
 
     # Operator-required actions count
     checks.append({
         "name": "gpac-28-operator-required-count",
-        "passed": len(OPERATOR_REQUIRED_ACTIONS) == 12,
+        "passed": len(OPERATOR_REQUIRED_ACTIONS) == 15,
         "message": f"count={len(OPERATOR_REQUIRED_ACTIONS)}",
     })
 

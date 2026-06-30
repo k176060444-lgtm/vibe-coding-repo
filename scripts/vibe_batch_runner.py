@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Trusted Self-Repo Batch Runner — serial execution of low-risk Work Orders.
+"""Batch Runner — serial execution of Work Orders.
 
-Executes 1-5 trusted-self low-risk Work Orders in sequence.
-Each WO: branch → commit → push → PR → wrapper merge → post-merge checks.
-After each WO, refreshes baseline before executing the next.
+V1.10 (baseline01): ALL batch operations require explicit operator approval.
+No auto-allow path exists for any repo (self-repo or external).
+Every Work Order must have an approved intake or explicit operator consent
+before any git write or execution can proceed.
 
 Stop rules: any WO failure stops the batch immediately.
 
-V1.8: External repo protected policy dry-run.
-V1.9: External repo authorized push canary.
-- External repo read-only ops allowed without token.
-- External repo write ops BLOCK unless approved.
-- Approved external write: token preflight + controlled push via privileged wrapper.
+V1.8/V1.9: (superseded by baseline01) External repo protected policy.
+- External repo read-only ops require operator approval.
+- External repo write ops require operator approval.
+- All self-repo ops require operator approval.
 
 Usage:
     python3 scripts/vibe_batch_runner.py --batch <batch.json> [--json] [--compact] [--dry-run]
@@ -411,7 +411,7 @@ def check_external_policy(repo, operation, approval_id=None):
         "operation_type": operation,
         "is_read_only": is_read,
         "is_write": is_write,
-        "requires_approval": False,
+        "requires_approval": True,
         "approved": False,
         "approval_id": None,
         "would_read_token": False,
@@ -420,20 +420,18 @@ def check_external_policy(repo, operation, approval_id=None):
         "warnings": [],
     }
 
-    # Self repo: auto-allow for batch operations
-    if is_self:
-        result["approved"] = True
-        if is_write:
-            result["would_push"] = True
-        return result
+    # baseline01 fail-closed: no repo auto-allow.
+    # Every operation requires explicit operator approval.
+    # Removed: is_self auto-approval path.
+    # Removed: external read-only auto-approval path.
 
-    # External repo: check operation type
+    # Check operation type
     if is_read:
-        # Read-only operations: allowed, no token needed
-        result["requires_approval"] = False
-        result["approved"] = True
+        # Read-only operations: also require operator approval (baseline01)
+        result["requires_approval"] = True
+        result["approved"] = False
         result["would_read_token"] = False
-        result["warnings"].append("external_read_only: no token access")
+        result["warnings"].append("read_only_approval_required: baseline01 fail-closed")
         return result
 
     if is_write:
