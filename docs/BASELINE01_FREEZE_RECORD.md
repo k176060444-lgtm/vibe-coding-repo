@@ -178,3 +178,5 @@ None of the P3 items affect baseline01 gate closure. They are documentation-only
 > All seven remediation points (SOUL/MEMORY runtime + G1 through G6) have been implemented, merged, and verified on `github/main` at SHA `7dceb8c8012294a1820fa2e59270af128c06d7cb`. Subsequent work shall reference this freeze record as the baseline against which changes are measured.
 >
 > No further modifications to baseline01 scope are permitted without a new operator-approved baseline cycle.
+>
+> **Post-baseline01 remediation**: PRs #270, #271, and #272 supersede the original freeze SHA for audit-remediated code. The remediated `github/main` is at SHA `7a5d946ca567b2223a9a7f5ad90db7e973f27c6a`. See ## Audit Supersession above for details.
