@@ -170,9 +170,9 @@ def _classify_repo_trust(repo):
 def _validate_push(record):
     """Validate all constraints for a privileged push.
 
-    Applies repo trust policy:
-    - Self-repo: low-risk push allowed without human approval
-    - External repos: require human approval (status=approved)
+    Applies repo trust policy (baseline01 fail-closed):
+    - Self-repo: push requires explicit human/operator approval
+    - External repos: push requires explicit human/operator approval
 
     Returns (would_push: bool, blockers: list, warnings: list).
     """
