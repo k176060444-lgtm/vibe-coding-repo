@@ -1004,8 +1004,8 @@ NODE_DESCRIPTION = {
 }
 G5_UNKNOWN_FIELDS = ("synced", "wrapper_valid", "model_call_verified",
                      "operator_approved", "runtime_visible", "env_loaded")
-G5_13_FIELDS = ("model_id", "canonical_provider", "provider_namespace",
-                "primary_alias", "runtime_provider", "declared") + G5_UNKNOWN_FIELDS
+G5_ENTRY_FIELDS = ("model_id", "canonical_provider", "provider_namespace",
+                  "primary_alias", "runtime_provider", "declared") + G5_UNKNOWN_FIELDS
 
 
 def _build_node_matrix():
@@ -1085,8 +1085,9 @@ def _node_matrix_to_yaml(node_matrix, skipped, total_models):
 def cmd_generate_node_capability(args):
     """Generate scripts/node_model_capability.yaml from model_pool.yaml.
 
-    The new file holds the complete G5 effective model-node matrix with 13 fields
-    per entry. Six runtime/approval status fields are set to 'unknown'; no probe.
+    The new file holds the complete G5 effective model-node matrix with
+    12 entry fields (node context from YAML parent key). Six runtime/approval
+    status fields are set to 'unknown'; no probe.
     """
     matrix, skipped, total = _build_node_matrix()
     yaml_text = _node_matrix_to_yaml(matrix, skipped, total)
@@ -1134,9 +1135,9 @@ def cmd_generate_node_capability(args):
 def cmd_validate_node_capability(args):
     """Validate the node capability matrix.
 
-    Checks schema_version, 13-field completeness, 'unknown' defaults for
-    the 6 runtime/approval fields, and (optionally) cross-references all
-    model_ids against model_pool.yaml.
+    Checks schema_version, 12-entry-field completeness (node context from YAML key),
+    'unknown' defaults for the 6 runtime/approval fields, and (optionally)
+    cross-references all model_ids against model_pool.yaml.
     """
     path = SCRIPTS_DIR / "node_model_capability.yaml"
     if not path.exists():
@@ -1165,8 +1166,8 @@ def cmd_validate_node_capability(args):
         matrix = nd.get("matrix", [])
         for i, entry in enumerate(matrix):
             mid = entry.get("model_id", f"[index {i}]")
-            # Check 13 fields present
-            for fname in G5_13_FIELDS:
+            # Check 12 entry fields present
+            for fname in G5_ENTRY_FIELDS:
                 if fname not in entry:
                     errors.append({
                         "type": "MISSING_FIELD", "node": node_name,

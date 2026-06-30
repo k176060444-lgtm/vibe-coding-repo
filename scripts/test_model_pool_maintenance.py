@@ -290,8 +290,8 @@ def test_T18_g5_file_exists_and_yaml():
     print(f"  PASS: node_model_capability.yaml exists, valid YAML, schema_version=1.1, 3 nodes")
     return True
 
-def test_T19_g5_13_fields_per_entry():
-    """T19: every matrix entry has all 13 required fields."""
+def test_T19_g5_entry_fields():
+    """T19: every matrix entry has all required entry fields."""
     import yaml
     with open(SCRIPTS_DIR / "node_model_capability.yaml", encoding="utf-8") as f:
         data = yaml.safe_load(f)
@@ -310,7 +310,7 @@ def test_T19_g5_13_fields_per_entry():
                     missing.append(f"{nid}[{i}]: missing {field}")
     assert not missing, f"Missing fields: {missing[:10]}"
     assert total_entries > 0, "No entries found"
-    print(f"  PASS: {total_entries} entries × 13 fields, all present")
+    print(f"  PASS: {total_entries} entries × {len(required)} entry fields (node context via YAML key), all present")
     return True
 
 def test_T20_g5_unknown_status_fields():
@@ -395,7 +395,7 @@ tests = [
     test_T16_g4_provider_namespace_default_unknown,
     test_T17_g4_migrate_idempotent,
     test_T18_g5_file_exists_and_yaml,
-    test_T19_g5_13_fields_per_entry,
+    test_T19_g5_entry_fields,
     test_T20_g5_unknown_status_fields,
     test_T21_g5_no_bool_in_runtime_fields,
     test_T22_g5_cross_ref_model_pool,
