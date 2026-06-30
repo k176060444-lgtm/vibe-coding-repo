@@ -4,6 +4,12 @@
 VibeCoding iteration budget policy. Maps task profiles to OpenCode `steps`
 values and enforces approval rules for high-risk tasks.
 
+DEPRECATED (baseline01): Production approval enforcement is handled by
+fail-closed gates in vibe_task_intake.py, vibe_batch_runner.py, and
+git_pr_approval_gate.py. Values and metadata in this module (auto_approve,
+requires_approval) are retained for legacy/test compatibility only.
+Do not wire this module into runtime approval decisions.
+
 Profiles:
   short=200    — read-only scout, dashboard, health, gateway queries
   standard=300 — self repo single WO, small fixes
@@ -115,6 +121,10 @@ def recommend_profile(task_type: str, risk_level: str = "low",
                       ) -> dict:
     """Recommend an iteration profile based on task characteristics.
 
+    NOTE (baseline01): This function is retained for legacy/test compatibility.
+    Returned `auto_approve` is legacy metadata, not runtime authorization.
+    Production approval enforcement is in vibe_task_intake.py, not here.
+
     Returns dict with profile_name, steps, auto_approve, reason, warnings.
     """
     warnings = []
@@ -176,6 +186,10 @@ def recommend_profile(task_type: str, risk_level: str = "low",
 def check_approval_gate(task_type: str, risk_level: str,
                         profile: str) -> dict:
     """Check if a task can proceed with the given profile.
+
+    DEPRECATED (baseline01): This function is legacy-only. Its returned
+    `requires_approval` is metadata, not an approval gate. Production
+    approval enforcement is in vibe_task_intake.py and related gates.
 
     Returns dict with allowed, reason, requires_approval.
     """

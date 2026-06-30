@@ -4,6 +4,13 @@
 Windows Worker Lane policy. Classifies tasks as suitable for Windows
 execution vs must-Debian, with gateway isolation rules.
 
+NOTE (baseline01): This module is a node/task classifier only. Its
+`requires_approval` return value is informational legacy metadata.
+Production approval enforcement must come from baseline01 operator gates
+(vibe_task_intake.py, git_pr_approval_gate.py, vibe_batch_runner.py), not
+from this classifier. Callers must not treat classifier output as
+authorization.
+
 Windows suitable:
   - gateway health / status / reconnect
   - Windows scheduled tasks (Task Scheduler)
@@ -98,6 +105,11 @@ GATEWAY_ISOLATION = {
 def classify_task_node(task_text: str, risk_level: str = "low",
                        repo_scope: str = "trusted-self") -> dict:
     """Classify which node should execute a task.
+
+    NOTE (baseline01): This function is a node classifier, not an approval
+    gate. Its returned `requires_approval` is legacy metadata — do not use
+    it as runtime authorization. Callers must enforce operator approval
+    via baseline01 gates (vibe_task_intake.py, git_pr_approval_gate.py).
 
     Returns: node, reason, timeout, requires_approval, gateway_safe.
     """
