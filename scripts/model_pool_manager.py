@@ -989,6 +989,305 @@ def cmd_sync(args):
     return True
 
 
+# --- baseline01 G5 (node capability matrix) ---
+
+ACTIVE_NODES = ["21bao", "5bao", "9bao"]
+NODE_RUNTIME_PROVIDER = {
+    "21bao": "opencode-go-plan",
+    "5bao": "opencode-go",
+    "9bao": "opencode-go",
+}
+NODE_DESCRIPTION = {
+    "21bao": "Windows local-exec/control node",
+    "5bao": "Remote SSH worker",
+    "9bao": "Remote SSH worker",
+}
+G5_UNKNOWN_FIELDS = ("synced", "wrapper_valid", "model_call_verified",
+                     "operator_approved", "runtime_visible", "env_loaded")
+G5_ENTRY_FIELDS = ("model_id", "canonical_provider", "provider_namespace",
+                  "primary_alias", "runtime_provider", "declared") + G5_UNKNOWN_FIELDS
+
+
+def _build_node_matrix():
+    """Build the per-node capability matrix from model_pool.yaml.
+
+    Returns dict[model_id, dict[field, value]] per node, plus skip stats.
+    """
+    pool = _load_pool()
+    models = pool.get("models", [])
+    skipped = []
+
+    node_matrix = {node: [] for node in ACTIVE_NODES}
+
+    for m in models:
+        mid = m["id"]
+        if not m.get("enabled", True) or m.get("quarantined", False):
+            skipped.append({"id": mid, "enabled": m.get("enabled", True),
+                            "quarantined": m.get("quarantined", False),
+                            "reason": "disabled or quarantined"})
+            continue
+
+        allowed = m.get("allowed_nodes", [])
+        primary = m.get("primary_alias")
+        if not primary:
+            _error(f"Model {mid} is missing required primary_alias (G4 not migrated?)")
+
+        for node_name in ACTIVE_NODES:
+            if allowed and node_name not in allowed:
+                continue
+            entry = OrderedDict()
+            entry["model_id"] = mid
+            entry["canonical_provider"] = m.get("canonical_provider", "unknown")
+            entry["provider_namespace"] = m.get("provider_namespace", "unknown")
+            entry["primary_alias"] = primary
+            entry["runtime_provider"] = NODE_RUNTIME_PROVIDER.get(node_name, "unknown")
+            entry["declared"] = True
+            for uf in G5_UNKNOWN_FIELDS:
+                entry[uf] = "unknown"
+            node_matrix[node_name].append(entry)
+
+    return node_matrix, skipped, len(models)
+
+
+def _node_matrix_to_yaml(node_matrix, skipped, total_models):
+    """Convert the node matrix into a YAML document string."""
+    import yaml
+    from collections import OrderedDict
+
+    top = OrderedDict()
+    top["schema_version"] = "1.1"
+    top["generated_at"] = datetime.now(timezone.utc).isoformat()
+    top["generated_from"] = "scripts/model_pool.yaml"
+    top["notes"] = (
+        "G5 effective model-node matrix. 6 runtime/approval fields default to 'unknown'; "
+        "they will be populated by subsequent diagnostic PRs. "
+        "model_id, canonical_provider, provider_namespace, primary_alias, "
+        "runtime_provider, declared are backfilled from model_pool.yaml."
+    )
+    top["skipped_models"] = {"count": len(skipped), "ids": [s["id"] for s in skipped]}
+    top["nodes"] = OrderedDict()
+
+    for node_name in ACTIVE_NODES:
+        nd = OrderedDict()
+        nd["runtime_provider"] = NODE_RUNTIME_PROVIDER.get(node_name, "unknown")
+        nd["description"] = NODE_DESCRIPTION.get(node_name, "")
+        nd["total_entries"] = len(node_matrix[node_name])
+        nd["matrix"] = node_matrix[node_name]
+        top["nodes"][node_name] = nd
+
+    dumper = yaml.SafeDumper
+    dumper.add_representer(OrderedDict, dumper.represent_dict)
+    dumper.add_representer(dict, dumper.represent_dict)
+    return yaml.dump(top, default_flow_style=False, allow_unicode=True,
+                     sort_keys=False, Dumper=dumper)
+
+
+def cmd_generate_node_capability(args):
+    """Generate scripts/node_model_capability.yaml from model_pool.yaml.
+
+    The new file holds the complete G5 effective model-node matrix with
+    12 entry fields (node context from YAML parent key). Six runtime/approval
+    status fields are set to 'unknown'; no probe.
+    """
+    matrix, skipped, total = _build_node_matrix()
+    yaml_text = _node_matrix_to_yaml(matrix, skipped, total)
+
+    total_entries = sum(len(entries) for entries in matrix.values())
+
+    if not args.apply:
+        _output({
+            "status": "DRY_RUN",
+            "note": "G5 dry-run",
+            "node_entry_counts": {n: len(matrix[n]) for n in ACTIVE_NODES},
+            "total_entries": total_entries,
+            "models_in_pool": total,
+            "skipped_count": len(skipped),
+            "skipped_ids": [s["id"] for s in skipped],
+            "yaml_preview_lines": len(yaml_text.splitlines()),
+            "message": "Pass --apply to write scripts/node_model_capability.yaml",
+        })
+        return True
+
+    path = SCRIPTS_DIR / "node_model_capability.yaml"
+    # Backup if exists
+    if path.exists():
+        backup = path.with_suffix(".yaml.bak")
+        import shutil
+        shutil.copy2(str(path), str(backup))
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(yaml_text)
+
+    _output({
+        "status": "ok",
+        "note": "G5 generate",
+        "path": str(path),
+        "node_entry_counts": {n: len(matrix[n]) for n in ACTIVE_NODES},
+        "total_entries": total_entries,
+        "models_in_pool": total,
+        "skipped_count": len(skipped),
+        "skipped_ids": [s["id"] for s in skipped],
+        "message": "node_model_capability.yaml written.",
+    })
+    return True
+
+
+def cmd_validate_node_capability(args):
+    """Validate the node capability matrix.
+
+    Checks schema_version, 12-entry-field completeness (node context from YAML key),
+    'unknown' defaults for the 6 runtime/approval fields, and (optionally)
+    cross-references all model_ids against model_pool.yaml.
+    """
+    path = SCRIPTS_DIR / "node_model_capability.yaml"
+    if not path.exists():
+        _output({"status": "ERROR", "message": f"File not found: {path}"})
+        return False
+
+    import yaml
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    errors = []
+    warnings = []
+
+    # Schema version
+    sv = data.get("schema_version", "")
+    if sv != "1.1":
+        errors.append({"type": "SCHEMA_VERSION", "expected": "1.1", "actual": sv})
+
+    # Node structure
+    nodes = data.get("nodes", {})
+    for node_name in ACTIVE_NODES:
+        if node_name not in nodes:
+            errors.append({"type": "MISSING_NODE", "node": node_name})
+            continue
+        nd = nodes[node_name]
+        matrix = nd.get("matrix", [])
+        for i, entry in enumerate(matrix):
+            mid = entry.get("model_id", f"[index {i}]")
+            # Check 12 entry fields present
+            for fname in G5_ENTRY_FIELDS:
+                if fname not in entry:
+                    errors.append({
+                        "type": "MISSING_FIELD", "node": node_name,
+                        "model_id": mid, "field": fname, "index": i,
+                    })
+            # Check 6 unknown fields don't have bool
+            for uf in G5_UNKNOWN_FIELDS:
+                val = entry.get(uf)
+                if isinstance(val, bool):
+                    errors.append({
+                        "type": "RUNTIME_FIELD_HAS_BOOL", "node": node_name,
+                        "model_id": mid, "field": uf, "value": val, "index": i,
+                    })
+                elif val is None:
+                    errors.append({
+                        "type": "RUNTIME_FIELD_MISSING", "node": node_name,
+                        "model_id": mid, "field": uf, "index": i,
+                    })
+                elif val != "unknown":
+                    warnings.append({
+                        "type": "RUNTIME_FIELD_UNEXPECTED", "node": node_name,
+                        "model_id": mid, "field": uf, "value": val, "index": i,
+                    })
+            # Check primary_alias not empty
+            pa = entry.get("primary_alias")
+            if not pa or pa == "":
+                errors.append({
+                    "type": "MISSING_PRIMARY_ALIAS", "node": node_name,
+                    "model_id": mid, "index": i,
+                })
+            # Check runtime_provider
+            rp = entry.get("runtime_provider")
+            expected_rp = NODE_RUNTIME_PROVIDER.get(node_name, "unknown")
+            if rp != expected_rp:
+                errors.append({
+                    "type": "WRONG_RUNTIME_PROVIDER", "node": node_name,
+                    "model_id": mid, "expected": expected_rp, "actual": rp, "index": i,
+                })
+
+    # Count stats
+    total_entries = sum(len(nodes.get(n, {}).get("matrix", [])) for n in ACTIVE_NODES)
+    total_models_in_pool = len(_load_pool().get("models", []))
+    unknown_count_rv = sum(
+        1 for n in ACTIVE_NODES
+        for e in nodes.get(n, {}).get("matrix", [])
+        if e.get("runtime_visible") == "unknown"
+    )
+    unknown_count_env = sum(
+        1 for n in ACTIVE_NODES
+        for e in nodes.get(n, {}).get("matrix", [])
+        if e.get("env_loaded") == "unknown"
+    )
+
+    result = {
+        "status": "ok" if not errors else "ERRORS_FOUND",
+        "schema_version": sv,
+        "total_entries": total_entries,
+        "total_models_in_pool": total_models_in_pool,
+        "nodes": {n: len(nodes.get(n, {}).get("matrix", [])) for n in ACTIVE_NODES},
+        "runtime_visible_unknown": unknown_count_rv,
+        "env_loaded_unknown": unknown_count_env,
+        "error_count": len(errors),
+        "warning_count": len(warnings),
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+    # Cross-reference (--cross-full)
+    if args.cross_full:
+        pool = _load_pool()
+        pool_models = {m["id"]: m for m in pool.get("models", [])}
+        cross_errors = []
+
+        for node_name in ACTIVE_NODES:
+            for i, entry in enumerate(nodes.get(node_name, {}).get("matrix", [])):
+                mid = entry.get("model_id")
+                pm = pool_models.get(mid)
+                if not pm:
+                    cross_errors.append({
+                        "type": "MODEL_ID_NOT_IN_POOL", "node": node_name,
+                        "model_id": mid, "index": i,
+                    })
+                    continue
+                # Cross-check canonical_provider
+                if entry.get("canonical_provider") != pm.get("canonical_provider"):
+                    cross_errors.append({
+                        "type": "CANONICAL_PROVIDER_MISMATCH", "node": node_name,
+                        "model_id": mid,
+                        "in_matrix": entry.get("canonical_provider"),
+                        "in_pool": pm.get("canonical_provider"),
+                    })
+                if entry.get("provider_namespace") != pm.get("provider_namespace"):
+                    cross_errors.append({
+                        "type": "PROVIDER_NAMESPACE_MISMATCH", "node": node_name,
+                        "model_id": mid,
+                        "in_matrix": entry.get("provider_namespace"),
+                        "in_pool": pm.get("provider_namespace"),
+                    })
+                if entry.get("primary_alias") != pm.get("primary_alias"):
+                    cross_errors.append({
+                        "type": "PRIMARY_ALIAS_MISMATCH", "node": node_name,
+                        "model_id": mid,
+                        "in_matrix": entry.get("primary_alias"),
+                        "in_pool": pm.get("primary_alias"),
+                    })
+
+        result["cross_reference"] = {
+            "status": "ok" if not cross_errors else "ERRORS_FOUND",
+            "error_count": len(cross_errors),
+            "errors": cross_errors,
+        }
+        all_errors = errors + cross_errors
+        if all_errors:
+            result["status"] = "ERRORS_FOUND"
+            result["error_count"] = len(all_errors)
+
+    _output(result)
+    return result["status"] == "ok"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="VibeDev Model Pool Manager CLI",
@@ -1116,6 +1415,19 @@ def main():
     p_syn = sub.add_parser("sync", help="Dry-run sync plan (contract only)")
     p_syn.add_argument("--nodes", help="Comma-separated target nodes")
     p_syn.set_defaults(func=cmd_sync)
+
+    # --- baseline01 G5 node capability matrix ---
+    p_gnc = sub.add_parser("generate-node-capability",
+                           help="Generate scripts/node_model_capability.yaml from model_pool.yaml")
+    p_gnc.add_argument("--dry-run", action="store_true", help="Show content without writing")
+    p_gnc.add_argument("--apply", action="store_true", help="Write the file")
+    p_gnc.set_defaults(func=cmd_generate_node_capability, g5_dry_run=True, g5_apply=False)
+
+    p_vnc = sub.add_parser("validate-node-capability",
+                           help="Validate the node capability matrix (schema + unknown defaults)")
+    p_vnc.add_argument("--cross-full", action="store_true",
+                       help="Also cross-reference all model_ids/providers against model_pool.yaml")
+    p_vnc.set_defaults(func=cmd_validate_node_capability)
 
     args = parser.parse_args()
     try:
