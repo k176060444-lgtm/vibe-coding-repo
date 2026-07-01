@@ -102,7 +102,7 @@ Every receipt is a JSON object written by its producing gate. All 5 receipts MUS
 | `provider` | string | yes | runtime provider name (NOT collapsed with `canonical_provider`) |
 | `provider_namespace` | enum | yes | `unknown` \| `opencode` \| `anthropic` \| `xiaomi` \| `volcengine` \| `minimax` \| … (enumerated; unknown forbidden at F6) |
 | `call_budget` | integer | yes | max model calls permitted |
-| `fallback_policy` | enum | yes | `none` \| `one-shot` \| `bounded-N` |
+| `fallback_policy` | enum | yes | `disabled` \| `same_provider_different_model` \| `operator_selects` |
 | `operator_approval_timestamp` | ISO-8601 | yes | copied from approval_receipt.timestamp |
 | `operator_approval_signature` | string | yes | SHA256 of (approval_receipt.approval_id + operator_approval_timestamp) for linkage |
 | `node_whitelist_verified` | bool | yes | Stage 3 enforces node ∈ {21bao, 5bao, 9bao} |

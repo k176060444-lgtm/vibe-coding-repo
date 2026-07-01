@@ -242,10 +242,15 @@ class TestModelPoolDeclarations(unittest.TestCase):
 
     def test_pool_has_provider_namespaces(self):
         self.assertIn("provider_namespaces", self.decl)
-        # all 38 entries currently have provider_namespace=unknown
-        # (this is the Stage 1 GAP-L5-1 condition; Stage 3 doesn't fix it
-        # but records it)
-        self.assertIn("unknown", self.decl["provider_namespaces"])
+        # Stage 4 cleared all provider_namespace=unknown entries:
+        # all 38 models now have deterministic namespaces mapped from
+        # canonical_provider (14 unique namespaces). This assertion confirms
+        # no residual "unknown" remains after Stage 4.
+        self.assertNotIn("unknown", self.decl["provider_namespaces"])
+        self.assertGreater(len(self.decl["provider_namespaces"]), 0)
+        for ns in self.decl["provider_namespaces"]:
+            self.assertIsNotNone(ns)
+            self.assertNotEqual(ns, "")
 
     def test_pool_real_model_id_in_pool(self):
         self.assertIn(REAL_MODEL_ID, self.decl["model_ids"])
