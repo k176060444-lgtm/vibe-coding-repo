@@ -285,6 +285,13 @@ class TestSevenStateSchema:
                 "deepseek-deepseek-coder", "deepseek-deepseek-reasoner",
             },
         }
+        # Per-entry operator_approved promotions (S7-6 F6 vertical slice:
+        # readiness_id=17a71a60a81a349a052b9b8f98, operator=KK, 3 entries)
+        OPERATOR_APPROVED_ENTRIES = {
+            "21bao": {"opencode-go-mimo-v2-5"},
+            "5bao": {"opencode-go-mimo-v2-5"},
+            "9bao": {"opencode-go-mimo-v2-5"},
+        }
         for nn, nd in nmc["nodes"].items():
             for i, e in enumerate(nd["matrix"]):
                 mid = e.get("model_id", "")
@@ -311,6 +318,11 @@ class TestSevenStateSchema:
                     if sf == "env_loaded" and mid in ENV_LOADED_ENTRIES.get(nn, set()):
                         if val is not True:
                             bad.append(f"{nn}[{i}]({mid}): env_loaded={val!r} (expected True, S7-2)")
+                        continue
+                    # Per-entry override: operator_approved (S7-6 F6 vertical slice)
+                    if sf == "operator_approved" and mid in OPERATOR_APPROVED_ENTRIES.get(nn, set()):
+                        if val is not True:
+                            bad.append(f"{nn}[{i}]({mid}): operator_approved={val!r} (expected True, S7-6)")
                         continue
                     if promoted and sf in promoted:
                         # Promoted states must be True, not 'unknown'
