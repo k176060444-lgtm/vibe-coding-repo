@@ -266,7 +266,7 @@ nodes:
       declared: true
       synced: true
       wrapper_valid: true
-      model_call_verified: unknown
+      model_call_verified: true
       operator_approved: unknown
       runtime_visible: unknown
       env_loaded: unknown
@@ -571,7 +571,7 @@ nodes:
       declared: true
       synced: true
       wrapper_valid: true
-      model_call_verified: unknown
+      model_call_verified: true
       operator_approved: unknown
       runtime_visible: unknown
       env_loaded: unknown
@@ -876,7 +876,7 @@ nodes:
       declared: true
       synced: true
       wrapper_valid: true
-      model_call_verified: unknown
+      model_call_verified: true
       operator_approved: unknown
       runtime_visible: unknown
       env_loaded: unknown
