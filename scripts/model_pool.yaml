@@ -1,10 +1,11 @@
-schema_version: '1.1'
+schema_version: '1.2'
 phase: transitional-local
 source_of_truth: win:C:/Users/KK/AppData/Local/hermes/profiles/vibedev/scripts/model_pool.yaml
 generated_from:
 - scripts/model_alias_config.yaml
 - scripts/node_model_capability.yaml
 generated_at: '2026-06-25T12:13:30Z'
+notes: "Schema v1.2 — lifecycle_status fields auto-populated with classify --apply"
 models:
 - id: anthropic-claude-3-5-haiku-20241022
   alias:
@@ -29,6 +30,7 @@ models:
   canonical_provider: anthropic
   provider_namespace: anthropic
   primary_alias: haiku
+  lifecycle_status: declared_enabled_unassigned
 - id: anthropic-claude-opus-4
   alias:
   - opus
@@ -53,6 +55,7 @@ models:
   canonical_provider: anthropic
   provider_namespace: anthropic
   primary_alias: opus
+  lifecycle_status: declared_enabled_unassigned
 - id: anthropic-claude-sonnet-4
   alias:
   - claude
@@ -78,6 +81,7 @@ models:
   canonical_provider: anthropic
   provider_namespace: anthropic
   primary_alias: claude
+  lifecycle_status: declared_enabled_unassigned
 - id: dashscope-qwen-max
   alias:
   - qwen
@@ -102,6 +106,7 @@ models:
   canonical_provider: dashscope
   provider_namespace: dashscope
   primary_alias: qwen
+  lifecycle_status: declared_enabled_unassigned
 - id: dashscope-qwen-plus
   alias:
   - qwen-plus
@@ -125,6 +130,7 @@ models:
   canonical_provider: dashscope
   provider_namespace: dashscope
   primary_alias: qwen-plus
+  lifecycle_status: declared_enabled_unassigned
 - id: deepseek-deepseek-chat
   alias:
   - deepseek
@@ -165,6 +171,7 @@ models:
   canonical_provider: deepseek
   provider_namespace: deepseek
   primary_alias: deepseek
+  lifecycle_status: disabled
 - id: deepseek-deepseek-coder
   alias:
   - deepseek-coder
@@ -188,6 +195,7 @@ models:
   canonical_provider: deepseek
   provider_namespace: deepseek
   primary_alias: deepseek-coder
+  lifecycle_status: declared_enabled_unassigned
 - id: deepseek-deepseek-reasoner
   alias:
   - deepseek-r1
@@ -211,6 +219,7 @@ models:
   canonical_provider: deepseek
   provider_namespace: deepseek
   primary_alias: deepseek-r1
+  lifecycle_status: declared_enabled_unassigned
 - id: google-gemini-2-5-flash
   alias:
   - gemini-flash
@@ -234,6 +243,7 @@ models:
   canonical_provider: google
   provider_namespace: google
   primary_alias: gemini-flash
+  lifecycle_status: declared_enabled_unassigned
 - id: google-gemini-2-5-pro
   alias:
   - gemini
@@ -258,6 +268,7 @@ models:
   canonical_provider: google
   provider_namespace: google
   primary_alias: gemini
+  lifecycle_status: declared_enabled_unassigned
 - id: minimax-minimax-m2-5
   alias:
   - minimax
@@ -291,6 +302,7 @@ models:
   canonical_provider: minimax
   provider_namespace: minimax
   primary_alias: minimax
+  lifecycle_status: historical
 - id: moonshot-moonshot-v1-128k
   alias:
   - kimi
@@ -314,6 +326,7 @@ models:
   canonical_provider: moonshot
   provider_namespace: moonshot
   primary_alias: kimi
+  lifecycle_status: declared_enabled_unassigned
 - id: openai-gpt-4o
   alias:
   - gpt4o
@@ -339,6 +352,7 @@ models:
   canonical_provider: openai
   provider_namespace: openai
   primary_alias: gpt4o
+  lifecycle_status: declared_enabled_unassigned
 - id: openai-o1
   alias:
   - o1
@@ -362,6 +376,7 @@ models:
   canonical_provider: openai
   provider_namespace: openai
   primary_alias: o1
+  lifecycle_status: declared_enabled_unassigned
 - id: openai-o3
   alias:
   - o3
@@ -385,6 +400,7 @@ models:
   canonical_provider: openai
   provider_namespace: openai
   primary_alias: o3
+  lifecycle_status: declared_enabled_unassigned
 - id: openai-o3-mini
   alias:
   - o3-mini
@@ -408,6 +424,7 @@ models:
   canonical_provider: openai
   provider_namespace: openai
   primary_alias: o3-mini
+  lifecycle_status: declared_enabled_unassigned
 - id: openai-o4-mini
   alias:
   - o4-mini
@@ -431,6 +448,7 @@ models:
   canonical_provider: openai
   provider_namespace: openai
   primary_alias: o4-mini
+  lifecycle_status: declared_enabled_unassigned
 - id: volcengine-doubao-1-5-pro-256k
   alias:
   - doubao
@@ -464,6 +482,7 @@ models:
   canonical_provider: volcengine
   provider_namespace: volcengine
   primary_alias: doubao
+  lifecycle_status: candidate
 - id: xai-grok-3
   alias:
   - grok
@@ -488,6 +507,7 @@ models:
   canonical_provider: xai
   provider_namespace: xai
   primary_alias: grok
+  lifecycle_status: declared_enabled_unassigned
 - id: deepseek-plan-deepseek-v4-pro
   alias:
   - deepseek-v4-pro
@@ -527,6 +547,7 @@ models:
   canonical_provider: deepseek-plan
   provider_namespace: deepseek-plan
   primary_alias: deepseek-v4-pro
+  lifecycle_status: candidate
 - id: minimax-plan-minimax-m3
   alias:
   - minimax-m3
@@ -565,6 +586,7 @@ models:
   canonical_provider: minimax-plan
   provider_namespace: minimax-plan
   primary_alias: minimax-m3
+  lifecycle_status: candidate
 - id: opencode-deepseek-v4-flash-free
   alias:
   - opencode-ds4flash-free
@@ -592,6 +614,7 @@ models:
   canonical_provider: opencode
   provider_namespace: opencode
   primary_alias: opencode-ds4flash-free
+  lifecycle_status: remove_pending
 - id: opencode-mimo-v2-5-free
   alias:
   - opencode-mimo-free
@@ -618,6 +641,7 @@ models:
   canonical_provider: opencode
   provider_namespace: opencode
   primary_alias: opencode-mimo-free
+  lifecycle_status: remove_pending
 - id: opencode-nemotron-3-ultra-free
   alias:
   - opencode-nemotron-free
@@ -645,6 +669,7 @@ models:
   canonical_provider: opencode
   provider_namespace: opencode
   primary_alias: opencode-nemotron-free
+  lifecycle_status: remove_pending
 - id: opencode-north-mini-code-free
   alias:
   - opencode-north-free
@@ -672,6 +697,7 @@ models:
   canonical_provider: opencode
   provider_namespace: opencode
   primary_alias: opencode-north-free
+  lifecycle_status: remove_pending
 - id: opencode-big-pickle
   alias:
   - opencode-big-pickle
@@ -698,6 +724,7 @@ models:
   canonical_provider: opencode
   provider_namespace: opencode
   primary_alias: opencode-big-pickle
+  lifecycle_status: remove_pending
 - id: xiaomi-mimo-v2-5-pro
   alias:
   - mimo
@@ -746,6 +773,7 @@ models:
   canonical_provider: xiaomi
   provider_namespace: xiaomi
   primary_alias: mimo
+  lifecycle_status: historical
 - id: xiaomi-mimo-v2-5-pro-payg
   alias:
   - xmipro
@@ -778,6 +806,7 @@ models:
   canonical_provider: xiaomi
   provider_namespace: xiaomi
   primary_alias: xmipro
+  lifecycle_status: historical
 - id: xiaomi-mimo-v2-5-payg
   alias:
   - xmi
@@ -811,6 +840,7 @@ models:
   canonical_provider: xiaomi
   provider_namespace: xiaomi
   primary_alias: xmi
+  lifecycle_status: historical
 - id: opencode-go-glm-5-2
   alias:
   - opencode-glm52
@@ -850,6 +880,7 @@ models:
   canonical_provider: opencode-go
   provider_namespace: opencode-go
   primary_alias: opencode-glm52
+  lifecycle_status: enabled_assigned
 - id: opencode-go-glm-5-1
   alias:
   - opencode-glm51
@@ -889,6 +920,7 @@ models:
   canonical_provider: opencode-go
   provider_namespace: opencode-go
   primary_alias: opencode-glm51
+  lifecycle_status: enabled_assigned
 - id: opencode-go-deepseek-v4-flash
   alias:
   - opencode-ds4flash
@@ -929,6 +961,7 @@ models:
   canonical_provider: opencode-go
   provider_namespace: opencode-go
   primary_alias: opencode-ds4flash
+  lifecycle_status: enabled_assigned
 - id: opencode-go-kimi-k2-6
   alias:
   - opencode-kimi26
@@ -968,6 +1001,7 @@ models:
   canonical_provider: opencode-go
   provider_namespace: opencode-go
   primary_alias: opencode-kimi26
+  lifecycle_status: enabled_assigned
 - id: opencode-go-qwen3-7-max
   alias:
   - opencode-qwen37max
@@ -1008,6 +1042,7 @@ models:
   canonical_provider: opencode-go
   provider_namespace: opencode-go
   primary_alias: opencode-qwen37max
+  lifecycle_status: enabled_assigned
 - id: opencode-go-qwen3-7-plus
   alias:
   - opencode-qwen37plus
@@ -1047,6 +1082,7 @@ models:
   canonical_provider: opencode-go
   provider_namespace: opencode-go
   primary_alias: opencode-qwen37plus
+  lifecycle_status: enabled_assigned
 - id: opencode-go-mimo-v2-5-pro
   alias:
   - opencode-mimopro
@@ -1087,6 +1123,7 @@ models:
   canonical_provider: opencode-go
   provider_namespace: opencode-go
   primary_alias: opencode-mimopro
+  lifecycle_status: enabled_assigned
 - id: opencode-go-mimo-v2-5
   alias:
   - opencode-mimo
@@ -1126,6 +1163,7 @@ models:
   canonical_provider: opencode-go
   provider_namespace: opencode-go
   primary_alias: opencode-mimo
+  lifecycle_status: operator_requested
 - id: opencode-go-deepseek-v4-pro
   alias:
   - opencode-ds4pro
@@ -1166,3 +1204,4 @@ models:
   canonical_provider: opencode-go
   provider_namespace: opencode-go
   primary_alias: opencode-ds4pro
+  lifecycle_status: enabled_assigned

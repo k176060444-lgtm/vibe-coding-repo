@@ -142,17 +142,27 @@ def _load_evidence(path):
 # --- Commands ---
 
 def cmd_list(args):
-    """List models in the pool."""
+    """List models in the pool, optionally filtered by lifecycle_status."""
     pool = _load_pool()
     models = pool.get("models", [])
+
+    # Filter by lifecycle_status if specified
+    if hasattr(args, "lifecycle_status") and args.lifecycle_status:
+        err = validate_lifecycle_status(args.lifecycle_status)
+        if err:
+            _error(err, "INVALID_LIFECYCLE_STATUS")
+        models = [m for m in models if m.get("lifecycle_status") == args.lifecycle_status]
+
     if args.json:
         _output({"status": "ok", "total_models": len(models), "models": models})
     else:
-        print(f"Total models: {len(models)}")
+        print(f"Total models: {len(models)}" +
+              (f" (lifecycle_status={args.lifecycle_status})" if hasattr(args, "lifecycle_status") and args.lifecycle_status else ""))
         for m in models:
             nodes = ",".join(m.get("allowed_nodes", [])) or "(none)"
             enabled = "E" if m.get("enabled") else "D"
-            print(f"  [{enabled}] {m['id']:40s} {m.get('provider','?'):20s} {m.get('model','?'):30s} nodes=[{nodes}]")
+            ls = m.get("lifecycle_status", "?")
+            print(f"  [{enabled}] {m['id']:40s} ls={ls:30s} nodes=[{nodes}]")
     return True
 
 
@@ -209,6 +219,11 @@ def cmd_add(args):
     entry["smoke_results"] = {}
     entry["source"] = "add-command"
     entry["notes"] = args.notes or ""
+    if args.lifecycle_status:
+        err = validate_lifecycle_status(args.lifecycle_status)
+        if err:
+            _error(err, "INVALID_LIFECYCLE_STATUS")
+        entry["lifecycle_status"] = args.lifecycle_status
     if args.internal_provider_id:
         entry["internal_provider_id"] = args.internal_provider_id
     if key_env_aliases:
@@ -241,6 +256,7 @@ def cmd_update(args):
         ("provider", "provider"), ("model", "model"), ("key_env", "key_env"),
         ("base_url_env", "base_url_env"), ("cost", "cost"),
         ("priority", "priority"), ("notes", "notes"),
+        ("lifecycle_status", "lifecycle_status"),
         ("internal_provider_id", "internal_provider_id"),
     ]:
         val = getattr(args, attr, None)
@@ -576,8 +592,21 @@ def cmd_validate_schema(args):
         if ns is not None and ns != "unknown" and not isinstance(ns, str):
             errors.append({"type": "INVALID_PROVIDER_NAMESPACE", "id": mid, "value": ns, "index": i})
 
-    if schema_version != "1.1":
-        errors.append({"type": "SCHEMA_VERSION_NOT_1_1", "expected": "1.1", "actual": schema_version})
+    if schema_version not in ("1.1", "1.2"):
+        errors.append({"type": "SCHEMA_VERSION_NOT_1_1_OR_1_2", "expected": "1.1 or 1.2", "actual": schema_version})
+
+    # Lifecycle_status check (v1.2+)
+    seen_ls = {"present": 0, "missing": 0}
+    for m in models:
+        if "lifecycle_status" in m and m.get("lifecycle_status"):
+            seen_ls["present"] += 1
+            ls = m["lifecycle_status"]
+            if ls not in LIFECYCLE_STATUS_VALUES:
+                errors.append({"type": "INVALID_LIFECYCLE_STATUS", "id": m.get("id"), "value": ls})
+        else:
+            seen_ls["missing"] += 1
+            if schema_version == "1.2":
+                warnings.append({"type": "MISSING_LIFECYCLE_STATUS", "id": m.get("id"), "message": "All models should have lifecycle_status in schema v1.2; run 'classify --apply'"})
 
     status = "ok" if not errors else "ERRORS_FOUND"
     result = {
@@ -585,6 +614,7 @@ def cmd_validate_schema(args):
         "schema_version": schema_version,
         "total_models": len(models),
         "migration_state": seen_migration_state,
+        "lifecycle_status": seen_ls,
         "error_count": len(errors),
         "warning_count": len(warnings),
         "errors": errors,
@@ -659,12 +689,12 @@ def cmd_self_check(args):
     result = {
         "status": "ok",
         "schema_version": schema_version,
-        "expected_schema_version": "1.1",
+        "expected_schema_version": "1.1 or 1.2",
         "total_models": len(models),
         "new_field_counts": new_field_counts,
         "legacy_field_counts": legacy_field_counts,
         "summary": (
-            f"schema_version={schema_version} (expected 1.1); "
+            f"schema_version={schema_version} (expected 1.1/1.2); "
             f"new_fields coverage: canonical_provider={new_field_counts['canonical_provider']}/{len(models)}, "
             f"provider_namespace={new_field_counts['provider_namespace']}/{len(models)}, "
             f"primary_alias={new_field_counts['primary_alias']}/{len(models)}; "
@@ -675,7 +705,7 @@ def cmd_self_check(args):
 
     coverage_ok = all(v == len(models) for v in new_field_counts.values())
     legacy_ok = all(v == len(models) for v in legacy_field_counts.values())
-    schema_ok = schema_version == "1.1"
+    schema_ok = schema_version in ("1.1", "1.2")
     if not (coverage_ok and legacy_ok and schema_ok):
         result["status"] = "WARN"
         result["issues"] = {
@@ -989,7 +1019,118 @@ def cmd_sync(args):
     return True
 
 
-# --- baseline01 G5 (node capability matrix) ---
+# ── lifecycle_status (schema v1.2) ------------------------------------------------
+
+LIFECYCLE_STATUS_VALUES = frozenset({
+    "required",
+    "operator_requested",
+    "enabled_assigned",
+    "declared_enabled_unassigned",
+    "candidate",
+    "disabled",
+    "historical",
+    "remove_pending",
+})
+
+# Models with explicit F6 operator_approved receipt (lifecycle_status=operator_requested)
+EXPLICIT_OPERATOR_REQUESTED = frozenset({"opencode-go-mimo-v2-5"})
+
+# Provider-level auto-classify rules for non-enabled models
+CANDIDATE_NAMESPACES = frozenset({"volcengine", "deepseek-plan", "minimax-plan"})
+REMOVE_PENDING_NAMESPACES = frozenset({"opencode"})
+HISTORICAL_PROVIDER_NAMES = frozenset({"xiaomi", "minimax"})
+
+
+def auto_classify(model: dict) -> str:
+    """Determine lifecycle_status from existing model fields.
+
+    Returns one of the 8 LIFECYCLE_STATUS_VALUES. Does NOT read or depend
+    on any secret field (key_env, base_url_env values). Pure deterministic
+    function based on id, enabled, allowed_nodes, and canonical_provider.
+    """
+    mid = model.get("id", "")
+    enabled = bool(model.get("enabled", False))
+    allowed_nodes = model.get("allowed_nodes") or []
+    cp = model.get("canonical_provider", "")
+
+    # operator_requested: models with explicit F6 operator_approved receipt
+    if mid in EXPLICIT_OPERATOR_REQUESTED:
+        return "operator_requested"
+
+    if enabled:
+        if allowed_nodes:
+            return "enabled_assigned"
+        return "declared_enabled_unassigned"
+
+    # Disabled models — classify by provider/namespace
+    ns = model.get("provider_namespace", "")
+    if ns in CANDIDATE_NAMESPACES or cp in CANDIDATE_NAMESPACES:
+        return "candidate"
+    if ns in REMOVE_PENDING_NAMESPACES or cp == "opencode":
+        return "remove_pending"
+    if cp in HISTORICAL_PROVIDER_NAMES:
+        return "historical"
+    return "disabled"
+
+
+def validate_lifecycle_status(status: str) -> str | None:
+    """Validate lifecycle_status. Return error message or None."""
+    if status not in LIFECYCLE_STATUS_VALUES:
+        return (f"Invalid lifecycle_status '{status}'. "
+                f"Must be one of: {', '.join(sorted(LIFECYCLE_STATUS_VALUES))}")
+    return None
+
+
+# ── cmd_classify: auto-classify all models ──────────────────────────────────
+
+
+def cmd_classify(args):
+    """Auto-classify all models by lifecycle_status (schema v1.2).
+
+    Reads each model's existing fields (id, enabled, allowed_nodes,
+    canonical_provider, provider_namespace) and assigns lifecycle_status
+    using auto_classify(). Pure deterministic function — no secret read.
+    """
+    pool = _load_pool()
+    models = pool.get("models", [])
+    result = []
+    for m in models:
+        new_status = auto_classify(m)
+        old_status = m.get("lifecycle_status", None)
+        changed = old_status is None or old_status != new_status
+        result.append({
+            "id": m["id"],
+            "from": old_status,
+            "to": new_status,
+            "changed": changed,
+        })
+        if args.apply:
+            m["lifecycle_status"] = new_status
+
+    if args.apply:
+        _save_pool(pool)
+        status = "ok"
+    else:
+        status = "DRY_RUN"
+
+    statuses: dict[str, int] = {}
+    for r in result:
+        s = r["to"]
+        statuses[s] = statuses.get(s, 0) + 1
+    changed_count = sum(1 for r in result if r["changed"])
+
+    _output({
+        "status": status,
+        "total_models": len(result),
+        "changed": changed_count,
+        "classifications": statuses,
+        "details": result,
+        "message": "Auto-classified. Pass --apply to write." if status == "DRY_RUN" else f"Written {changed_count} lifecycle_status fields.",
+    })
+    return True
+
+
+# ── baseline01 G5 node capability matrix ---------------------------------
 
 ACTIVE_NODES = ["21bao", "5bao", "9bao"]
 NODE_RUNTIME_PROVIDER = {
@@ -1307,8 +1448,9 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
 
     # list
-    p_list = sub.add_parser("list", help="List models")
+    p_list = sub.add_parser("list", help="List models (optionally filtered)")
     p_list.add_argument("--json", action="store_true", help="JSON output")
+    p_list.add_argument("--lifecycle-status", help="Filter by lifecycle_status value")
     p_list.set_defaults(func=cmd_list)
 
     # add
@@ -1327,6 +1469,7 @@ def main():
     p_add.add_argument("--internal-provider-id", help="Internal provider ID for the worker")
     p_add.add_argument("--key-env-aliases", help="Comma-separated alternate key env names")
     p_add.add_argument("--smoke-required", help="Whether smoke is required (true/false)")
+    p_add.add_argument("--lifecycle-status", help="lifecycle_status for the model (default: auto-classify)")
     p_add.set_defaults(func=cmd_add)
 
     # update
@@ -1348,6 +1491,7 @@ def main():
     p_upd.add_argument("--internal-provider-id", help="New internal provider ID")
     p_upd.add_argument("--key-env-aliases", help="Comma-separated key env aliases")
     p_upd.add_argument("--smoke-required", help="Smoke required (true/false)")
+    p_upd.add_argument("--lifecycle-status", help="New lifecycle_status")
     p_upd.add_argument("--add-alias", help="Add an alias")
     p_upd.add_argument("--remove-alias", help="Remove an alias")
     group_mode = p_upd.add_mutually_exclusive_group()
@@ -1387,8 +1531,8 @@ def main():
     # --- baseline01 G4 schema 1.1 validators (additive) ---
     # NOTE: legacy model entry uses `alias` as a list (e.g. - haiku); the
     # new schema 1.1 single-alias field is named `primary_alias` to avoid a
-    # YAML key collision with the existing list-typed `alias` field.
-    p_vschema = sub.add_parser("validate-schema", help="Validate schema_version==1.1 + G4 field coverage")
+    # --- schema validators (additive) ---
+    p_vschema = sub.add_parser("validate-schema", help="Validate schema_version >=1.1 + G4 field coverage + lifecycle_status")
     p_vschema.set_defaults(func=cmd_validate_schema)
 
     p_vbc = sub.add_parser("validate-backward-compat", help="Verify legacy provider/alias(list) fields are still readable")
@@ -1404,6 +1548,12 @@ def main():
     p_mig.add_argument("--apply", action="store_true", help="Apply migration to model_pool.yaml")
     p_mig.add_argument("--namespace-mapping", help="Optional path to alias->namespace mapping YAML")
     p_mig.set_defaults(func=cmd_migrate, dry_run=True, apply=False)
+
+    # --- schema v1.2 lifecycle_status ---
+    p_cls = sub.add_parser("classify", help="Auto-classify all models by lifecycle_status (schema v1.2)")
+    p_cls.add_argument("--dry-run", action="store_true", help="Show changes without writing (default)")
+    p_cls.add_argument("--apply", action="store_true", help="Write lifecycle_status to model_pool.yaml")
+    p_cls.set_defaults(func=cmd_classify, dry_run=True, apply=False)
 
     # freeze
     p_frz = sub.add_parser("freeze", help="Generate capability freeze snapshot")
