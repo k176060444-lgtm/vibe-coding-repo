@@ -22,28 +22,29 @@ import sys
 from pathlib import Path
 
 try:
-    # Stage 3 corrective (PR #278 acceptance FAIL, issue #2): the EAG must
-    # call the strict v1.1.0 validator so that production coding tasks are
-    # fail-closed against the 7 spec §4.2 fields. v1.0.0 legacy behavior
-    # is preserved as a fallback ONLY when the strict validator is not
-    # importable (e.g. transitional deploy), and is explicitly marked
-    # non-production-compatible via the EAG v1.2.x legacy_check_used flag.
-    from vibe_role_assignment_gate import (
-        validate_assignment_matrix,
-        validate_assignment_matrix_strict,
-    )
-    _ROLE_ASSIGNMENT_GATE_AVAILABLE = True
+    # Stage 3 corrective #2 (PR #278 post-corrective acceptance): the EAG
+    # production path MUST call the v1.1.0 strict validator. If the strict
+    # validator is not importable (RAG < v1.1.0), the EAG BLOCKS the
+    # production coding task — there is NO fallback to the v1.0.0 legacy
+    # validator in production. The legacy validator remains importable
+    # for non-production / unit-test use only (e.g. tests/test_stage3_eag_caller.py
+    # explicitly imports it to verify the fail-closed behavior).
+    from vibe_role_assignment_gate import validate_assignment_matrix_strict
     _STRICT_AVAILABLE = True
+    _ROLE_ASSIGNMENT_GATE_AVAILABLE = True
 except ImportError:
+    # Strict validator missing → production is BLOCKED.
+    # We still attempt to import the legacy validator for diagnostic
+    # purposes (so an operator can see what validator is available),
+    # but the production path will BLOCK regardless.
+    validate_assignment_matrix_strict = None
+    _STRICT_AVAILABLE = False
     try:
         from vibe_role_assignment_gate import validate_assignment_matrix
         _ROLE_ASSIGNMENT_GATE_AVAILABLE = True
-        _STRICT_AVAILABLE = False
     except ImportError:
         validate_assignment_matrix = None
-        validate_assignment_matrix_strict = None
         _ROLE_ASSIGNMENT_GATE_AVAILABLE = False
-        _STRICT_AVAILABLE = False
 
 VERSION = "1.2.0"
 
@@ -248,21 +249,17 @@ def cmd_check(args):
     # For coding tasks (wo_type == "code" or operation_type involves coding),
     # a validated role assignment matrix is required.
     #
-    # Stage 3 corrective (PR #278 acceptance FAIL, issue #2): EAG must call
-    # the v1.1.0 strict validator so the 7 spec §4.2 fields are enforced
-    # in production. The strict validator:
-    #   - runs the v1.0.0 baseline checks (8 required fields, reviewer,
-    #     tester/main-tester, operator_approved) AND
-    #   - runs the v1.1.0 entry checks (assignment_id, provider_namespace,
-    #     operator_approval_timestamp, operator_approval_signature,
-    #     node_whitelist_verified, model_pool_source_verified, base_sha)
-    #     when the matrix opts into v1.1.0 (spec_version=1.1.0 or auto-detect).
+    # Stage 3 corrective #2 (PR #278 post-corrective acceptance): EAG MUST
+    # call the v1.1.0 strict validator. There is NO fallback to the
+    # v1.0.0 legacy validator in production. If _STRICT_AVAILABLE is False
+    # (RAG < v1.1.0), the EAG BLOCKS the coding task with a clear message
+    # demanding RAG v1.1.0+ install. This is the fail-closed production
+    # enforcement per operator §4 + spec §4.2 mandate.
     #
-    # Legacy v1.0.0 path (validate_assignment_matrix) is used ONLY when
-    # the strict validator cannot be imported. This is the explicitly
-    # marked non-production-compatible fallback; the EAG result includes
-    # `legacy_check_used=True` so the operator can detect transitional
-    # deploys and force-fix the gate.
+    # The legacy validate_assignment_matrix() remains importable for
+    # non-production / unit-test use (e.g. tests/test_stage3_eag_caller.py
+    # uses it to verify the fail-closed boundary). Production EAG never
+    # calls it.
     wo_type = entry.get("wo_type", entry.get("type", ""))
     operation_type = entry.get("operation_type", "")
     is_coding_task = wo_type in ("code", "fix") or operation_type in ("write-local", "push", "coding")
@@ -272,11 +269,33 @@ def cmd_check(args):
             checks.append({"name": "role_assignment_matrix", "result": "BLOCK",
                            "detail": "Coding task missing role_assignment_matrix"})
             errors.append("Coding task requires role_assignment_matrix in registry entry")
-        elif _STRICT_AVAILABLE:
-            # Stage 3 corrective: production path uses v1.1.0 strict
-            # validator. v1.0.0 matrices (no spec_version, no v1.1.0 fields)
-            # are routed through the strict wrapper which surfaces missing
-            # v1.1.0 fields as BLOCK (fail-closed).
+        elif not _STRICT_AVAILABLE:
+            # Stage 3 corrective #2: when strict is unavailable, the EAG
+            # BLOCKS instead of falling back to legacy. The legacy
+            # validator does NOT enforce the 7 spec §4.2 fields, so a
+            # v1.0.0 matrix would pass without those fields — this is
+            # exactly the bypass the post-corrective acceptance flagged
+            # as blocking. The operator must upgrade RAG to v1.1.0+ to
+            # enable production coding-task dispatch.
+            checks.append({
+                "name": "role_assignment_matrix",
+                "result": "BLOCK",
+                "detail": (
+                    "RAG v1.1.0 strict validator unavailable — cannot enforce "
+                    "spec §4.2 7-field mandate in production. "
+                    "Upgrade scripts/vibe_role_assignment_gate.py to v1.1.0+ to "
+                    "enable strict enforcement. The legacy v1.0.0 validator is "
+                    "NOT acceptable for production coding tasks."
+                ),
+            })
+            errors.append(
+                "EAG: RAG v1.1.0 strict validator unavailable. Production "
+                "coding tasks are BLOCKED to prevent spec §4.2 7-field "
+                "bypass. Upgrade RAG to v1.1.0+."
+            )
+            ra_legacy = False
+        else:
+            # Production path: v1.1.0 strict validator.
             ra_result = validate_assignment_matrix_strict(role_matrix)
             ra_legacy = False
             if not ra_result["valid"]:
@@ -285,31 +304,12 @@ def cmd_check(args):
                 errors.extend([f"role_assignment: {e}" for e in ra_result["errors"]])
             else:
                 detail = f"Valid (strict v1.1.0) with {len(role_matrix.get('assignments', []))} roles"
-                # Surface any v1.0.0 informational warnings so operator sees
-                # that legacy matrices are still being routed (transition period).
+                # Surface any v1.0.0 informational warnings (transition period)
                 warnings = ra_result.get("warnings", [])
                 if warnings:
                     detail += f" (warnings: {len(warnings)})"
                 checks.append({"name": "role_assignment_matrix", "result": "PASS",
                                "detail": detail})
-        elif _ROLE_ASSIGNMENT_GATE_AVAILABLE:
-            # Transitional fallback: strict validator not importable (RAG < v1.1.0)
-            ra_result = validate_assignment_matrix(role_matrix)
-            ra_legacy = True
-            if not ra_result["valid"]:
-                checks.append({"name": "role_assignment_matrix", "result": "BLOCK",
-                               "detail": f"Invalid (legacy v1.0.0 fallback): {len(ra_result['errors'])} errors"})
-                errors.extend([f"role_assignment: {e}" for e in ra_result["errors"]])
-            else:
-                checks.append({"name": "role_assignment_matrix", "result": "PASS",
-                               "detail": f"Valid (LEGACY v1.0.0 fallback — non-production-compatible) "
-                                          f"with {len(role_matrix.get('assignments', []))} roles; "
-                                          f"upgrade RAG to v1.1.0 to enable strict enforcement"})
-        else:
-            checks.append({"name": "role_assignment_matrix", "result": "BLOCK",
-                           "detail": "role assignment gate import failed"})
-            errors.append("Cannot validate role_assignment_matrix: gate module unavailable")
-            ra_legacy = False
     else:
         checks.append({"name": "role_assignment_matrix", "result": "PASS",
                        "detail": f"Not a coding task (wo_type={wo_type}), gate not applicable"})
