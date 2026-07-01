@@ -11,8 +11,11 @@ Enforces Git/PR state transition policy for VibeDev orchestrator (baseline01):
 
 Integrates with:
 - V1.21.6 conversational_intake_gate (intake approval lifecycle)
-- V1.21.9 remote_verification_gate (remote source-of-truth verification)
-- operator_merge_approval_gate (merge approval records)
+# V1.21.9 remote_verification_gate (remote source-of-truth verification)
+# - operator_merge_approval_gate (merge approval records)
+#
+# Stage 6 (F7): public_pr_preflight — repo visibility and operator confirmation
+#   before merge on public repos.
 
 Usage:
     python scripts/git_pr_approval_gate.py --self-check
@@ -54,9 +57,16 @@ except ImportError:
     _eag_check = None
     _EAG_APPROVAL_BOUND = "APPROVAL_BOUND"
     _EAG_PASS_READ_ONLY = "PASS_READ_ONLY"
+    _EAG_BLOCKED_NO_APPROVAL = "BLOCKED_EXECUTION_WITHOUT_APPROVAL"
     _EXECUTION_APPROVAL_GATE_AVAILABLE = False
     _EAG_KNOWN_BLOCK_VERDICTS = set()
 
+try:
+    from public_pr_preflight import run_preflight as _run_preflight
+    _PUBLIC_PR_PREFLIGHT_AVAILABLE = True
+except ImportError:
+    _run_preflight = None
+    _PUBLIC_PR_PREFLIGHT_AVAILABLE = False
 try:
     from conversational_intake_gate import write_eag_result as _write_eag_result
     _WRITE_EAG_RESULT_AVAILABLE = True
@@ -121,6 +131,9 @@ VERDICTS = {
     "BLOCKED_REMOTE_VERIFICATION_REQUIRED": "Action blocked: remote verification gate must pass before this action",
     "BLOCKED_EXECUTION_APPROVAL_REQUIRED": "Action blocked: execution approval binding required (V1.21.12)",
     "BLOCKED_EXECUTION_APPROVAL_GATE_ERROR": "Action blocked: execution approval gate internal error, cannot verify binding (V1.21.13A, fail-closed)",
+    "BLOCKED_PUBLIC_PR_OPERATOR_CONFIRMATION_REQUIRED": "Action blocked: public PR merge requires operator confirmation (Stage 6 F7)",
+    "BLOCKED_F7_API_FAILURE": "Action blocked: F7 public-PR pre-flight API call failed (fail-closed)",
+    "BLOCKED_F7_NOT_AVAILABLE": "Action blocked: F7 pre-flight module not available (fail-closed)",
     "PASS": "Action approved and allowed",
 }
 
@@ -149,6 +162,7 @@ def check_git_pr_action(
     execution_approval: dict = None,
     proposal_hash: str = None,
     operator_message: str = None,
+    public_pr_preflight_result: dict = None,
 ) -> dict:
     """Check whether a Git/PR action is allowed under VibeDev policy.
 
@@ -300,6 +314,32 @@ def check_git_pr_action(
                 result["remote_verification_required"] = True
                 result["forbidden_actions"] = [action]
                 return result
+            # F7 Gate: public-PR pre-flight (Stage 6)
+            if not _PUBLIC_PR_PREFLIGHT_AVAILABLE:
+                result["verdict"] = "BLOCKED_F7_NOT_AVAILABLE"
+                result["allowed"] = False
+                result["blocked_reason"] = "F7 public-PR pre-flight module not installed"
+                result["required_next_step"] = "Install scripts/public_pr_preflight.py"
+                result["forbidden_actions"] = [action]
+                return result
+            if action == "merge" and public_pr_preflight_result is None:
+                result["verdict"] = "BLOCKED_F7_API_FAILURE"
+                result["allowed"] = False
+                result["blocked_reason"] = "F7 public-PR pre-flight result required for merge"
+                result["required_next_step"] = "Run public_pr_preflight and pass result"
+                result["forbidden_actions"] = [action]
+                return result
+            if public_pr_preflight_result is not None:
+                pf = public_pr_preflight_result
+                pf_verdict = pf.get("verdict", "")
+                pf_authorized = pf.get("operator_merge_authorized", False)
+                if pf_verdict != "PASS" or not pf_authorized:
+                    result["verdict"] = pf_verdict
+                    result["allowed"] = False
+                    result["blocked_reason"] = pf.get("reason", "F7 gate blocked") + " (Stage 6 F7)"
+                    result["f7_preflight_result"] = pf
+                    result["forbidden_actions"] = [action]
+                    return result
             # All checks passed
             result["verdict"] = "PASS"
             result["allowed"] = True
@@ -309,6 +349,8 @@ def check_git_pr_action(
                 "remote_verified": True,
                 "merge_check_passed": True,
             }
+            if public_pr_preflight_result is not None:
+                result["f7_preflight_result"] = public_pr_preflight_result
             return result
 
         if action == "branch_delete":
@@ -557,7 +599,8 @@ def self_check(output_json=False):
         "message": f"verdict={r['verdict']}",
     })
 
-    # Pass: merge with approval + remote verification + merge check
+    # Pass: merge with approval + remote verification + merge check + F7 private
+    _F7_PRIVATE = {"verdict": "PASS", "operator_merge_authorized": True, "repo_is_public": False, "reason": "private"}
     r = check_git_pr_action(
         action="merge",
         pr_number=100,
@@ -565,6 +608,7 @@ def self_check(output_json=False):
         operator_approved_actions=["merge"],
         remote_verified=True,
         merge_check_passed=True,
+        public_pr_preflight_result=_F7_PRIVATE,
     )
     checks.append({
         "name": "gpac-11-merge-full-pass",
@@ -763,7 +807,7 @@ def self_check(output_json=False):
     # Verdict count
     checks.append({
         "name": "gpac-26-verdicts-count",
-        "passed": len(VERDICTS) == 10,
+        "passed": len(VERDICTS) == 13,
         "message": f"count={len(VERDICTS)}",
     })
 
@@ -795,7 +839,8 @@ def self_check(output_json=False):
         "message": f"count={len(PROTECTED_BRANCHES)}",
     })
 
-    # Approval binding fields for merge
+    # Approval binding fields for merge (with F7)
+    _F7_PRIV_B = {"verdict": "PASS", "operator_merge_authorized": True, "repo_is_public": False, "reason": "private"}
     r = check_git_pr_action(
         action="merge",
         pr_number=100,
@@ -803,6 +848,7 @@ def self_check(output_json=False):
         operator_approved_actions=["merge"],
         remote_verified=True,
         merge_check_passed=True,
+        public_pr_preflight_result=_F7_PRIV_B,
     )
     checks.append({
         "name": "gpac-31-merge-approval-binding",
@@ -862,6 +908,59 @@ def self_check(output_json=False):
         "name": "gpac-35-merge-remote-verification-flag",
         "passed": r["remote_verification_required"] is True,
         "message": f"remote_verification_required={r['remote_verification_required']}",
+    })
+
+    # F7 Gate: merge with public repo no confirmation (requires f7 result)
+    _F7_PUBLIC_NO = {"verdict": "BLOCKED_PUBLIC_PR_OPERATOR_CONFIRMATION_REQUIRED", "operator_merge_authorized": False, "repo_is_public": True, "reason": "test reason"}
+    r = check_git_pr_action(
+        action="merge", pr_number=100,
+        operator_approval_id="approval-001", operator_approved_actions=["merge"],
+        remote_verified=True, merge_check_passed=True,
+        public_pr_preflight_result=_F7_PUBLIC_NO,
+    )
+    checks.append({
+        "name": "gpac-36-f7-public-no-confirmation",
+        "passed": r["verdict"] == "BLOCKED_PUBLIC_PR_OPERATOR_CONFIRMATION_REQUIRED" and not r["allowed"],
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # F7 Gate: merge with public repo confirmation pass
+    _F7_PUBLIC_OK = {"verdict": "PASS", "operator_merge_authorized": True, "repo_is_public": True, "reason": "confirmed"}
+    r = check_git_pr_action(
+        action="merge", pr_number=100,
+        operator_approval_id="approval-001", operator_approved_actions=["merge"],
+        remote_verified=True, merge_check_passed=True,
+        public_pr_preflight_result=_F7_PUBLIC_OK,
+    )
+    checks.append({
+        "name": "gpac-37-f7-public-confirmation-pass",
+        "passed": r["verdict"] == "PASS" and r["allowed"] and "f7_preflight_result" in r,
+        "message": f"verdict={r['verdict']} has_f7={'f7_preflight_result' in r}",
+    })
+
+    # F7 Gate: merge with private repo (no f7 result required for private)
+    r = check_git_pr_action(
+        action="merge", pr_number=100,
+        operator_approval_id="approval-001", operator_approved_actions=["merge"],
+        remote_verified=True, merge_check_passed=True,
+        public_pr_preflight_result=None,
+    )
+    checks.append({
+        "name": "gpac-38-f7-private-no-f7-required",
+        "passed": r["verdict"] == "BLOCKED_F7_API_FAILURE",
+        "message": f"verdict={r['verdict']}",
+    })
+
+    # F7 Gate: ready_to_merge does not require f7 (different action)
+    r = check_git_pr_action(
+        action="ready_to_merge", pr_number=100,
+        operator_approval_id="approval-001", operator_approved_actions=["ready_to_merge"],
+        remote_verified=True, merge_check_passed=True,
+    )
+    checks.append({
+        "name": "gpac-39-f7-ready-to-merge-no-f7-required",
+        "passed": r["verdict"] == "PASS" and r["allowed"],
+        "message": f"verdict={r['verdict']}",
     })
 
     # Summary
