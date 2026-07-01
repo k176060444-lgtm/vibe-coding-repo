@@ -235,6 +235,56 @@ class TestSevenStateSchema:
             "5bao": {"opencode-go-mimo-v2-5"},
             "9bao": {"opencode-go-mimo-v2-5"},
         }
+        # Per-entry runtime_visible promotions (S7-1 inventory evidence:
+        # model_id listed in opencode.jsonc opencode-go provider on all 3 nodes)
+        RUNTIME_VISIBLE_ENTRIES = {
+            "21bao": {
+                "opencode-go-deepseek-v4-flash", "opencode-go-glm-5-1",
+                "opencode-go-glm-5-2", "opencode-go-kimi-k2-6",
+                "opencode-go-mimo-v2-5", "opencode-go-mimo-v2-5-pro",
+                "opencode-go-qwen3-7-max", "opencode-go-qwen3-7-plus",
+            },
+            "5bao": {
+                "opencode-go-deepseek-v4-flash", "opencode-go-glm-5-1",
+                "opencode-go-glm-5-2", "opencode-go-kimi-k2-6",
+                "opencode-go-mimo-v2-5", "opencode-go-mimo-v2-5-pro",
+                "opencode-go-qwen3-7-max", "opencode-go-qwen3-7-plus",
+            },
+            "9bao": {
+                "opencode-go-deepseek-v4-flash", "opencode-go-glm-5-1",
+                "opencode-go-glm-5-2", "opencode-go-kimi-k2-6",
+                "opencode-go-mimo-v2-5", "opencode-go-mimo-v2-5-pro",
+                "opencode-go-qwen3-7-max", "opencode-go-qwen3-7-plus",
+            },
+        }
+        # Per-entry env_loaded promotions (S7-2 inventory evidence:
+        # OPENCODE_GO_API_KEY + OPENCODE_DEEPSEEK_API_KEY populated on all 3 nodes)
+        ENV_LOADED_ENTRIES = {
+            "21bao": {
+                "opencode-go-deepseek-v4-flash", "opencode-go-deepseek-v4-pro",
+                "opencode-go-glm-5-1", "opencode-go-glm-5-2",
+                "opencode-go-kimi-k2-6", "opencode-go-mimo-v2-5",
+                "opencode-go-mimo-v2-5-pro", "opencode-go-qwen3-7-max",
+                "opencode-go-qwen3-7-plus",
+                "deepseek-deepseek-coder", "deepseek-deepseek-reasoner",
+            },
+            "5bao": {
+                "opencode-go-deepseek-v4-flash", "opencode-go-deepseek-v4-pro",
+                "opencode-go-glm-5-1", "opencode-go-glm-5-2",
+                "opencode-go-kimi-k2-6", "opencode-go-mimo-v2-5",
+                "opencode-go-mimo-v2-5-pro", "opencode-go-qwen3-7-max",
+                "opencode-go-qwen3-7-plus",
+                "deepseek-deepseek-coder", "deepseek-deepseek-reasoner",
+            },
+            "9bao": {
+                "opencode-go-deepseek-v4-flash", "opencode-go-deepseek-v4-pro",
+                "opencode-go-glm-5-1", "opencode-go-glm-5-2",
+                "opencode-go-kimi-k2-6", "opencode-go-mimo-v2-5",
+                "opencode-go-mimo-v2-5-pro", "opencode-go-qwen3-7-max",
+                "opencode-go-qwen3-7-plus",
+                "deepseek-deepseek-coder", "deepseek-deepseek-reasoner",
+            },
+        }
         for nn, nd in nmc["nodes"].items():
             for i, e in enumerate(nd["matrix"]):
                 mid = e.get("model_id", "")
@@ -251,6 +301,16 @@ class TestSevenStateSchema:
                     if sf == "model_call_verified" and mid in MODEL_CALL_VERIFIED_ENTRIES.get(nn, set()):
                         if val is not True:
                             bad.append(f"{nn}[{i}]({mid}): model_call_verified={val!r} (expected True, Batch D-R2)")
+                        continue
+                    # Per-entry override: runtime_visible (S7-1 inventory evidence)
+                    if sf == "runtime_visible" and mid in RUNTIME_VISIBLE_ENTRIES.get(nn, set()):
+                        if val is not True:
+                            bad.append(f"{nn}[{i}]({mid}): runtime_visible={val!r} (expected True, S7-1)")
+                        continue
+                    # Per-entry override: env_loaded (S7-2 inventory evidence)
+                    if sf == "env_loaded" and mid in ENV_LOADED_ENTRIES.get(nn, set()):
+                        if val is not True:
+                            bad.append(f"{nn}[{i}]({mid}): env_loaded={val!r} (expected True, S7-2)")
                         continue
                     if promoted and sf in promoted:
                         # Promoted states must be True, not 'unknown'

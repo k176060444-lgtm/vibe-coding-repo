@@ -89,7 +89,7 @@ nodes:
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
-      env_loaded: unknown
+      env_loaded: true
     - model_id: deepseek-deepseek-reasoner
       canonical_provider: deepseek
       provider_namespace: deepseek
@@ -101,7 +101,7 @@ nodes:
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
-      env_loaded: unknown
+      env_loaded: true
     - model_id: google-gemini-2-5-flash
       canonical_provider: google
       provider_namespace: google
@@ -208,8 +208,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-deepseek-v4-pro
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -221,7 +221,7 @@ nodes:
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
-      env_loaded: unknown
+      env_loaded: true
     - model_id: opencode-go-glm-5-1
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -232,8 +232,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-glm-5-2
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -244,8 +244,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-kimi-k2-6
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -256,8 +256,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-mimo-v2-5
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -268,8 +268,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: true
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-mimo-v2-5-pro
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -280,8 +280,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-qwen3-7-max
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -292,8 +292,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-qwen3-7-plus
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -304,8 +304,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: xai-grok-3
       canonical_provider: xai
       provider_namespace: xai
@@ -394,7 +394,7 @@ nodes:
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
-      env_loaded: unknown
+      env_loaded: true
     - model_id: deepseek-deepseek-reasoner
       canonical_provider: deepseek
       provider_namespace: deepseek
@@ -406,7 +406,7 @@ nodes:
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
-      env_loaded: unknown
+      env_loaded: true
     - model_id: google-gemini-2-5-flash
       canonical_provider: google
       provider_namespace: google
@@ -513,8 +513,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-deepseek-v4-pro
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -526,7 +526,7 @@ nodes:
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
-      env_loaded: unknown
+      env_loaded: true
     - model_id: opencode-go-glm-5-1
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -537,8 +537,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-glm-5-2
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -549,8 +549,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-kimi-k2-6
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -561,8 +561,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-mimo-v2-5
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -573,8 +573,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: true
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-mimo-v2-5-pro
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -585,8 +585,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-qwen3-7-max
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -597,8 +597,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-qwen3-7-plus
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -609,8 +609,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: xai-grok-3
       canonical_provider: xai
       provider_namespace: xai
@@ -699,7 +699,7 @@ nodes:
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
-      env_loaded: unknown
+      env_loaded: true
     - model_id: deepseek-deepseek-reasoner
       canonical_provider: deepseek
       provider_namespace: deepseek
@@ -711,7 +711,7 @@ nodes:
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
-      env_loaded: unknown
+      env_loaded: true
     - model_id: google-gemini-2-5-flash
       canonical_provider: google
       provider_namespace: google
@@ -818,8 +818,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-deepseek-v4-pro
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -831,7 +831,7 @@ nodes:
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
-      env_loaded: unknown
+      env_loaded: true
     - model_id: opencode-go-glm-5-1
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -842,8 +842,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-glm-5-2
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -854,8 +854,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-kimi-k2-6
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -866,8 +866,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-mimo-v2-5
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -878,8 +878,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: true
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-mimo-v2-5-pro
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -890,8 +890,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-qwen3-7-max
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -902,8 +902,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: opencode-go-qwen3-7-plus
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -914,8 +914,8 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
+      runtime_visible: true
+      env_loaded: true
     - model_id: xai-grok-3
       canonical_provider: xai
       provider_namespace: xai
