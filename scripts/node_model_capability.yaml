@@ -1,7 +1,9 @@
 schema_version: '1.1'
 generated_at: '2026-07-01T01:10:40.387122+00:00'
 generated_from: scripts/model_pool.yaml
-notes: 'Baseline02 Stage 4: declared layer sync. provider_namespace populated from canonical_provider. smoke_required+unverified/temporary_unavailable models disabled. 6 runtime states remain unknown (Stage 5 scope).'
+notes: 'Baseline02 Stage 4: declared layer sync. provider_namespace populated from
+  canonical_provider. smoke_required+unverified/temporary_unavailable models disabled.
+  6 runtime states remain unknown (Stage 5 scope).'
 skipped_models:
   count: 5
   ids:
@@ -22,8 +24,8 @@ nodes:
       primary_alias: haiku
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -34,8 +36,8 @@ nodes:
       primary_alias: opus
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -46,8 +48,8 @@ nodes:
       primary_alias: claude
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -58,8 +60,8 @@ nodes:
       primary_alias: qwen
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -70,8 +72,8 @@ nodes:
       primary_alias: qwen-plus
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -82,8 +84,8 @@ nodes:
       primary_alias: deepseek-coder
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -94,8 +96,8 @@ nodes:
       primary_alias: deepseek-r1
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -106,8 +108,8 @@ nodes:
       primary_alias: gemini-flash
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -118,8 +120,8 @@ nodes:
       primary_alias: gemini
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -130,8 +132,8 @@ nodes:
       primary_alias: kimi
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -142,8 +144,8 @@ nodes:
       primary_alias: gpt4o
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -154,8 +156,8 @@ nodes:
       primary_alias: o1
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -166,8 +168,8 @@ nodes:
       primary_alias: o3
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -178,8 +180,8 @@ nodes:
       primary_alias: o3-mini
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -190,8 +192,8 @@ nodes:
       primary_alias: o4-mini
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -202,8 +204,8 @@ nodes:
       primary_alias: opencode-ds4flash
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -214,8 +216,8 @@ nodes:
       primary_alias: opencode-ds4pro
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -226,8 +228,8 @@ nodes:
       primary_alias: opencode-glm51
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -238,8 +240,8 @@ nodes:
       primary_alias: opencode-glm52
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -250,8 +252,8 @@ nodes:
       primary_alias: opencode-kimi26
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -262,8 +264,8 @@ nodes:
       primary_alias: opencode-mimo
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -274,8 +276,8 @@ nodes:
       primary_alias: opencode-mimopro
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -286,8 +288,8 @@ nodes:
       primary_alias: opencode-qwen37max
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -298,8 +300,8 @@ nodes:
       primary_alias: opencode-qwen37plus
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown
@@ -310,8 +312,8 @@ nodes:
       primary_alias: grok
       runtime_provider: opencode-go
       declared: true
-      synced: unknown
-      wrapper_valid: unknown
+      synced: true
+      wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
       runtime_visible: unknown

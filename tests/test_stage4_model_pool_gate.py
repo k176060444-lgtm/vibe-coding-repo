@@ -219,11 +219,21 @@ class TestSevenStateSchema:
 
     def test_runtime_states_are_unknown(self, nmc):
         bad = []
+        # States that are EXPECTED to have been promoted on 21bao
+        # (Stage 5 Batch A evidence: synced=HIGH confidence, wrapper_valid=HIGH confidence)
+        PROMOTED_ON_21BAO = {"synced", "wrapper_valid"}
         for nn, nd in nmc["nodes"].items():
             for i, e in enumerate(nd["matrix"]):
                 for sf in self.RS:
-                    if e.get(sf) != "unknown":
-                        bad.append(f"{nn}[{i}]({e.get('model_id','?')}): {sf}={e.get(sf)!r}")
+                    val = e.get(sf)
+                    if nn == "21bao" and sf in PROMOTED_ON_21BAO:
+                        # 21bao promoted states must be True, not 'unknown'
+                        if val is not True:
+                            bad.append(f"{nn}[{i}]({e.get('model_id','?')}): {sf}={val!r} (expected True)")
+                    else:
+                        # All other nodes/states must remain 'unknown'
+                        if val != "unknown":
+                            bad.append(f"{nn}[{i}]({e.get('model_id','?')}): {sf}={val!r} (expected 'unknown')")
         assert bad == [], "\n".join(bad)
 
     def test_declared_is_true(self, nmc):
