@@ -267,7 +267,7 @@ nodes:
       synced: true
       wrapper_valid: true
       model_call_verified: true
-      operator_approved: unknown
+      operator_approved: true
       runtime_visible: true
       env_loaded: true
     - model_id: opencode-go-mimo-v2-5-pro
@@ -572,7 +572,7 @@ nodes:
       synced: true
       wrapper_valid: true
       model_call_verified: true
-      operator_approved: unknown
+      operator_approved: true
       runtime_visible: true
       env_loaded: true
     - model_id: opencode-go-mimo-v2-5-pro
@@ -877,7 +877,7 @@ nodes:
       synced: true
       wrapper_valid: true
       model_call_verified: true
-      operator_approved: unknown
+      operator_approved: true
       runtime_visible: true
       env_loaded: true
     - model_id: opencode-go-mimo-v2-5-pro
