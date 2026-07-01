@@ -12,7 +12,7 @@ skipped_models:
   - opencode-big-pickle
 nodes:
   21bao:
-    runtime_provider: opencode-go-plan
+    runtime_provider: opencode-go
     description: Windows local-exec/control node
     total_entries: 25
     matrix:
@@ -20,7 +20,7 @@ nodes:
       canonical_provider: anthropic
       provider_namespace: anthropic
       primary_alias: haiku
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -32,7 +32,7 @@ nodes:
       canonical_provider: anthropic
       provider_namespace: anthropic
       primary_alias: opus
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -44,7 +44,7 @@ nodes:
       canonical_provider: anthropic
       provider_namespace: anthropic
       primary_alias: claude
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -56,7 +56,7 @@ nodes:
       canonical_provider: dashscope
       provider_namespace: dashscope
       primary_alias: qwen
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -68,7 +68,7 @@ nodes:
       canonical_provider: dashscope
       provider_namespace: dashscope
       primary_alias: qwen-plus
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -80,7 +80,7 @@ nodes:
       canonical_provider: deepseek
       provider_namespace: deepseek
       primary_alias: deepseek-coder
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -92,7 +92,7 @@ nodes:
       canonical_provider: deepseek
       provider_namespace: deepseek
       primary_alias: deepseek-r1
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -104,7 +104,7 @@ nodes:
       canonical_provider: google
       provider_namespace: google
       primary_alias: gemini-flash
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -116,7 +116,7 @@ nodes:
       canonical_provider: google
       provider_namespace: google
       primary_alias: gemini
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -128,7 +128,7 @@ nodes:
       canonical_provider: moonshot
       provider_namespace: moonshot
       primary_alias: kimi
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -140,7 +140,7 @@ nodes:
       canonical_provider: openai
       provider_namespace: openai
       primary_alias: gpt4o
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -152,7 +152,7 @@ nodes:
       canonical_provider: openai
       provider_namespace: openai
       primary_alias: o1
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -164,7 +164,7 @@ nodes:
       canonical_provider: openai
       provider_namespace: openai
       primary_alias: o3
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -176,7 +176,7 @@ nodes:
       canonical_provider: openai
       provider_namespace: openai
       primary_alias: o3-mini
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -188,7 +188,7 @@ nodes:
       canonical_provider: openai
       provider_namespace: openai
       primary_alias: o4-mini
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown
@@ -308,7 +308,7 @@ nodes:
       canonical_provider: xai
       provider_namespace: xai
       primary_alias: grok
-      runtime_provider: opencode-go-plan
+      runtime_provider: opencode-go
       declared: true
       synced: unknown
       wrapper_valid: unknown

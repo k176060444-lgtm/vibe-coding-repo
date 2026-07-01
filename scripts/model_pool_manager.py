@@ -993,7 +993,7 @@ def cmd_sync(args):
 
 ACTIVE_NODES = ["21bao", "5bao", "9bao"]
 NODE_RUNTIME_PROVIDER = {
-    "21bao": "opencode-go-plan",
+    "21bao": "opencode-go",
     "5bao": "opencode-go",
     "9bao": "opencode-go",
 }
