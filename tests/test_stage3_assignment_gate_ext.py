@@ -441,18 +441,20 @@ class TestValidateAssignmentEntryV11(unittest.TestCase):
     def test_node_win_rejected(self):
         e = _v11_entry(override={"node": "win"})
         errs = validate_assignment_entry_v11(e, 0, decl=self.decl)
-        self.assertTrue(any("not in the cluster whitelist" in err for err in errs),
-                        f"expected whitelist error, got: {errs}")
+        # Stage 3 corrective: error message now mentions v1.1.0 strict
+        # cluster whitelist (issue #1: main-agent also rejected in v1.1.0 strict).
+        self.assertTrue(any("v1.1.0 strict cluster whitelist" in err for err in errs),
+                        f"expected v1.1.0 strict whitelist error, got: {errs}")
 
     def test_node_Win_uppercase_rejected(self):
         e = _v11_entry(override={"node": "Win"})
         errs = validate_assignment_entry_v11(e, 0, decl=self.decl)
-        self.assertTrue(any("not in the cluster whitelist" in err for err in errs))
+        self.assertTrue(any("v1.1.0 strict cluster whitelist" in err for err in errs))
 
     def test_node_10bao_rejected(self):
         e = _v11_entry(override={"node": "10bao"})
         errs = validate_assignment_entry_v11(e, 0, decl=self.decl)
-        self.assertTrue(any("not in the cluster whitelist" in err for err in errs))
+        self.assertTrue(any("v1.1.0 strict cluster whitelist" in err for err in errs))
 
     def test_model_bogus_with_verified_true_blocks(self):
         e = _v11_entry(override={"model": "opencode/bogus-model-zzz"})
@@ -474,7 +476,19 @@ class TestValidateAssignmentEntryV11(unittest.TestCase):
         # Even with verified=True, if node string isn't in whitelist, fail
         e = _v11_entry(override={"node": "win", "node_whitelist_verified": True})
         errs = validate_assignment_entry_v11(e, 0, decl=self.decl)
-        self.assertTrue(any("not in the cluster whitelist" in err for err in errs))
+        # Stage 3 corrective: error mentions v1.1.0 strict cluster whitelist
+        self.assertTrue(any("v1.1.0 strict cluster whitelist" in err for err in errs))
+
+    def test_node_main_agent_rejected_in_v11_strict(self):
+        # Stage 3 corrective (issue #1): main-agent is REJECTED in v1.1.0
+        # strict, regardless of role. (Legacy v1.0.0 path still accepts
+        # main-agent for main-agent-as-tester baseline01 behavior.)
+        for role in ("implementer", "reviewer", "tester", "tester-checker", "checker"):
+            e = _v11_entry(role=role, node="main-agent")
+            errs = validate_assignment_entry_v11(e, 0, decl=self.decl)
+            self.assertTrue(
+                any("main-agent" in err or "v1.1.0 strict" in err for err in errs),
+                f"role={role}: main-agent must be rejected in v1.1.0 strict; got: {errs}")
 
 
 class TestAggregateV11EntryErrors(unittest.TestCase):
@@ -635,12 +649,13 @@ class TestLegacyBackwardsCompat(unittest.TestCase):
         result = validate_assignment_matrix(matrix)
         self.assertTrue(result["valid"], f"legacy matrix must pass: {result['errors']}")
 
-    def test_legacy_matrix_v11_entry_check_reports_warnings(self):
-        # v1.1.0 entry check is additive: when the matrix has NO spec_version
-        # and entries have NO v1.1.0 fields, the strict path keeps
-        # backward compat: v1.0.0 path is authoritative; v1.1.0 fields
-        # are reported as informational warnings (not blocks). This is
-        # what allows baseline01 callers to keep running.
+    def test_legacy_matrix_strict_now_fail_closed(self):
+        # Stage 3 corrective (PR #278 issue #2): strict validator now
+        # FAILS-CLOSED for legacy v1.0.0 matrices. The v1.1.0 field gaps
+        # are BLOCK errors, NOT informational warnings. This is the
+        # production enforcement path used by EAG and any other v1.1.0+
+        # caller. Legacy behavior (informational warnings only) is now
+        # available ONLY via the pure validate_assignment_matrix() path.
         matrix = create_assignment_matrix("low", task_id="ext-legacy-v11")
         matrix["assignments"] = [
             create_role_assignment(role="implementer", node="21bao",
@@ -653,14 +668,39 @@ class TestLegacyBackwardsCompat(unittest.TestCase):
         matrix["operator_approved"] = True
         matrix["operator_approval_timestamp"] = "2026-06-21T00:00:00Z"
         result = validate_assignment_matrix_strict(matrix, decl=self.decl)
-        # v1.0.0 path passes; v1.1.0 surfaces as warnings only.
-        self.assertTrue(result["valid"],
-                        f"legacy strict must pass: {result.get('errors')}")
+        # Stage 3 corrective: v1.0.0 matrix in strict validator now BLOCKS.
+        self.assertFalse(result["valid"],
+                         f"strict must BLOCK v1.0.0 legacy matrix; errors: {result.get('errors')}")
         self.assertEqual(result.get("spec_version"), "1.0.0")
-        # Warnings should mention v1.1.0 informational
-        warnings = result.get("warnings", [])
-        self.assertTrue(any("v1.1.0 informational" in w for w in warnings),
-                        f"expected v1.1.0 warnings, got: {warnings}")
+        # The v11_strict_enforcement check must be present and BLOCK
+        v11_check = [c for c in result.get("checks", [])
+                     if c.get("name") == "v11_strict_enforcement"]
+        self.assertEqual(len(v11_check), 1, "v11_strict_enforcement check must exist")
+        self.assertEqual(v11_check[0]["result"], "BLOCK")
+        # The errors must mention v1.1.0 field gaps
+        err_text = " ".join(result.get("errors", []))
+        self.assertIn("v1.1.0 required field", err_text,
+                      f"errors must surface v1.1.0 field gap; got: {err_text[:200]}")
+
+    def test_legacy_matrix_pure_v10_path_unchanged(self):
+        # The pure v1.0.0 path (validate_assignment_matrix) remains
+        # backward-compatible: legacy matrices pass without v1.1.0 field
+        # enforcement. This is the documented non-production-compatible
+        # fallback (see EAG _STRICT_AVAILABLE flag handling).
+        matrix = create_assignment_matrix("low", task_id="ext-legacy-v10-unchanged")
+        matrix["assignments"] = [
+            create_role_assignment(role="implementer", node="21bao",
+                                   model=REAL_MODEL_ID, provider="deepseek"),
+            create_role_assignment(role="reviewer", node="5bao",
+                                   model=REAL_MODEL_ID, provider="deepseek"),
+            create_role_assignment(role="checker", node="21bao",
+                                   model=REAL_MODEL_ID, provider="deepseek"),
+        ]
+        matrix["operator_approved"] = True
+        matrix["operator_approval_timestamp"] = "2026-06-21T00:00:00Z"
+        result = validate_assignment_matrix(matrix)
+        self.assertTrue(result["valid"],
+                        f"v1.0.0 path must still pass legacy matrix; errors: {result.get('errors')}")
 
     def test_legacy_matrix_pure_v11_path_surfaces_missing(self):
         # Calling the pure v1.1.0 path on a legacy matrix DOES surface

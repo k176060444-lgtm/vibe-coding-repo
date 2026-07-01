@@ -79,6 +79,17 @@ CLUSTER_NODE_WHITELIST = {"21bao", "5bao", "9bao"}
 LEGACY_AGENT_NODE = "main-agent"  # backwards-compat for main-agent-as-tester
 ALLOWED_NODE_VALUES = CLUSTER_NODE_WHITELIST | {LEGACY_AGENT_NODE}
 
+# v1.1.0 strict: spec §2 + operator §3 acceptance criterion. The v1.1.0 strict
+# node whitelist is INDEPENDENT from the legacy ALLOWED_NODE_VALUES and only
+# contains cluster nodes. main-agent is NOT a cluster node (it is the
+# operator's local Hermes agent, see docs/OPERATOR_ORCHESTRATOR_CONTRACT.md
+# §2) and is therefore REJECTED by any v1.1.0 strict assignment, regardless
+# of role. The legacy v1.0.0 path (validate_assignment_matrix → is_node_whitelisted)
+# preserves the main-agent-as-tester behavior for backward compatibility with
+# baseline01 callers; v1.1.0 callers must use validate_assignment_matrix_strict
+# which routes through is_v11_strict_node_accepted.
+V11_STRICT_NODE_WHITELIST = frozenset({"21bao", "5bao", "9bao"})
+
 # v1.1.0: Provider namespace is an enumerated token (spec §4.2). Stage 3
 # accepts the values declared in scripts/model_pool.yaml; Stage 4-5 will
 # additionally reject `unknown` at the readiness gate (FCR-1 / GAP-L5-1).
@@ -236,8 +247,30 @@ def is_node_whitelisted(node: str) -> bool:
     Spec §2: win+21bao is one node; "win" is NOT an accepted cluster node
     string at the RAG level. Use "21bao" for the Windows local-exec/control
     host. main-agent is preserved for main-agent-as-tester (tester role).
+
+    This is the LEGACY v1.0.0 path. For v1.1.0 strict assignments, use
+    is_v11_strict_node_accepted() instead — main-agent is NOT accepted
+    in v1.1.0 strict (operator §3 acceptance criterion).
     """
     return isinstance(node, str) and node in ALLOWED_NODE_VALUES
+
+
+def is_v11_strict_node_accepted(node: str) -> bool:
+    """True iff node ∈ {21bao, 5bao, 9bao} for v1.1.0 strict assignments.
+
+    Spec §2 + operator §3: v1.1.0 strict assignments only accept cluster
+    nodes. main-agent is the operator's local Hermes agent (see
+    docs/OPERATOR_ORCHESTRATOR_CONTRACT.md §2) and is NOT a cluster node;
+    it is rejected by v1.1.0 strict regardless of role. The legacy v1.0.0
+    path (is_node_whitelisted) still accepts main-agent for the
+    main-agent-as-tester baseline01 behavior, but v1.1.0 strict callers
+    must use this strict whitelist.
+
+    The v1.0.0 callers (e.g. scripts/vibe_execution_gate.py pre-fix) that
+    call validate_assignment_matrix() directly are NOT upgraded by this
+    function; the EAG-side upgrade is required (see issue #2 corrective).
+    """
+    return isinstance(node, str) and node in V11_STRICT_NODE_WHITELIST
 
 
 def is_model_in_pool(model: str, decl: Optional[dict] = None) -> bool:
@@ -543,19 +576,26 @@ def validate_assignment_entry_v11(entry: dict, index: int, decl: Optional[dict] 
             f"assignment[{index}]: base_sha must be 40-char lowercase hex SHA1, got {bsha!r}"
         )
 
-    # Cross-field: node must be in cluster whitelist
+    # Cross-field: node must be in v1.1 strict cluster whitelist.
+    # v1.1.0 strict (operator §3 acceptance criterion) only accepts
+    # {21bao, 5bao, 9bao}. main-agent, win, and any other host string
+    # are REJECTED in v1.1 strict regardless of role. The legacy
+    # main-agent-as-tester behavior is preserved only on the v1.0.0
+    # path (validate_assignment_matrix → is_node_whitelisted).
     node = entry.get("node")
-    if isinstance(node, str) and node and not is_node_whitelisted(node):
+    if isinstance(node, str) and node and not is_v11_strict_node_accepted(node):
         errors.append(
-            f"assignment[{index}]: node '{node}' is not in the cluster whitelist "
-            f"{sorted(CLUSTER_NODE_WHITELIST)} (spec §2; 'win' is rejected; "
-            f"main-agent is allowed only for tester/tester-checker roles)"
+            f"assignment[{index}]: node '{node}' is not in the v1.1.0 strict "
+            f"cluster whitelist {sorted(V11_STRICT_NODE_WHITELIST)} "
+            f"(spec §2; 'win', 'main-agent', and any other host are rejected "
+            f"in v1.1.0 strict regardless of role; main-agent is allowed "
+            f"only via the v1.0.0 legacy path)"
         )
-    if nwv is True and isinstance(node, str) and node and not is_node_whitelisted(node):
+    if nwv is True and isinstance(node, str) and node and not is_v11_strict_node_accepted(node):
         # Belt-and-suspenders: even if the boolean was set, the literal node string
-        # must match the whitelist. Mismatch = inconsistency in the entry.
+        # must match the v1.1 strict whitelist. Mismatch = inconsistency in the entry.
         errors.append(
-            f"assignment[{index}]: node_whitelist_verified=True but node '{node}' is not whitelisted"
+            f"assignment[{index}]: node_whitelist_verified=True but node '{node}' is not in the v1.1.0 strict cluster whitelist"
         )
 
     # Cross-field: model must be in central model pool (when source verified)
@@ -628,35 +668,58 @@ def validate_assignment_matrix_v11(matrix: dict, decl: Optional[dict] = None) ->
 
 
 def validate_assignment_matrix_strict(matrix: dict, decl: Optional[dict] = None) -> dict:
-    """Combined v1.0.0 + v1.1.0 validation.
+    """Strict v1.1.0 validator. ALWAYS enforces 7 spec §4.2 fields.
 
-    Behavior depends on `detect_spec_version(matrix)`:
-      - "1.0.0" → only v1.0.0 path runs (baseline01 callers are unaffected;
-        the v1.1.0 fields are reported as warnings, not blocks).
-      - "1.1.0" → both paths run; any v1.1.0 missing field BLOCKS.
+    Behavior:
+      - For matrices that opt into spec_version >= "1.1.0" OR have all
+        v1.1.0 fields present: runs v1.0.0 baseline + v1.1.0 entry checks
+        (any v1.1.0 field error → BLOCK).
+      - For matrices that do NOT opt in (legacy v1.0.0 form: no
+        spec_version, missing v1.1.0 fields): the v1.0.0 path runs, but
+        the missing v1.1.0 fields are reported as BLOCK errors (not
+        warnings). This is the fail-closed production enforcement per
+        Stage 3 corrective (PR #278 acceptance FAIL, issue #2): the
+        operator's spec §4.2 mandate applies to ALL production coding
+        tasks, including those whose work-order compiler did not yet
+        inject spec_version=1.1.0.
 
-    Use this when the matrix opts into spec_version >= "1.1.0" or when all
-    entries already declare the v1.1.0 fields. The result merges v1.0.0
-    checks and v1.1.0 entry checks.
+    Backward compat note: callers (e.g. scripts/vibe_execution_gate.py)
+    that used to call validate_assignment_matrix() will now fail-closed
+    for v1.0.0 matrices. The legacy validator remains available for
+    pre-production / non-coding-task use; production coding tasks must
+    use this strict validator.
+
+    The v1.0.0 callers that cannot import the strict validator (RAG
+    < v1.1.0) should be marked as non-production transitional by the
+    caller (see EAG `_STRICT_AVAILABLE` flag).
     """
     base = validate_assignment_matrix(matrix)
+    entries = (matrix or {}).get("assignments", [])
     spec_version = detect_spec_version(matrix or {})
-    if spec_version == "1.0.0":
-        # Backward compat: v1.0.0 matrix without v1.1.0 fields → only
-        # the v1.0.0 path is authoritative. v1.1.0 fields are reported
-        # as informational warnings (NOT blocks) to keep baseline01
-        # callers running.
-        entries = (matrix or {}).get("assignments", [])
-        v11_missing_errors = aggregate_v11_entry_errors(entries, decl=decl) if entries else []
-        warnings = [f"v1.1.0 informational: {e}" for e in v11_missing_errors]
-        merged = dict(base)
-        merged["warnings"] = list(base.get("warnings", [])) + warnings
-        merged["spec_version"] = spec_version
-        return merged
-    # spec_version >= 1.1.0 → both paths
-    v11 = validate_assignment_matrix_v11(matrix, decl=decl)
-    merged_errors = list(base.get("errors", [])) + list(v11.get("errors", []))
-    merged_checks = list(base.get("checks", [])) + list(v11.get("checks", []))
+    v11_entry_errors = aggregate_v11_entry_errors(entries, decl=decl) if entries else []
+
+    if spec_version == "1.1.0":
+        # Spec-in: v1.0.0 + v1.1.0 both run. v1.1.0 errors are BLOCKs.
+        v11 = validate_assignment_matrix_v11(matrix, decl=decl)
+        merged_errors = list(base.get("errors", [])) + list(v11.get("errors", []))
+        merged_checks = list(base.get("checks", [])) + list(v11.get("checks", []))
+    else:
+        # Spec-out (legacy v1.0.0 form): v1.0.0 baseline runs (may pass);
+        # missing v1.1.0 fields are reported as BLOCK errors (fail-closed
+        # for spec §4.2 compliance). This is the Stage 3 corrective
+        # production enforcement: callers cannot bypass v1.1.0 fields
+        # by simply omitting them.
+        merged_errors = list(base.get("errors", []))
+        for v11_err in v11_entry_errors:
+            merged_errors.append(f"missing v1.1.0 required field (fail-closed): {v11_err}")
+        merged_checks = list(base.get("checks", []))
+        if v11_entry_errors:
+            merged_checks.append({
+                "name": "v11_strict_enforcement",
+                "result": "BLOCK",
+                "detail": f"{len(v11_entry_errors)} v1.1.0 required field gap(s) — "
+                          f"spec §4.2 mandate (Stage 3 corrective, issue #2)",
+            })
     verdict = "BLOCK" if any(c["result"] == "BLOCK" for c in merged_checks) else "ALLOW"
     return {
         "valid": len(merged_errors) == 0,
@@ -1234,7 +1297,7 @@ def self_check() -> dict:
     # v11-26: node="win" rejected (architecture drift guard)
     bad = make_v11_entry(override={"node": "win"})
     errs = validate_assignment_entry_v11(bad, 0, decl=decl)
-    check("v11-26-node-win-rejected", any("not in the cluster whitelist" in e for e in errs))
+    check("v11-26-node-win-rejected", any("v1.1.0 strict cluster whitelist" in e for e in errs))
 
     # v11-27: node="21bao" with model not in pool blocks (cross-field)
     bad = make_v11_entry(override={"node": "21bao", "model": "anthropic/imaginary"})
@@ -1312,6 +1375,110 @@ def self_check() -> dict:
     matrix_low["spec_version"] = "1.1.0"
     result_low = validate_assignment_matrix_strict(matrix_low)
     check("v11-34-low-no-bypass-blocks", not result_low["valid"])
+
+    # ── v1.1.0 corrective (PR #278 acceptance FAIL, issue #1) ─────────
+
+    # v11-35: is_v11_strict_node_accepted accepts only cluster nodes
+    check("v11-35-strict-accepts-21bao", is_v11_strict_node_accepted("21bao"))
+    check("v11-36-strict-accepts-5bao", is_v11_strict_node_accepted("5bao"))
+    check("v11-37-strict-accepts-9bao", is_v11_strict_node_accepted("9bao"))
+
+    # v11-38: is_v11_strict_node_accepted rejects main-agent (operator §3)
+    check("v11-38-strict-rejects-main-agent",
+          not is_v11_strict_node_accepted("main-agent"))
+
+    # v11-39: is_v11_strict_node_accepted rejects win/other
+    for bad in ("win", "Win", "10bao", "hermes", "agent", ""):
+        check(f"v11-39-strict-rejects-{bad!r}", not is_v11_strict_node_accepted(bad))
+
+    # v11-40: legacy is_node_whitelisted preserves main-agent for v1.0.0 compat
+    check("v11-40-legacy-keeps-main-agent", is_node_whitelisted("main-agent"))
+
+    # v11-41: v1.1 strict + node=main-agent + role=implementer BLOCKS (issue #1)
+    matrix_main_imp = {
+        "risk_level": "low", "task_id": "v11-main-agent-imp",
+        "required_roles": ["implementer", "reviewer", "checker"],
+        "operator_approved": True,
+        "operator_approval_timestamp": valid_iso,
+        "operator_approval_signature": valid_sha256,
+        "main_agent_as_tester_approved": True,
+        "spec_version": "1.1.0",
+        "assignments": [
+            make_v11_entry(role="implementer", node="main-agent"),
+            make_v11_entry(role="reviewer", node="5bao"),
+            make_v11_entry(role="checker", node="21bao"),
+        ],
+    }
+    result_main_imp = validate_assignment_matrix_strict(matrix_main_imp)
+    check("v11-41-strict-main-agent-imp-blocks",
+          not result_main_imp["valid"] and any("main-agent" in e for e in result_main_imp.get("errors", [])),
+          f"got: {result_main_imp}")
+
+    # v11-42: v1.1 strict + node=main-agent + role=tester BLOCKS (issue #1)
+    matrix_main_tester = {
+        "risk_level": "low", "task_id": "v11-main-agent-tester",
+        "required_roles": ["implementer", "reviewer", "tester-checker"],
+        "operator_approved": True,
+        "operator_approval_timestamp": valid_iso,
+        "operator_approval_signature": valid_sha256,
+        "main_agent_as_tester_approved": True,
+        "spec_version": "1.1.0",
+        "assignments": [
+            make_v11_entry(role="implementer", node="21bao"),
+            make_v11_entry(role="reviewer", node="5bao"),
+            make_v11_entry(role="tester-checker", node="main-agent"),
+        ],
+    }
+    result_main_tester = validate_assignment_matrix_strict(matrix_main_tester)
+    check("v11-42-strict-main-agent-tester-blocks",
+          not result_main_tester["valid"] and any("main-agent" in e for e in result_main_tester.get("errors", [])),
+          f"got: {result_main_tester}")
+
+    # ── v1.1.0 corrective (PR #278 acceptance FAIL, issue #2) ─────────
+
+    # v11-43: v1.0.0 legacy matrix (no spec_version, no v1.1.0 fields) in
+    # strict validator now BLOCKS (issue #2 fail-closed production enforcement)
+    matrix_v10_legacy = create_assignment_matrix("low", task_id="v11-v10-legacy")
+    matrix_v10_legacy["assignments"] = [
+        create_role_assignment(role="implementer", node="21bao",
+                               model=real_model_id, provider="deepseek"),
+        create_role_assignment(role="reviewer", node="5bao",
+                               model=real_model_id, provider="deepseek"),
+        create_role_assignment(role="checker", node="21bao",
+                               model=real_model_id, provider="deepseek"),
+    ]
+    matrix_v10_legacy["operator_approved"] = True
+    matrix_v10_legacy["operator_approval_timestamp"] = "2026-06-21T00:00:00Z"
+    result_v10_strict = validate_assignment_matrix_strict(matrix_v10_legacy)
+    check("v11-43-strict-v10-legacy-blocks", not result_v10_strict["valid"])
+    # v11_strict_enforcement check must be present
+    v11_block_check = [c for c in result_v10_strict.get("checks", [])
+                       if c.get("name") == "v11_strict_enforcement"]
+    check("v11-44-strict-v10-legacy-has-v11-enforcement-block",
+          len(v11_block_check) == 1 and v11_block_check[0]["result"] == "BLOCK",
+          f"got checks: {result_v10_strict.get('checks')}")
+
+    # v11-45: pure v1.0.0 path (validate_assignment_matrix) unchanged for legacy
+    result_v10_pure = validate_assignment_matrix(matrix_v10_legacy)
+    check("v11-45-pure-v10-path-still-passes-legacy", result_v10_pure["valid"])
+
+    # v11-46: legal v1.1 strict still passes (sanity)
+    matrix_legal_v11 = {
+        "risk_level": "low", "task_id": "v11-legal-strict",
+        "required_roles": ["implementer", "reviewer", "checker"],
+        "operator_approved": True,
+        "operator_approval_timestamp": valid_iso,
+        "operator_approval_signature": valid_sha256,
+        "spec_version": "1.1.0",
+        "assignments": [
+            make_v11_entry(role="implementer", node="21bao"),
+            make_v11_entry(role="reviewer", node="5bao"),
+            make_v11_entry(role="checker", node="21bao"),
+        ],
+    }
+    result_legal = validate_assignment_matrix_strict(matrix_legal_v11)
+    check("v11-46-legal-v11-strict-passes", result_legal["valid"],
+          f"errors: {result_legal.get('errors')}")
 
     return {
         "version": __version__,
