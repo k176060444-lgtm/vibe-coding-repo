@@ -228,8 +228,16 @@ class TestSevenStateSchema:
         # States promoted on 9bao
         # (Stage 5 Batch C + C4 evidence: model_pool synced, runner PATH fix, node/npm/opencode-go verified)
         PROMOTED_ON_9BAO = {"synced", "wrapper_valid"}
+        # Per-entry model_call_verified promotions (Batch D-R2 evidence:
+        # HTTP 200, content='ok', attribution=mimo-v2.5, fallback=0, retry=0, duration<30s)
+        MODEL_CALL_VERIFIED_ENTRIES = {
+            "21bao": {"opencode-go-mimo-v2-5"},
+            "5bao": {"opencode-go-mimo-v2-5"},
+            "9bao": {"opencode-go-mimo-v2-5"},
+        }
         for nn, nd in nmc["nodes"].items():
             for i, e in enumerate(nd["matrix"]):
+                mid = e.get("model_id", "")
                 for sf in self.RS:
                     val = e.get(sf)
                     promoted = set()
@@ -239,6 +247,11 @@ class TestSevenStateSchema:
                         promoted = PROMOTED_ON_5BAO
                     elif nn == "9bao":
                         promoted = PROMOTED_ON_9BAO
+                    # Per-entry override: model_call_verified (Batch D-R2)
+                    if sf == "model_call_verified" and mid in MODEL_CALL_VERIFIED_ENTRIES.get(nn, set()):
+                        if val is not True:
+                            bad.append(f"{nn}[{i}]({mid}): model_call_verified={val!r} (expected True, Batch D-R2)")
+                        continue
                     if promoted and sf in promoted:
                         # Promoted states must be True, not 'unknown'
                         if val is not True:
