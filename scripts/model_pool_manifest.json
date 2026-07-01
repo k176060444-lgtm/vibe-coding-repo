@@ -1,10 +1,11 @@
 {
-  "schema_version": "1.1",
-  "generated_at": "2026-07-01T01:15:00.000000+00:00",
+  "schema_version": "1.2",
+  "generated_at": "2026-07-01T23:30:17.314118+00:00",
+  "notes": "lifecycle_status field added for all 38 models",
   "files": {
     "model_pool.yaml": {
-      "sha256": "2c71aa31bd717fca8851faded06d87c2dd61ad216bbd6865c710809a5d99b08d",
-      "size": 29573
+      "sha256": "e867296636bf5ef8d99cab776643290c78bafbc36ec7255f2949ae261b0e5033",
+      "size": 31219
     }
   }
 }
