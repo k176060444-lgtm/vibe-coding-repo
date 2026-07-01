@@ -1,10 +1,7 @@
 schema_version: '1.1'
-generated_at: '2026-06-30T00:43:54.288541+00:00'
+generated_at: '2026-07-01T01:10:40.387122+00:00'
 generated_from: scripts/model_pool.yaml
-notes: G5 effective model-node matrix. 6 runtime/approval fields default to 'unknown';
-  they will be populated by subsequent diagnostic PRs. model_id, canonical_provider,
-  provider_namespace, primary_alias, runtime_provider, declared are backfilled from
-  model_pool.yaml.
+notes: 'Baseline02 Stage 4: declared layer sync. provider_namespace populated from canonical_provider. smoke_required+unverified/temporary_unavailable models disabled. 6 runtime states remain unknown (Stage 5 scope).'
 skipped_models:
   count: 5
   ids:
@@ -17,11 +14,11 @@ nodes:
   21bao:
     runtime_provider: opencode-go-plan
     description: Windows local-exec/control node
-    total_entries: 16
+    total_entries: 25
     matrix:
     - model_id: anthropic-claude-3-5-haiku-20241022
       canonical_provider: anthropic
-      provider_namespace: unknown
+      provider_namespace: anthropic
       primary_alias: haiku
       runtime_provider: opencode-go-plan
       declared: true
@@ -33,7 +30,7 @@ nodes:
       env_loaded: unknown
     - model_id: anthropic-claude-opus-4
       canonical_provider: anthropic
-      provider_namespace: unknown
+      provider_namespace: anthropic
       primary_alias: opus
       runtime_provider: opencode-go-plan
       declared: true
@@ -45,7 +42,7 @@ nodes:
       env_loaded: unknown
     - model_id: anthropic-claude-sonnet-4
       canonical_provider: anthropic
-      provider_namespace: unknown
+      provider_namespace: anthropic
       primary_alias: claude
       runtime_provider: opencode-go-plan
       declared: true
@@ -57,7 +54,7 @@ nodes:
       env_loaded: unknown
     - model_id: dashscope-qwen-max
       canonical_provider: dashscope
-      provider_namespace: unknown
+      provider_namespace: dashscope
       primary_alias: qwen
       runtime_provider: opencode-go-plan
       declared: true
@@ -69,7 +66,7 @@ nodes:
       env_loaded: unknown
     - model_id: dashscope-qwen-plus
       canonical_provider: dashscope
-      provider_namespace: unknown
+      provider_namespace: dashscope
       primary_alias: qwen-plus
       runtime_provider: opencode-go-plan
       declared: true
@@ -81,7 +78,7 @@ nodes:
       env_loaded: unknown
     - model_id: deepseek-deepseek-coder
       canonical_provider: deepseek
-      provider_namespace: unknown
+      provider_namespace: deepseek
       primary_alias: deepseek-coder
       runtime_provider: opencode-go-plan
       declared: true
@@ -93,7 +90,7 @@ nodes:
       env_loaded: unknown
     - model_id: deepseek-deepseek-reasoner
       canonical_provider: deepseek
-      provider_namespace: unknown
+      provider_namespace: deepseek
       primary_alias: deepseek-r1
       runtime_provider: opencode-go-plan
       declared: true
@@ -105,7 +102,7 @@ nodes:
       env_loaded: unknown
     - model_id: google-gemini-2-5-flash
       canonical_provider: google
-      provider_namespace: unknown
+      provider_namespace: google
       primary_alias: gemini-flash
       runtime_provider: opencode-go-plan
       declared: true
@@ -117,7 +114,7 @@ nodes:
       env_loaded: unknown
     - model_id: google-gemini-2-5-pro
       canonical_provider: google
-      provider_namespace: unknown
+      provider_namespace: google
       primary_alias: gemini
       runtime_provider: opencode-go-plan
       declared: true
@@ -129,7 +126,7 @@ nodes:
       env_loaded: unknown
     - model_id: moonshot-moonshot-v1-128k
       canonical_provider: moonshot
-      provider_namespace: unknown
+      provider_namespace: moonshot
       primary_alias: kimi
       runtime_provider: opencode-go-plan
       declared: true
@@ -141,7 +138,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-gpt-4o
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: gpt4o
       runtime_provider: opencode-go-plan
       declared: true
@@ -153,7 +150,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o1
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o1
       runtime_provider: opencode-go-plan
       declared: true
@@ -165,7 +162,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o3
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o3
       runtime_provider: opencode-go-plan
       declared: true
@@ -177,7 +174,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o3-mini
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o3-mini
       runtime_provider: opencode-go-plan
       declared: true
@@ -189,7 +186,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o4-mini
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o4-mini
       runtime_provider: opencode-go-plan
       declared: true
@@ -199,9 +196,117 @@ nodes:
       operator_approved: unknown
       runtime_visible: unknown
       env_loaded: unknown
+    - model_id: opencode-go-deepseek-v4-flash
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-ds4flash
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-deepseek-v4-pro
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-ds4pro
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-glm-5-1
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-glm51
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-glm-5-2
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-glm52
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-kimi-k2-6
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-kimi26
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-mimo-v2-5
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-mimo
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-mimo-v2-5-pro
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-mimopro
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-qwen3-7-max
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-qwen37max
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-qwen3-7-plus
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-qwen37plus
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
     - model_id: xai-grok-3
       canonical_provider: xai
-      provider_namespace: unknown
+      provider_namespace: xai
       primary_alias: grok
       runtime_provider: opencode-go-plan
       declared: true
@@ -214,11 +319,11 @@ nodes:
   5bao:
     runtime_provider: opencode-go
     description: Remote SSH worker
-    total_entries: 33
+    total_entries: 25
     matrix:
     - model_id: anthropic-claude-3-5-haiku-20241022
       canonical_provider: anthropic
-      provider_namespace: unknown
+      provider_namespace: anthropic
       primary_alias: haiku
       runtime_provider: opencode-go
       declared: true
@@ -230,7 +335,7 @@ nodes:
       env_loaded: unknown
     - model_id: anthropic-claude-opus-4
       canonical_provider: anthropic
-      provider_namespace: unknown
+      provider_namespace: anthropic
       primary_alias: opus
       runtime_provider: opencode-go
       declared: true
@@ -242,7 +347,7 @@ nodes:
       env_loaded: unknown
     - model_id: anthropic-claude-sonnet-4
       canonical_provider: anthropic
-      provider_namespace: unknown
+      provider_namespace: anthropic
       primary_alias: claude
       runtime_provider: opencode-go
       declared: true
@@ -254,7 +359,7 @@ nodes:
       env_loaded: unknown
     - model_id: dashscope-qwen-max
       canonical_provider: dashscope
-      provider_namespace: unknown
+      provider_namespace: dashscope
       primary_alias: qwen
       runtime_provider: opencode-go
       declared: true
@@ -266,20 +371,8 @@ nodes:
       env_loaded: unknown
     - model_id: dashscope-qwen-plus
       canonical_provider: dashscope
-      provider_namespace: unknown
+      provider_namespace: dashscope
       primary_alias: qwen-plus
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: deepseek-deepseek-chat
-      canonical_provider: deepseek
-      provider_namespace: unknown
-      primary_alias: deepseek
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -290,7 +383,7 @@ nodes:
       env_loaded: unknown
     - model_id: deepseek-deepseek-coder
       canonical_provider: deepseek
-      provider_namespace: unknown
+      provider_namespace: deepseek
       primary_alias: deepseek-coder
       runtime_provider: opencode-go
       declared: true
@@ -302,7 +395,7 @@ nodes:
       env_loaded: unknown
     - model_id: deepseek-deepseek-reasoner
       canonical_provider: deepseek
-      provider_namespace: unknown
+      provider_namespace: deepseek
       primary_alias: deepseek-r1
       runtime_provider: opencode-go
       declared: true
@@ -314,7 +407,7 @@ nodes:
       env_loaded: unknown
     - model_id: google-gemini-2-5-flash
       canonical_provider: google
-      provider_namespace: unknown
+      provider_namespace: google
       primary_alias: gemini-flash
       runtime_provider: opencode-go
       declared: true
@@ -326,20 +419,8 @@ nodes:
       env_loaded: unknown
     - model_id: google-gemini-2-5-pro
       canonical_provider: google
-      provider_namespace: unknown
+      provider_namespace: google
       primary_alias: gemini
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: minimax-minimax-m2-5
-      canonical_provider: minimax
-      provider_namespace: unknown
-      primary_alias: minimax
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -350,7 +431,7 @@ nodes:
       env_loaded: unknown
     - model_id: moonshot-moonshot-v1-128k
       canonical_provider: moonshot
-      provider_namespace: unknown
+      provider_namespace: moonshot
       primary_alias: kimi
       runtime_provider: opencode-go
       declared: true
@@ -362,7 +443,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-gpt-4o
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: gpt4o
       runtime_provider: opencode-go
       declared: true
@@ -374,7 +455,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o1
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o1
       runtime_provider: opencode-go
       declared: true
@@ -386,7 +467,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o3
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o3
       runtime_provider: opencode-go
       declared: true
@@ -398,7 +479,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o3-mini
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o3-mini
       runtime_provider: opencode-go
       declared: true
@@ -410,116 +491,8 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o4-mini
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o4-mini
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: volcengine-doubao-1-5-pro-256k
-      canonical_provider: volcengine
-      provider_namespace: unknown
-      primary_alias: doubao
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: xai-grok-3
-      canonical_provider: xai
-      provider_namespace: unknown
-      primary_alias: grok
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: deepseek-plan-deepseek-v4-pro
-      canonical_provider: deepseek-plan
-      provider_namespace: unknown
-      primary_alias: deepseek-v4-pro
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: minimax-plan-minimax-m3
-      canonical_provider: minimax-plan
-      provider_namespace: unknown
-      primary_alias: minimax-m3
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: xiaomi-mimo-v2-5-pro
-      canonical_provider: xiaomi
-      provider_namespace: unknown
-      primary_alias: mimo
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: xiaomi-mimo-v2-5-pro-payg
-      canonical_provider: xiaomi
-      provider_namespace: unknown
-      primary_alias: xmipro
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: xiaomi-mimo-v2-5-payg
-      canonical_provider: xiaomi
-      provider_namespace: unknown
-      primary_alias: xmi
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: opencode-go-glm-5-2
-      canonical_provider: opencode-go
-      provider_namespace: unknown
-      primary_alias: opencode-glm52
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: opencode-go-glm-5-1
-      canonical_provider: opencode-go
-      provider_namespace: unknown
-      primary_alias: opencode-glm51
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -530,8 +503,44 @@ nodes:
       env_loaded: unknown
     - model_id: opencode-go-deepseek-v4-flash
       canonical_provider: opencode-go
-      provider_namespace: unknown
+      provider_namespace: opencode-go
       primary_alias: opencode-ds4flash
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-deepseek-v4-pro
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-ds4pro
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-glm-5-1
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-glm51
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-glm-5-2
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-glm52
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -542,8 +551,32 @@ nodes:
       env_loaded: unknown
     - model_id: opencode-go-kimi-k2-6
       canonical_provider: opencode-go
-      provider_namespace: unknown
+      provider_namespace: opencode-go
       primary_alias: opencode-kimi26
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-mimo-v2-5
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-mimo
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-mimo-v2-5-pro
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-mimopro
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -554,7 +587,7 @@ nodes:
       env_loaded: unknown
     - model_id: opencode-go-qwen3-7-max
       canonical_provider: opencode-go
-      provider_namespace: unknown
+      provider_namespace: opencode-go
       primary_alias: opencode-qwen37max
       runtime_provider: opencode-go
       declared: true
@@ -566,7 +599,7 @@ nodes:
       env_loaded: unknown
     - model_id: opencode-go-qwen3-7-plus
       canonical_provider: opencode-go
-      provider_namespace: unknown
+      provider_namespace: opencode-go
       primary_alias: opencode-qwen37plus
       runtime_provider: opencode-go
       declared: true
@@ -576,34 +609,10 @@ nodes:
       operator_approved: unknown
       runtime_visible: unknown
       env_loaded: unknown
-    - model_id: opencode-go-mimo-v2-5-pro
-      canonical_provider: opencode-go
-      provider_namespace: unknown
-      primary_alias: opencode-mimopro
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: opencode-go-mimo-v2-5
-      canonical_provider: opencode-go
-      provider_namespace: unknown
-      primary_alias: opencode-mimo
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: opencode-go-deepseek-v4-pro
-      canonical_provider: opencode-go
-      provider_namespace: unknown
-      primary_alias: opencode-ds4pro
+    - model_id: xai-grok-3
+      canonical_provider: xai
+      provider_namespace: xai
+      primary_alias: grok
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -615,11 +624,11 @@ nodes:
   9bao:
     runtime_provider: opencode-go
     description: Remote SSH worker
-    total_entries: 33
+    total_entries: 25
     matrix:
     - model_id: anthropic-claude-3-5-haiku-20241022
       canonical_provider: anthropic
-      provider_namespace: unknown
+      provider_namespace: anthropic
       primary_alias: haiku
       runtime_provider: opencode-go
       declared: true
@@ -631,7 +640,7 @@ nodes:
       env_loaded: unknown
     - model_id: anthropic-claude-opus-4
       canonical_provider: anthropic
-      provider_namespace: unknown
+      provider_namespace: anthropic
       primary_alias: opus
       runtime_provider: opencode-go
       declared: true
@@ -643,7 +652,7 @@ nodes:
       env_loaded: unknown
     - model_id: anthropic-claude-sonnet-4
       canonical_provider: anthropic
-      provider_namespace: unknown
+      provider_namespace: anthropic
       primary_alias: claude
       runtime_provider: opencode-go
       declared: true
@@ -655,7 +664,7 @@ nodes:
       env_loaded: unknown
     - model_id: dashscope-qwen-max
       canonical_provider: dashscope
-      provider_namespace: unknown
+      provider_namespace: dashscope
       primary_alias: qwen
       runtime_provider: opencode-go
       declared: true
@@ -667,20 +676,8 @@ nodes:
       env_loaded: unknown
     - model_id: dashscope-qwen-plus
       canonical_provider: dashscope
-      provider_namespace: unknown
+      provider_namespace: dashscope
       primary_alias: qwen-plus
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: deepseek-deepseek-chat
-      canonical_provider: deepseek
-      provider_namespace: unknown
-      primary_alias: deepseek
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -691,7 +688,7 @@ nodes:
       env_loaded: unknown
     - model_id: deepseek-deepseek-coder
       canonical_provider: deepseek
-      provider_namespace: unknown
+      provider_namespace: deepseek
       primary_alias: deepseek-coder
       runtime_provider: opencode-go
       declared: true
@@ -703,7 +700,7 @@ nodes:
       env_loaded: unknown
     - model_id: deepseek-deepseek-reasoner
       canonical_provider: deepseek
-      provider_namespace: unknown
+      provider_namespace: deepseek
       primary_alias: deepseek-r1
       runtime_provider: opencode-go
       declared: true
@@ -715,7 +712,7 @@ nodes:
       env_loaded: unknown
     - model_id: google-gemini-2-5-flash
       canonical_provider: google
-      provider_namespace: unknown
+      provider_namespace: google
       primary_alias: gemini-flash
       runtime_provider: opencode-go
       declared: true
@@ -727,20 +724,8 @@ nodes:
       env_loaded: unknown
     - model_id: google-gemini-2-5-pro
       canonical_provider: google
-      provider_namespace: unknown
+      provider_namespace: google
       primary_alias: gemini
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: minimax-minimax-m2-5
-      canonical_provider: minimax
-      provider_namespace: unknown
-      primary_alias: minimax
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -751,7 +736,7 @@ nodes:
       env_loaded: unknown
     - model_id: moonshot-moonshot-v1-128k
       canonical_provider: moonshot
-      provider_namespace: unknown
+      provider_namespace: moonshot
       primary_alias: kimi
       runtime_provider: opencode-go
       declared: true
@@ -763,7 +748,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-gpt-4o
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: gpt4o
       runtime_provider: opencode-go
       declared: true
@@ -775,7 +760,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o1
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o1
       runtime_provider: opencode-go
       declared: true
@@ -787,7 +772,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o3
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o3
       runtime_provider: opencode-go
       declared: true
@@ -799,7 +784,7 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o3-mini
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o3-mini
       runtime_provider: opencode-go
       declared: true
@@ -811,116 +796,8 @@ nodes:
       env_loaded: unknown
     - model_id: openai-o4-mini
       canonical_provider: openai
-      provider_namespace: unknown
+      provider_namespace: openai
       primary_alias: o4-mini
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: volcengine-doubao-1-5-pro-256k
-      canonical_provider: volcengine
-      provider_namespace: unknown
-      primary_alias: doubao
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: xai-grok-3
-      canonical_provider: xai
-      provider_namespace: unknown
-      primary_alias: grok
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: deepseek-plan-deepseek-v4-pro
-      canonical_provider: deepseek-plan
-      provider_namespace: unknown
-      primary_alias: deepseek-v4-pro
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: minimax-plan-minimax-m3
-      canonical_provider: minimax-plan
-      provider_namespace: unknown
-      primary_alias: minimax-m3
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: xiaomi-mimo-v2-5-pro
-      canonical_provider: xiaomi
-      provider_namespace: unknown
-      primary_alias: mimo
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: xiaomi-mimo-v2-5-pro-payg
-      canonical_provider: xiaomi
-      provider_namespace: unknown
-      primary_alias: xmipro
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: xiaomi-mimo-v2-5-payg
-      canonical_provider: xiaomi
-      provider_namespace: unknown
-      primary_alias: xmi
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: opencode-go-glm-5-2
-      canonical_provider: opencode-go
-      provider_namespace: unknown
-      primary_alias: opencode-glm52
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: opencode-go-glm-5-1
-      canonical_provider: opencode-go
-      provider_namespace: unknown
-      primary_alias: opencode-glm51
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -931,8 +808,44 @@ nodes:
       env_loaded: unknown
     - model_id: opencode-go-deepseek-v4-flash
       canonical_provider: opencode-go
-      provider_namespace: unknown
+      provider_namespace: opencode-go
       primary_alias: opencode-ds4flash
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-deepseek-v4-pro
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-ds4pro
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-glm-5-1
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-glm51
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-glm-5-2
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-glm52
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -943,8 +856,32 @@ nodes:
       env_loaded: unknown
     - model_id: opencode-go-kimi-k2-6
       canonical_provider: opencode-go
-      provider_namespace: unknown
+      provider_namespace: opencode-go
       primary_alias: opencode-kimi26
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-mimo-v2-5
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-mimo
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+    - model_id: opencode-go-mimo-v2-5-pro
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      primary_alias: opencode-mimopro
       runtime_provider: opencode-go
       declared: true
       synced: unknown
@@ -955,7 +892,7 @@ nodes:
       env_loaded: unknown
     - model_id: opencode-go-qwen3-7-max
       canonical_provider: opencode-go
-      provider_namespace: unknown
+      provider_namespace: opencode-go
       primary_alias: opencode-qwen37max
       runtime_provider: opencode-go
       declared: true
@@ -967,7 +904,7 @@ nodes:
       env_loaded: unknown
     - model_id: opencode-go-qwen3-7-plus
       canonical_provider: opencode-go
-      provider_namespace: unknown
+      provider_namespace: opencode-go
       primary_alias: opencode-qwen37plus
       runtime_provider: opencode-go
       declared: true
@@ -977,34 +914,10 @@ nodes:
       operator_approved: unknown
       runtime_visible: unknown
       env_loaded: unknown
-    - model_id: opencode-go-mimo-v2-5-pro
-      canonical_provider: opencode-go
-      provider_namespace: unknown
-      primary_alias: opencode-mimopro
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: opencode-go-mimo-v2-5
-      canonical_provider: opencode-go
-      provider_namespace: unknown
-      primary_alias: opencode-mimo
-      runtime_provider: opencode-go
-      declared: true
-      synced: unknown
-      wrapper_valid: unknown
-      model_call_verified: unknown
-      operator_approved: unknown
-      runtime_visible: unknown
-      env_loaded: unknown
-    - model_id: opencode-go-deepseek-v4-pro
-      canonical_provider: opencode-go
-      provider_namespace: unknown
-      primary_alias: opencode-ds4pro
+    - model_id: xai-grok-3
+      canonical_provider: xai
+      provider_namespace: xai
+      primary_alias: grok
       runtime_provider: opencode-go
       declared: true
       synced: unknown
