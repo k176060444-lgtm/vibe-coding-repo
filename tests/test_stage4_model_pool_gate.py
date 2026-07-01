@@ -225,6 +225,9 @@ class TestSevenStateSchema:
         # States promoted on 5bao
         # (Stage 5 Batch B + B2 evidence: model_pool synced, wrapper/runner verified)
         PROMOTED_ON_5BAO = {"synced", "wrapper_valid"}
+        # States promoted on 9bao
+        # (Stage 5 Batch C + C4 evidence: model_pool synced, runner PATH fix, node/npm/opencode-go verified)
+        PROMOTED_ON_9BAO = {"synced", "wrapper_valid"}
         for nn, nd in nmc["nodes"].items():
             for i, e in enumerate(nd["matrix"]):
                 for sf in self.RS:
@@ -234,6 +237,8 @@ class TestSevenStateSchema:
                         promoted = PROMOTED_ON_21BAO
                     elif nn == "5bao":
                         promoted = PROMOTED_ON_5BAO
+                    elif nn == "9bao":
+                        promoted = PROMOTED_ON_9BAO
                     if promoted and sf in promoted:
                         # Promoted states must be True, not 'unknown'
                         if val is not True:
