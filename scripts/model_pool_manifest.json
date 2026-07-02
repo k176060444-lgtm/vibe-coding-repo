@@ -1,11 +1,11 @@
 {
   "schema_version": "1.2",
-  "generated_at": "2026-07-01T23:30:17.314118+00:00",
-  "notes": "lifecycle_status field added for all 38 models",
+  "generated_at": "2026-07-02T00:50:00Z",
+  "notes": "credential_status schema added (Phase 3 PR-5)",
   "files": {
     "model_pool.yaml": {
-      "sha256": "e867296636bf5ef8d99cab776643290c78bafbc36ec7255f2949ae261b0e5033",
-      "size": 31219
+      "sha256": "40f387e5a366f3e9aaa06e8a548deefb91cb70c509ccf0d888b3dec823856a6f",
+      "size": 32407
     }
   }
 }
