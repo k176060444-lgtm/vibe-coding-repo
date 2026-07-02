@@ -791,7 +791,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - chat
@@ -840,7 +840,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: paid
   capability_tags:
   - chat
@@ -875,7 +875,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: paid
   capability_tags:
   - chat
@@ -912,7 +912,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - coding
@@ -954,7 +954,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - coding
@@ -996,7 +996,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - coding
@@ -1039,7 +1039,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - coding
@@ -1081,7 +1081,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - coding
@@ -1124,7 +1124,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - coding
@@ -1166,7 +1166,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - coding
@@ -1209,7 +1209,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - coding
@@ -1251,7 +1251,7 @@ models:
   allowed_nodes:
   - 5bao
   - 9bao
-  - win
+  - 21bao
   cost: free
   capability_tags:
   - coding

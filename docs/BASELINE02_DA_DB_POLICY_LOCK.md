@@ -75,19 +75,21 @@ The 16 DEU cluster by canonical provider:
 
 ### 1.3 Node-alias normalization — `win` → `21bao`
 
-Reported, non-blocking today. The current pool still uses the legacy alias
-`"win"` inside `allowed_nodes` for some active/historical models. The
-canonical node ids per SOUL.md §1 are `{"21bao", "5bao", "9bao"}`, and
-`win` MUST resolve to `21bao`.
+**Status: NORMALIZED** — All legacy `win` references in `allowed_nodes` have been
+replaced with the canonical `21bao` in [[PR #306]].
 
-* `scripts/model_pool_drift.py` already normalizes `win` → `21bao` at read
-  time (`LEGACY_NODE_ALIASES = {"win": "21bao"}`).
+The canonical node ids per SOUL.md §1 are `{"21bao", "5bao", "9bao"}`.
+The legacy alias `"win"` is no longer present in `model_pool.yaml`.
+
+Defence-in-depth:
+
+* `scripts/model_pool_drift.py` still normalizes `win` → `21bao` at read time
+  via `LEGACY_NODE_ALIASES = {"win": "21bao"}` (retained for one release cycle).
 * `scripts/vibe_model_resolver.py` restricts input `node` to canonical ids
   (`VALID_NODES = {"21bao", "5bao", "9bao"}`), so `win` cannot enter as a
   resolution target.
-* The policy-lock validator **reports** every `win` reference and emits a
-  normalization plan, but does **not** rewrite the pool. That rewrite is
-  itself a D-B data change and requires its own operator-approved PR.
+* The policy-lock validator now reports 0 legacy `win` refs; any reappearance
+  would be flagged.
 
 Any node reference that is neither canonical nor a legacy alias (e.g. a typo
 like `"mars"`) is treated as `invalid_node_refs` and **BLOCKS** the lock.

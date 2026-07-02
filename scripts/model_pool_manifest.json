@@ -1,11 +1,11 @@
 {
   "schema_version": "1.2",
-  "generated_at": "2026-07-02T01:00:00Z",
-  "notes": "endpoint_ref schema added (Phase 3 PR-6); credential_status already present",
+  "generated_at": "2026-07-02T11:30:00Z",
+  "notes": "endpoint_ref schema added (Phase 3 PR-6); credential_status already present; win→21bao normalization",
   "files": {
     "model_pool.yaml": {
-      "sha256": "244884f11299a25593fea557f40c533653a35d5b3dad1bb0b3f76ef4909b7e5b",
-      "size": 33547
+      "sha256": "168cb06be6aac8bea608599cebccd0897355d549554282341effacd92c637eec",
+      "size": 33571
     }
   }
 }

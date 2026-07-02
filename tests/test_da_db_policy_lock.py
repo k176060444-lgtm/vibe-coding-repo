@@ -93,8 +93,10 @@ def test_real_pool_reports_legacy_win_but_non_blocking():
     r = pl.validate_policy_lock()
     an = [c for c in r["checks"] if c["check"] == "node_alias_normalization"][0]
     assert an["passed"] is True  # legacy 'win' is not blocking
-    # At freeze point there are historical/active models that still use 'win'
-    assert len(an["legacy_win_refs"]) > 0
+    # Post-normalization (Phase 3 win→21bao): 0 legacy win refs remain
+    assert len(an["legacy_win_refs"]) == 0, (
+        f"expected 0 legacy win refs after normalization; got {len(an['legacy_win_refs'])}"
+    )
     assert an["invalid_node_refs"] == []
 
 
