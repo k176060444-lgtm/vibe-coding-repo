@@ -130,6 +130,11 @@ def check_operator_gate(
             "21bao local-only canary rejects collector_mode='ssh_canary' "
             "(no SSH capability; use real_read or dry_run)"
         )
+    elif collector_mode == "sanctioned_ssh_canary_5bao":
+        errors.append(
+            "21bao local-only canary rejects collector_mode='sanctioned_ssh_canary_5bao' "
+            "(5bao-only SSH mode; use real_read or dry_run)"
+        )
     elif not collector_mode or collector_mode not in _l3rp.VALID_COLLECTOR_MODES:
         errors.append(
             f"collector_mode must be one of "
