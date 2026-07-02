@@ -497,6 +497,21 @@ def evaluate_live_receipt(receipt: dict, declared: dict | None = None) -> dict:
         declared_lc = declared.get("lifecycle_status", "")
         lc_class = _classify_lifecycle(declared_lc)
 
+        # Active model: if collection was authorized but receipt not collected → BLOCK
+        if lc_class == "active":
+            cs = receipt.get("collection_status", "")
+            if cs != "collected":
+                findings.append({
+                    "type": "worker_attest_missing",
+                    "severity": "blocked",
+                    "detail": (
+                        f"Active model '{mid}' has collection_status='{cs}' "
+                        f"(expected 'collected'). Worker attestation was not "
+                        f"produced despite authorized collection."
+                    ),
+                    "model_id": mid,
+                })
+
         # Active model: observed runtime_visible must be True, observed
         # credential_status must be 'present'
         if lc_class == "active":
@@ -897,6 +912,17 @@ def self_check() -> dict:
         "name": "sc-15-deu-live-evidence-warn-only",
         "passed": deu_is_warn and deu_not_blocked and deu_not_stop,
         "detail": f"DEU verdict={deu_eval['verdict']} (expected PASS_WITH_WARN)",
+    })
+
+    # sc-16: worker_attest_missing when active model collection_status != 'collected'
+    missing_receipt = dict(good_receipt)
+    missing_receipt["collection_status"] = "not_collected"
+    missing_eval = evaluate_live_receipt(missing_receipt, declared)
+    missing_has_error = any(f.get("type") == "worker_attest_missing" for f in missing_eval["findings"])
+    checks.append({
+        "name": "sc-16-worker-attest-missing-blocks",
+        "passed": missing_has_error,
+        "detail": f"collection_status=not_collected → {'BLOCKED' if missing_has_error else 'NOT_BLOCKED'}",
     })
 
     passed_count = sum(1 for c in checks if c["passed"])

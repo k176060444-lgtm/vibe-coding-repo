@@ -275,19 +275,20 @@ class TestMissingAuthorizedReceipt:
         assert result["valid"] is False
         assert any("forbidden_operation_flags" in e for e in result["errors"])
 
-    def test_collection_status_not_collected_blocks_via_evaluation(self):
-        """If a receipt exists but collection_status != collected, the receipt
-        is not yet valid live evidence → evaluate produces BLOCKED for active."""
+    def test_collection_status_not_collected_blocks_active(self):
+        """Active model with collection_status='not_collected' → worker_attest_missing → BLOCKED."""
         receipt = _good_receipt()
-        receipt["collection_status"] = "skipped"  # no evidence produced
+        receipt["collection_status"] = "not_collected"
         declared = {"lifecycle_status": "enabled_assigned",
                     "provider_namespace": "opencode-go"}
-        # Schema still valid; evaluation should still find runnable receipt
         result = l3rp.evaluate_live_receipt(receipt, declared)
-        # If schema valid and no other issues, verdict is PASS/PASS_WITH_WARN
-        # since we don't block on collection_status alone (operator gate concern)
-        assert result["verdict"] in {"G_L3R_PASS", "G_L3R_PASS_WITH_WARN",
-                                     "G_L3R_BLOCKED"}
+        assert result["verdict"] == "G_L3R_BLOCKED", (
+            f"Expected BLOCKED for not_collected, got {result['verdict']}"
+        )
+        assert any("worker_attest_missing" in f.get("type", "")
+                   for f in result["findings"]), (
+            "Should find worker_attest_missing finding"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
