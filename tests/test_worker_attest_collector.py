@@ -532,7 +532,7 @@ class TestSelfCheckEndToEnd:
         r = wac.self_check()
         assert r["status"] == "PASS", \
             f"Self-check FAILED: {[c for c in r['checks'] if not c['passed']]}"
-        assert r["detail"].startswith("15/15")
+        assert r["detail"].startswith("18/18")
 
 
 # ── 11. Receipt validates against worker_attest_plan schema ────────────────
@@ -565,3 +565,87 @@ class TestReceiptSchema:
                 os.environ.pop("WORKER_ATTEST_OPERATOR_APPROVED", None)
             else:
                 os.environ["WORKER_ATTEST_OPERATOR_APPROVED"] = env_save
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 10. Canary real-read (Phase 3 PR-4F)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestCanaryRealRead:
+    """21bao local real-read canary tests (PR-4F)."""
+
+    def test_canary_gate_without_approval_skipped(self):
+        """Canary real read without operator_approved_real_read -> skipped."""
+        plan = wac.build_collection_plan("21bao", dry_run=False)
+        r = wac.collect_21bao_local(plan, canary_real_read=True,
+                                    operator_approved_real_read=False)
+        assert r["collection_status"] == "skipped"
+
+    def test_canary_gate_with_approval_no_env_skipped(self):
+        """Canary with approval but no env var -> skipped."""
+        env_save = os.environ.pop("WORKER_ATTEST_OPERATOR_APPROVED", None)
+        try:
+            plan = wac.build_collection_plan("21bao", dry_run=False)
+            r = wac.collect_21bao_local(plan, canary_real_read=True,
+                                        operator_approved_real_read=True)
+            assert r["collection_status"] == "skipped"
+        finally:
+            if env_save is not None:
+                os.environ["WORKER_ATTEST_OPERATOR_APPROVED"] = env_save
+
+    def test_canary_real_read_completed(self):
+        """Canary with all gates open reads real 21bao config."""
+        env_save = os.environ.get("WORKER_ATTEST_OPERATOR_APPROVED")
+        os.environ["WORKER_ATTEST_OPERATOR_APPROVED"] = "1"
+        try:
+            plan = wac.build_collection_plan("21bao", dry_run=False)
+            r = wac.collect_21bao_local(plan, canary_real_read=True,
+                                        operator_approved_real_read=True)
+            if r["collection_status"] == "completed":
+                assert "model_aliases" in r["attestation"]
+                assert len(r["attestation"]["model_aliases"]) > 0
+                assert r["attestation"]["node"] == "21bao"
+                assert r["attestation"]["opencode_config_present"] is True
+                fof = r["forbidden_operation_flags"]
+                for k, v in fof.items():
+                    assert v is False, f"forbidden flag '{k}' is {v}"
+                from worker_attest_plan import validate_receipt
+                v = validate_receipt(r["receipt"])
+                assert v["valid"], f"Receipt failed: {v['errors']}"
+            else:
+                assert r["collection_status"] in ("error", "skipped")
+        finally:
+            if env_save is not None:
+                os.environ["WORKER_ATTEST_OPERATOR_APPROVED"] = env_save
+            else:
+                os.environ.pop("WORKER_ATTEST_OPERATOR_APPROVED", None)
+
+    def test_canary_audit_safe(self):
+        """Canary real-read output must be audit-safe (no secrets/URLs)."""
+        env_save = os.environ.get("WORKER_ATTEST_OPERATOR_APPROVED")
+        os.environ["WORKER_ATTEST_OPERATOR_APPROVED"] = "1"
+        try:
+            plan = wac.build_collection_plan("21bao", dry_run=False)
+            r = wac.collect_21bao_local(plan, canary_real_read=True,
+                                        operator_approved_real_read=True)
+            if r["collection_status"] == "completed":
+                s = json.dumps(r)
+                has_secret = any(p in s for p in wac._SECRET_PATTERNS)
+                has_url = any(p in s for p in wac._URL_PATTERNS)
+                assert not has_secret, "Secret pattern leaked in output!"
+                assert not has_url, "URL pattern leaked in output!"
+        finally:
+            if env_save is not None:
+                os.environ["WORKER_ATTEST_OPERATOR_APPROVED"] = env_save
+            else:
+                os.environ.pop("WORKER_ATTEST_OPERATOR_APPROVED", None)
+
+    def test_canary_no_subprocess(self):
+        """Canary read must not use subprocess (AST-verified)."""
+        import ast
+        tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute):
+                if isinstance(node.value, ast.Name) and node.value.id == "subprocess":
+                    pytest.fail(f"subprocess reference at line {node.lineno}")
