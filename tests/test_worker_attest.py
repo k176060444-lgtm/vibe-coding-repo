@@ -54,7 +54,7 @@ class TestValidFixtures:
         result = _run_validate("worker_attest_21bao.json")
         assert result["valid"] is True, f"21bao failed: {result['errors']}"
         assert result["node"] == "21bao"
-        assert result["model_count"] == 3
+        assert result["model_count"] == 9
         assert len(result["errors"]) == 0
         assert len(result["warnings"]) == 0
 
@@ -62,13 +62,13 @@ class TestValidFixtures:
         result = _run_validate("worker_attest_5bao.json")
         assert result["valid"] is True, f"5bao failed: {result['errors']}"
         assert result["node"] == "5bao"
-        assert result["model_count"] == 3
+        assert result["model_count"] == 9
 
     def test_9bao_valid(self):
         result = _run_validate("worker_attest_9bao.json")
         assert result["valid"] is True, f"9bao failed: {result['errors']}"
         assert result["node"] == "9bao"
-        assert result["model_count"] == 3
+        assert result["model_count"] == 9
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -188,7 +188,8 @@ class TestFieldMismatchDetection:
         finally:
             Path(tf.name).unlink()
 
-    def test_credential_status_mismatch_warns(self):
+    def test_credential_status_mismatch_active_blocks(self):
+        """active operator_requested credential_status mismatch → BLOCK (PR #297 fix)."""
         sys.path.insert(0, str(REPO / "scripts"))
         from model_pool_drift import detect_drift_layer2
         import yaml, tempfile
@@ -196,6 +197,7 @@ class TestFieldMismatchDetection:
         pool = yaml.safe_load((REPO / "scripts" / "model_pool.yaml").read_text())
         nmc = yaml.safe_load((REPO / "scripts" / "node_model_capability.yaml").read_text())
         fixture = json.loads((FIXT_DIR / "worker_attest_21bao.json").read_text())
+        # model_aliases[0] is opencode-go-mimo-v2-5 (operator_requested → active)
         fixture["model_aliases"][0]["credential_status"] = "missing"
 
         tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
@@ -203,12 +205,14 @@ class TestFieldMismatchDetection:
         tf.close()
         try:
             r = detect_drift_layer2(fixture_path=Path(tf.name), pool=pool, nmc=nmc)
-            assert _has_category(r, "worker_credential_status_mismatch"), \
-                f"Expected credential_status mismatch, got cats={r['warn_categories']}"
+            assert "worker_credential_status_mismatch" in r["drift_categories"], \
+                f"Expected BLOCK drift, got BLOCK={r['drift_categories']} WARN={r['warn_categories']}"
+            assert _block_count(r) >= 1, "Active credential_status mismatch must BLOCK"
         finally:
             Path(tf.name).unlink()
 
-    def test_endpoint_ref_mismatch_warns(self):
+    def test_endpoint_ref_mismatch_active_blocks(self):
+        """active operator_requested endpoint_ref mismatch → BLOCK (PR #297 fix)."""
         sys.path.insert(0, str(REPO / "scripts"))
         from model_pool_drift import detect_drift_layer2
         import yaml, tempfile
@@ -216,6 +220,7 @@ class TestFieldMismatchDetection:
         pool = yaml.safe_load((REPO / "scripts" / "model_pool.yaml").read_text())
         nmc = yaml.safe_load((REPO / "scripts" / "node_model_capability.yaml").read_text())
         fixture = json.loads((FIXT_DIR / "worker_attest_21bao.json").read_text())
+        # model_aliases[0] is opencode-go-mimo-v2-5 (operator_requested → active)
         fixture["model_aliases"][0]["endpoint_ref"] = "not_required"
 
         tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
@@ -223,10 +228,113 @@ class TestFieldMismatchDetection:
         tf.close()
         try:
             r = detect_drift_layer2(fixture_path=Path(tf.name), pool=pool, nmc=nmc)
-            assert _has_category(r, "worker_endpoint_ref_mismatch"), \
-                f"Expected endpoint_ref mismatch, got cats={r['warn_categories']}"
+            assert "worker_endpoint_ref_mismatch" in r["drift_categories"], \
+                f"Expected BLOCK drift, got BLOCK={r['drift_categories']} WARN={r['warn_categories']}"
+            assert _block_count(r) >= 1, "Active endpoint_ref mismatch must BLOCK"
         finally:
             Path(tf.name).unlink()
+
+    def test_credential_status_mismatch_deu_warns(self):
+        """declared_enabled_unassigned credential_status mismatch → WARN (D-B pending)."""
+        sys.path.insert(0, str(REPO / "scripts"))
+        from model_pool_drift import detect_drift_layer2
+        import yaml
+
+        pool = yaml.safe_load((REPO / "scripts" / "model_pool.yaml").read_text())
+        nmc = yaml.safe_load((REPO / "scripts" / "node_model_capability.yaml").read_text())
+        # Use the dedicated DEU-cred fixture
+        r = detect_drift_layer2(
+            fixture_path=FIXT_DIR / "worker_attest_deu_cred_mismatch.json",
+            pool=pool, nmc=nmc,
+        )
+        # DEU credential_status mismatch → WARN only (not BLOCK)
+        assert "worker_credential_status_mismatch" in r["warn_categories"]
+        # And the active entries don't drift blockingly
+        active_cred_block = [d for d in r["details"]
+                            if d.get("category") == "worker_credential_status_mismatch"]
+        assert len(active_cred_block) == 0, \
+            "DEU-only credential mismatch must NOT produce BLOCK"
+
+    def test_endpoint_ref_mismatch_deu_warns(self):
+        """declared_enabled_unassigned endpoint_ref mismatch → WARN (D-B pending)."""
+        sys.path.insert(0, str(REPO / "scripts"))
+        from model_pool_drift import detect_drift_layer2
+        import yaml
+
+        pool = yaml.safe_load((REPO / "scripts" / "model_pool.yaml").read_text())
+        nmc = yaml.safe_load((REPO / "scripts" / "node_model_capability.yaml").read_text())
+        # Construct: alter DEU model's endpoint_ref in a copy of fixture
+        import tempfile
+        fixture = json.loads((FIXT_DIR / "worker_attest_21bao.json").read_text())
+        # Add a DEU entry with endpoint_ref mismatch
+        fixture["model_aliases"].append({
+            "model_id": "anthropic-claude-sonnet-4",
+            "alias": "anthropic-sonnet4",
+            "provider_namespace": "anthropic",
+            "lifecycle_status": "declared_enabled_unassigned",
+            "credential_status": "present",
+            "endpoint_ref": "not_required",
+            "key_env": "OPENCODE_ANTHROPIC_API_KEY",
+            "base_url_env": "OPENCODE_ANTHROPIC_BASE_URL",
+        })
+        tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        json.dump(fixture, tf)
+        tf.close()
+        try:
+            r = detect_drift_layer2(fixture_path=Path(tf.name), pool=pool, nmc=nmc)
+            assert "worker_endpoint_ref_mismatch" in r["warn_categories"]
+            active_ep_block = [d for d in r["details"]
+                               if d.get("category") == "worker_endpoint_ref_mismatch"]
+            assert len(active_ep_block) == 0, \
+                "DEU-only endpoint_ref mismatch must NOT produce BLOCK"
+        finally:
+            Path(tf.name).unlink()
+
+    def test_alias_missing_active_blocks(self):
+        """active operator_requested model missing from fixture → BLOCK (PR #297 fix)."""
+        sys.path.insert(0, str(REPO / "scripts"))
+        from model_pool_drift import detect_drift_layer2
+        import yaml
+
+        pool = yaml.safe_load((REPO / "scripts" / "model_pool.yaml").read_text())
+        nmc = yaml.safe_load((REPO / "scripts" / "node_model_capability.yaml").read_text())
+        # Negative fixture: only 1 active model in fixture, but matrix has 9
+        r = detect_drift_layer2(
+            fixture_path=FIXT_DIR / "worker_attest_active_alias_missing.json",
+            pool=pool, nmc=nmc,
+        )
+        assert "worker_alias_missing" in r["drift_categories"], \
+            "Active alias missing must BLOCK (was: WARN)"
+        assert _block_count(r) >= 1
+        # The DEU ones stay WARN
+        deu_warn = [w for w in r["warnings"]
+                    if w.get("category") == "worker_alias_missing"
+                    and w.get("model_id") not in [d["model_id"] for d in r["details"]]]
+        # Just check the block one is for mimo-v2-5-pro (active)
+        block_models = [d["model_id"] for d in r["details"]
+                        if d.get("category") == "worker_alias_missing"]
+        assert any("opencode-go-" in m for m in block_models), \
+            f"Expected an opencode-go active model in BLOCK, got {block_models}"
+
+    def test_alias_missing_deu_warns(self):
+        """declared_enabled_unassigned in matrix but not fixture → WARN (D-B pending)."""
+        sys.path.insert(0, str(REPO / "scripts"))
+        from model_pool_drift import detect_drift_layer2
+        import yaml
+
+        pool = yaml.safe_load((REPO / "scripts" / "model_pool.yaml").read_text())
+        nmc = yaml.safe_load((REPO / "scripts" / "node_model_capability.yaml").read_text())
+        # Valid 21bao fixture covers all 9 active, so missing = 16 DEU entries
+        r = detect_drift_layer2(
+            fixture_path=FIXT_DIR / "worker_attest_21bao.json",
+            pool=pool, nmc=nmc,
+        )
+        assert "worker_alias_missing" in r["warn_categories"]
+        # The DEU aliases that are WARNed must NOT appear in details (BLOCK)
+        alias_missing_block = [d for d in r["details"]
+                               if d.get("category") == "worker_alias_missing"]
+        assert len(alias_missing_block) == 0, \
+            "DEU alias missing must remain WARN, not produce BLOCK"
 
     def test_lifecycle_status_mismatch_blocks(self):
         sys.path.insert(0, str(REPO / "scripts"))

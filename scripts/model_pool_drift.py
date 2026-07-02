@@ -496,15 +496,33 @@ def detect_drift_layer2(
                         "detail": f"Fixture node '{node_name}' not in NMC matrix"})
 
     # ── alias missing (matrix has model not in fixture) ──
+    # Severity policy: per PR #297 fix, active models (enabled_assigned /
+    # operator_requested) must BLOCK if missing from worker attestation, because
+    # a missing alias means the worker hasn't attested a model the central pool
+    # thinks it should have. declared_enabled_unassigned stays WARN (D-B
+    # pending). Other lifecycle states (candidate/disabled/historical/
+    # remove_pending/required) BLOCK as a generic safety net — the only carve-
+    # out is DEU because the matrix currently reflects pre-existing baseline02
+    # matrix builder behavior pending D-B.
+    _ACTIVE = ("enabled_assigned", "operator_requested")
+    _DEU = "declared_enabled_unassigned"
     for mid in matrix:
         if mid not in fixture_by_id:
             ls = pool_models.get(mid, {}).get("lifecycle_status", "")
-            if ls == "declared_enabled_unassigned":
-                continue
-            warn_cats.append("worker_alias_missing")
-            details_warn.append({"category": "worker_alias_missing", "severity": "WARN",
-                                 "model_id": mid, "node": node_name,
-                                 "detail": f"Matrix has '{mid}' but fixture does not"})
+            if ls == _DEU:
+                # DEU stays WARN — pre-existing baseline02 matrix builder
+                # behavior pending D-B operator decision.
+                warn_cats.append("worker_alias_missing")
+                details_warn.append({"category": "worker_alias_missing", "severity": "WARN",
+                                     "model_id": mid, "node": node_name,
+                                     "detail": f"Matrix has '{mid}' but fixture does not "
+                                               f"(declared_enabled_unassigned, D-B pending)"})
+            else:
+                # active or other non-DEU lifecycle status: BLOCK.
+                drift_cats.append("worker_alias_missing")
+                details.append({"category": "worker_alias_missing", "severity": "BLOCK",
+                                "model_id": mid, "node": node_name,
+                                "detail": f"Matrix has '{mid}' ({ls}) but fixture does not"})
 
     # ── extra alias (fixture has model not in pool/matrix) ──
     for aid in fixture_by_id:
@@ -551,22 +569,48 @@ def detect_drift_layer2(
                                 "detail": f"lifecycle_status: fixture='{f_ls}' pool='{p_ls}'"})
 
         # credential_status
+        # Severity policy per PR #297 fix:
+        #   - active models (enabled_assigned / operator_requested) with a
+        #     credential_status mismatch → BLOCK (runtime credential ref drift
+        #     between central pool and worker attestation).
+        #   - declared_enabled_unassigned → WARN (D-B pending).
+        #   - other lifecycle states (candidate/disabled/historical/
+        #     remove_pending/required) → BLOCK as safety net.
         f_cs = fe.get("credential_status", "")
         p_cs = pe.get("credential_status", "")
         if f_cs and p_cs and f_cs != p_cs:
-            warn_cats.append("worker_credential_status_mismatch")
-            details_warn.append({"category": "worker_credential_status_mismatch",
-                                 "severity": "WARN", "model_id": mid, "node": node_name,
-                                 "detail": f"credential_status: fixture='{f_cs}' pool='{p_cs}'"})
+            ls = pe.get("lifecycle_status", "")
+            if ls == _DEU:
+                warn_cats.append("worker_credential_status_mismatch")
+                details_warn.append({"category": "worker_credential_status_mismatch",
+                                     "severity": "WARN", "model_id": mid, "node": node_name,
+                                     "detail": f"credential_status: fixture='{f_cs}' pool='{p_cs}' "
+                                               f"(declared_enabled_unassigned, D-B pending)"})
+            else:
+                drift_cats.append("worker_credential_status_mismatch")
+                details.append({"category": "worker_credential_status_mismatch",
+                                "severity": "BLOCK", "model_id": mid, "node": node_name,
+                                "detail": f"credential_status: fixture='{f_cs}' pool='{p_cs}' "
+                                          f"({ls})"})
 
         # endpoint_ref
+        # Severity policy mirrors credential_status (see above).
         f_er = fe.get("endpoint_ref", "")
         p_er = pe.get("endpoint_ref", "")
         if f_er and p_er and f_er != p_er:
-            warn_cats.append("worker_endpoint_ref_mismatch")
-            details_warn.append({"category": "worker_endpoint_ref_mismatch",
-                                 "severity": "WARN", "model_id": mid, "node": node_name,
-                                 "detail": f"endpoint_ref: fixture='{f_er}' pool='{p_er}'"})
+            ls = pe.get("lifecycle_status", "")
+            if ls == _DEU:
+                warn_cats.append("worker_endpoint_ref_mismatch")
+                details_warn.append({"category": "worker_endpoint_ref_mismatch",
+                                     "severity": "WARN", "model_id": mid, "node": node_name,
+                                     "detail": f"endpoint_ref: fixture='{f_er}' pool='{p_er}' "
+                                               f"(declared_enabled_unassigned, D-B pending)"})
+            else:
+                drift_cats.append("worker_endpoint_ref_mismatch")
+                details.append({"category": "worker_endpoint_ref_mismatch",
+                                "severity": "BLOCK", "model_id": mid, "node": node_name,
+                                "detail": f"endpoint_ref: fixture='{f_er}' pool='{p_er}' "
+                                          f"({ls})"})
 
     drift_count = len(drift_cats)
     warn_count = len(warn_cats)
