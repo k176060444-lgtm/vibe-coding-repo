@@ -427,24 +427,36 @@ def detect_drift_layer2(
     node: str | None = None,
     pool: dict | None = None,
     nmc: dict | None = None,
+    attestation: dict | None = None,
 ) -> dict:
     """Local-only drift Layer 2: compare worker_attest fixture vs pool vs matrix.
 
-    No SSH, no real worker access, no env read. Pure local fixture comparison.
+    Accepts EITHER a fixture_path (legacy file-based) OR an attestation dict
+    (from collector completed receipt). When attestation is provided,
+    fixture_path and node are ignored for loading.
+
+    No SSH, no real worker access, no env read. Pure local comparison.
     """
-    # ── Resolve fixture path ──
-    if fixture_path is None:
-        if node is None:
-            return _layer2_err("No fixture path or node specified")
-        fixture_path = FIXTURES_DIR / f"worker_attest_{node}.json"
+    # ── Get attestation data ──
+    if attestation is not None:
+        fixture = attestation
+        used_fixture_path = None
+    elif fixture_path is not None:
+        used_fixture_path = fixture_path
+        try:
+            fixture = _load_fixture(fixture_path)
+        except ValueError as e:
+            return _layer2_err(str(e))
+    elif node is not None:
+        used_fixture_path = FIXTURES_DIR / f"worker_attest_{node}.json"
+        try:
+            fixture = _load_fixture(used_fixture_path)
+        except ValueError as e:
+            return _layer2_err(str(e))
+    else:
+        return _layer2_err("No fixture path, node, or attestation specified")
 
-    # ── Load fixture ──
-    try:
-        fixture = _load_fixture(fixture_path)
-    except ValueError as e:
-        return _layer2_err(str(e))
-
-    # ── Validate fixture schema ──
+    # ── Validate fixture/attestation schema ──
     try:
         from worker_attest import validate_worker_attestation
         vr = validate_worker_attestation(fixture)
@@ -456,7 +468,7 @@ def detect_drift_layer2(
                 "details": [{"category": "worker_attestation_invalid", "severity": "BLOCK",
                              "detail": f"Fixture invalid: {'; '.join(vr['errors'][:3])}"}],
                 "warnings": vr.get("warnings", []), "layer": 2,
-                "node": fixture.get("node"), "fixture_path": str(fixture_path),
+                "node": fixture.get("node"), "fixture_path": str(used_fixture_path) if used_fixture_path else None,
                 "model_count": {}, "blocked_reason": "worker_attestation_invalid",
             }
     except ImportError:
@@ -624,10 +636,108 @@ def detect_drift_layer2(
         "warnings": details_warn,
         "layer": 2,
         "node": node_name,
-        "fixture_path": str(fixture_path),
+        "fixture_path": str(used_fixture_path) if used_fixture_path else None,
         "model_count": {"pool": len(pool_models), "matrix": len(matrix), "fixture": len(aliases)},
         "blocked_reason": None if drift_count == 0 else f"Layer 2 drift: {drift_count} BLOCK(s) in {sorted(set(drift_cats))}",
     }
+
+
+def validate_collector_receipt(receipt: dict) -> dict:
+    """Validate a collector receipt before using attestation for Layer2.
+
+    Checks:
+    - Receipt is a dict with required fields
+    - collection_status is 'completed' (only completed receipts have attestation)
+    - forbidden_operation_flags all False
+    - redaction_status all True
+    - attestation is present with model_aliases
+
+    Returns: {'valid': True/False, 'errors': [...], 'blocked_reason': ...}
+    """
+    errors: list[str] = []
+
+    if not isinstance(receipt, dict):
+        return {"valid": False, "errors": ["receipt must be a dict"],
+                "blocked_reason": "receipt_not_dict"}
+
+    # collection_status must be 'completed' to have attestation
+    cs = receipt.get("collection_status", "")
+    if cs != "completed":
+        errors.append(f"collection_status must be 'completed', got '{cs}'")
+
+    # forbidden_operation_flags must all be False
+    fof = receipt.get("forbidden_operation_flags", {})
+    if not isinstance(fof, dict):
+        errors.append("forbidden_operation_flags must be a dict")
+    else:
+        for k, v in fof.items():
+            if v is True:
+                errors.append(f"forbidden_operation_flags.{k} is True (forbidden operation detected)")
+
+    # redaction_status must all be True
+    rs = receipt.get("redacted_output", {})
+    # Also check the receipt's own redaction_status if present
+    rs_inner = receipt.get("receipt", {}).get("redaction_status", {})
+    if isinstance(rs_inner, dict):
+        for k, v in rs_inner.items():
+            if v is False:
+                errors.append(f"receipt.redaction_status.{k} is False")
+
+    # attestation field must be present
+    attestation = receipt.get("attestation")
+    if attestation is None:
+        errors.append("attestation field missing from collector output")
+    elif not isinstance(attestation, dict):
+        errors.append("attestation must be a dict")
+    elif "model_aliases" not in attestation:
+        errors.append("attestation missing model_aliases")
+
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "blocked_reason": None if not errors else "collector_receipt_invalid",
+    }
+
+
+def detect_drift_layer2_from_receipt(
+    receipt: dict,
+    pool: dict | None = None,
+    nmc: dict | None = None,
+) -> dict:
+    """Validate a collector receipt and run Layer 2 drift on its attestation.
+
+    This wires the collector output (PR-4D) into the Layer 2 drift detection
+    (PR-4B). Steps:
+    1. Validate the receipt format and safety constraints
+    2. Extract the attestation
+    3. Run existing detect_drift_layer2 with the attestation
+
+    No SSH, no real worker access, no env read. Pure local comparison.
+    """
+    # Step 1: Validate receipt
+    vr = validate_collector_receipt(receipt)
+    if not vr["valid"]:
+        return {
+            "drift_detected": True, "drift_count": 1, "warn_count": 0,
+            "drift_categories": ["collector_receipt_invalid"],
+            "warn_categories": [],
+            "details": [{"category": "collector_receipt_invalid", "severity": "BLOCK",
+                         "detail": "; ".join(vr["errors"][:3])}],
+            "warnings": [], "layer": 2,
+            "node": receipt.get("attestation", {}).get("node", None),
+            "fixture_path": None,
+            "model_count": {}, "blocked_reason": vr["blocked_reason"],
+        }
+
+    # Step 2: Extract attestation
+    attestation = receipt["attestation"]
+
+    # Step 3: Run Layer 2 comparison
+    return detect_drift_layer2(
+        attestation=attestation,
+        pool=pool,
+        nmc=nmc,
+    )
 
 
 def _layer2_err(msg: str) -> dict:
@@ -648,12 +758,22 @@ def main():
         if "--layer2" in sys.argv:
             fixture_path = None
             node = None
+            receipt_path = None
             for i, a in enumerate(sys.argv):
                 if a == "--fixture" and i + 1 < len(sys.argv):
                     fixture_path = Path(sys.argv[i + 1])
                 elif a == "--node" and i + 1 < len(sys.argv):
                     node = sys.argv[i + 1]
-            report = detect_drift_layer2(fixture_path=fixture_path, node=node)
+                elif a == "--receipt" and i + 1 < len(sys.argv):
+                    receipt_path = Path(sys.argv[i + 1])
+            if receipt_path is not None:
+                try:
+                    receipt = _load_json(receipt_path)
+                    report = detect_drift_layer2_from_receipt(receipt)
+                except ValueError as e:
+                    report = _layer2_err(str(e))
+            else:
+                report = detect_drift_layer2(fixture_path=fixture_path, node=node)
         else:
             report = detect_drift_layer1()
         print(json.dumps(report, indent=2))
@@ -661,12 +781,22 @@ def main():
     elif len(sys.argv) > 1 and sys.argv[1] in ("layer2",):
         fixture_path = None
         node = None
+        receipt_path = None
         for i, a in enumerate(sys.argv):
             if a == "--fixture" and i + 1 < len(sys.argv):
                 fixture_path = Path(sys.argv[i + 1])
             elif a == "--node" and i + 1 < len(sys.argv):
                 node = sys.argv[i + 1]
-        report = detect_drift_layer2(fixture_path=fixture_path, node=node)
+            elif a == "--receipt" and i + 1 < len(sys.argv):
+                receipt_path = Path(sys.argv[i + 1])
+        if receipt_path is not None:
+            try:
+                receipt = _load_json(receipt_path)
+                report = detect_drift_layer2_from_receipt(receipt)
+            except ValueError as e:
+                report = _layer2_err(str(e))
+        else:
+            report = detect_drift_layer2(fixture_path=fixture_path, node=node)
         print(json.dumps(report, indent=2))
         sys.exit(0 if not report.get("drift_detected", True) else 1)
     elif len(sys.argv) > 1 and sys.argv[1] == "drift":
@@ -676,8 +806,9 @@ def main():
     else:
         print("Usage:")
         print("  python model_pool_drift.py --self-check")
-        print("  python model_pool_drift.py detect")
+        print("  python model_pool_drift.py detect [--layer2 [--node NODE|--fixture PATH|--receipt PATH]]")
         print("  python model_pool_drift.py drift")
+        print("  python model_pool_drift.py layer2 [--node NODE|--fixture PATH|--receipt PATH]")
         sys.exit(0)
 
 
