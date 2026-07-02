@@ -1081,6 +1081,63 @@ def validate_lifecycle_status(status: str) -> str | None:
     return None
 
 
+# ── credential_status — additive schema v1.2 ─────────────────────────────────
+# Allowed values (Phase 3 PR-5):
+#   present       = credential ref (key_env/base_url_env NAME) declared in pool
+#   empty         = ref exists but is empty (no value available)
+#   missing       = required ref is absent
+#   unknown       = not audited yet
+#   not_required  = model/provider does not need credential
+
+CREDENTIAL_STATUS_VALUES = frozenset({
+    "present", "empty", "missing", "unknown", "not_required",
+})
+
+
+def auto_classify_credential_status(model: dict) -> str:
+    """Determine credential_status from model fields.
+
+    Pure deterministic function — reads key_env NAME existence (not value),
+    base_url_env NAME existence (not value), and lifecycle_status. No env var
+    reading. No secret value access.
+
+    Returns one of:
+      present       — key_env or base_url_env NAME is declared
+      not_required  — lifecycle in (disabled, historical, remove_pending)
+      unknown       — no ref declared, lifecycle in (candidate, declared_enabled_unassigned, or unknown)
+      missing       — no ref declared, lifecycle in (enabled_assigned, operator_requested) — should not happen
+    """
+    key_env = (model.get("key_env") or "").strip()
+    base_url_env = (model.get("base_url_env") or "").strip()
+    ls = (model.get("lifecycle_status") or "").strip()
+
+    has_ref = bool(key_env) or bool(base_url_env)
+
+    if not has_ref:
+        # No credential ref declared in YAML
+        if ls in ("remove_pending", "historical", "disabled"):
+            return "not_required"
+        elif ls in ("candidate", "declared_enabled_unassigned"):
+            return "unknown"
+        elif ls in ("enabled_assigned", "operator_requested"):
+            return "missing"
+        else:
+            return "unknown"
+    else:
+        # Credential ref NAME declared in YAML (value may or may not be populated in env)
+        if ls in ("remove_pending", "historical", "disabled"):
+            return "not_required"
+        return "present"
+
+
+def validate_credential_status(status: str) -> str | None:
+    """Validate credential_status. Return error message or None."""
+    if status not in CREDENTIAL_STATUS_VALUES:
+        return (f"Invalid credential_status '{status}'. "
+                f"Must be one of: {', '.join(sorted(CREDENTIAL_STATUS_VALUES))}")
+    return None
+
+
 # ── cmd_classify: auto-classify all models ──────────────────────────────────
 
 
@@ -1244,6 +1301,171 @@ def cmd_diff(args):
 def cmd_drift(args):
     """Same as cmd_diff (Phase 3 PR-3 covers Layer 1 only)."""
     return cmd_diff(args)
+
+
+# ── credential_status commands (Phase 3 PR-5) ───────────────────────────────
+
+
+def cmd_credential_status(args):
+    """Auto-classify or list credential_status for all models.
+
+    Dry-run only (default): shows credential_status for each model without
+    writing to model_pool.yaml. Pass --apply to write credential_status fields.
+
+    Pure deterministic — reads key_env/base_url_env NAME (not value).
+    No env var reading. No secret value access.
+    """
+    pool = _load_pool()
+    models = pool.get("models", [])
+    result = []
+    for m in models:
+        new_status = auto_classify_credential_status(m)
+        old_status = m.get("credential_status", None)
+        changed = (old_status is None or old_status != new_status)
+        result.append({
+            "id": m["id"],
+            "key_env": m.get("key_env", ""),
+            "lifecycle_status": m.get("lifecycle_status", ""),
+            "from": old_status,
+            "to": new_status,
+            "changed": changed,
+        })
+        if args.apply:
+            m["credential_status"] = new_status
+
+    if args.apply:
+        _save_pool(pool)
+        status = "ok"
+    else:
+        status = "DRY_RUN"
+
+    statuses: dict[str, int] = {}
+    for r in result:
+        s = r["to"]
+        statuses[s] = statuses.get(s, 0) + 1
+    changed_count = sum(1 for r in result if r["changed"])
+
+    _output({
+        "status": status,
+        "total_models": len(result),
+        "changed": changed_count,
+        "credential_statuses": statuses,
+        "details": result,
+        "message": "Auto-classified. Pass --apply to write."
+            if status == "DRY_RUN"
+            else f"Written {changed_count} credential_status fields.",
+    })
+    return True
+
+
+def cmd_validate_credential_status(args):
+    """Validate credential_status across all models.
+
+    Checks:
+    - Allowed enum values
+    - Lifecycle constraints:
+      - enabled_assigned / operator_requested: credential_status must exist;
+        if missing/empty → WARN; if unknown → WARN
+      - declared_enabled_unassigned: any valid credential_status → no error
+      - disabled / historical / remove_pending: any valid credential_status → ok
+
+    No secret value read. No env var read.
+    """
+    pool = _load_pool()
+    models = pool.get("models", [])
+
+    errors = []
+    warnings = []
+    valid = set(CREDENTIAL_STATUS_VALUES)
+
+    for m in models:
+        mid = m.get("id", "???")
+        cs = m.get("credential_status", "")
+        ls = m.get("lifecycle_status", "")
+
+        # Check allowed values
+        if cs and cs not in valid:
+            errors.append({
+                "model_id": mid,
+                "field": "credential_status",
+                "issue": "INVALID_VALUE",
+                "detail": f"credential_status='{cs}' not in {sorted(valid)}",
+            })
+            continue
+
+        # Lifecycle constraints
+        if ls in ("enabled_assigned", "operator_requested"):
+            if not cs:
+                warnings.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "credential_status": cs,
+                    "issue": "MISSING",
+                    "detail": f"Active model '{mid}' has no credential_status",
+                })
+            elif cs in ("missing", "empty"):
+                errors.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "credential_status": cs,
+                    "issue": "REQUIRED_CREDENTIAL_MISSING",
+                    "detail": f"Active model '{mid}' has credential_status='{cs}'",
+                })
+            elif cs == "unknown":
+                warnings.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "credential_status": cs,
+                    "issue": "UNKNOWN_CREDENTIAL",
+                    "detail": f"Active model '{mid}' credential_status=unknown (should audit)",
+                })
+
+        elif ls == "declared_enabled_unassigned":
+            if not cs:
+                warnings.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "credential_status": cs,
+                    "issue": "MISSING_OPTIONAL",
+                    "detail": f"DEU model '{mid}' has no credential_status (D-B pending, optional)",
+                })
+            elif cs not in valid:
+                errors.append({
+                    "model_id": mid,
+                    "issue": "INVALID_VALUE",
+                    "detail": f"credential_status='{cs}' not in {sorted(valid)}",
+                })
+            # DEU with any valid credential_status = OK (no error per constraint 8)
+
+        else:
+            # candidate, disabled, historical, remove_pending, or unknown lifecycle
+            if not cs:
+                warnings.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "credential_status": cs,
+                    "issue": "MISSING",
+                    "detail": f"Model '{mid}' ({ls}) has no credential_status",
+                })
+            elif cs == "missing":
+                warnings.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "credential_status": cs,
+                    "issue": "UNEXPECTED_MISSING",
+                    "detail": f"Model '{mid}' ({ls}) credential_status='missing' (not required)",
+                })
+
+    _output({
+        "status": "ok" if not errors else "ERRORS_FOUND",
+        "total_models": len(models),
+        "error_count": len(errors),
+        "warning_count": len(warnings),
+        "errors": errors,
+        "warnings": warnings,
+        "note": "credential_status is additive schema (Phase 3 PR-5). F6 readiness gate not affected.",
+    })
+    return len(errors) == 0
 
 
 def cmd_generate_node_capability(args):
@@ -1610,6 +1832,17 @@ def main():
     p_drift = sub.add_parser("drift", help="Same as 'diff'; fail-fast summary across all layers (currently Layer 1 only)")
     p_drift.add_argument("--json", action="store_true", help="JSON output (default)")
     p_drift.set_defaults(func=cmd_drift)
+
+    # --- Phase 3 PR-5: credential_status schema ---
+    p_cs = sub.add_parser("credential-status",
+                          help="Auto-classify credential_status for all models (dry-run or --apply)")
+    p_cs.add_argument("--dry-run", action="store_true", help="Show changes without writing (default)")
+    p_cs.add_argument("--apply", action="store_true", help="Write credential_status to model_pool.yaml")
+    p_cs.set_defaults(func=cmd_credential_status, dry_run=True, apply=False)
+
+    p_vcs = sub.add_parser("validate-credential-status",
+                           help="Validate credential_status across lifecycle constraints")
+    p_vcs.set_defaults(func=cmd_validate_credential_status)
 
     args = parser.parse_args()
     try:
