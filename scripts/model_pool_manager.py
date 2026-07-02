@@ -1138,6 +1138,61 @@ def validate_credential_status(status: str) -> str | None:
     return None
 
 
+# ── endpoint_ref — additive schema v1.2 (Phase 3 PR-6) ──────────────────────
+# Allowed values:
+#   base_url_env  = model's base_url_env NAME is the endpoint reference
+#   not_required  = model does not need an endpoint (inactive lifecycle)
+#   unknown       = not audited yet
+#   missing       = required ref is absent (fail-closed guard)
+
+ENDPOINT_REF_VALUES = frozenset({
+    "base_url_env", "not_required", "unknown", "missing",
+})
+
+
+def auto_classify_endpoint_ref(model: dict) -> str:
+    """Determine endpoint_ref from model fields.
+
+    Pure deterministic function — reads base_url_env NAME existence (not
+    value) and lifecycle_status. No env var reading. No URL value access.
+
+    Returns one of:
+      base_url_env   — base_url_env NAME is declared (the reference NAME,
+                       never the real URL value)
+      not_required   — lifecycle in (disabled, historical, remove_pending)
+      unknown        — no ref declared, lifecycle in (candidate,
+                       declared_enabled_unassigned, or unknown)
+      missing        — no ref declared, lifecycle in (enabled_assigned,
+                       operator_requested) — should not happen
+    """
+    base_url_env = (model.get("base_url_env") or "").strip()
+    ls = (model.get("lifecycle_status") or "").strip()
+
+    has_ref = bool(base_url_env)
+
+    if not has_ref:
+        if ls in ("remove_pending", "historical", "disabled"):
+            return "not_required"
+        elif ls in ("candidate", "declared_enabled_unassigned"):
+            return "unknown"
+        elif ls in ("enabled_assigned", "operator_requested"):
+            return "missing"
+        else:
+            return "unknown"
+    else:
+        if ls in ("remove_pending", "historical", "disabled"):
+            return "not_required"
+        return "base_url_env"
+
+
+def validate_endpoint_ref(status: str) -> str | None:
+    """Validate endpoint_ref. Return error message or None."""
+    if status not in ENDPOINT_REF_VALUES:
+        return (f"Invalid endpoint_ref '{status}'. "
+                f"Must be one of: {', '.join(sorted(ENDPOINT_REF_VALUES))}")
+    return None
+
+
 # ── cmd_classify: auto-classify all models ──────────────────────────────────
 
 
@@ -1464,6 +1519,170 @@ def cmd_validate_credential_status(args):
         "errors": errors,
         "warnings": warnings,
         "note": "credential_status is additive schema (Phase 3 PR-5). F6 readiness gate not affected.",
+    })
+    return len(errors) == 0
+
+
+# ── endpoint_ref commands (Phase 3 PR-6) ────────────────────────────────────
+
+
+def cmd_endpoint_ref(args):
+    """Auto-classify or list endpoint_ref for all models.
+
+    Dry-run only (default): shows endpoint_ref for each model without
+    writing to model_pool.yaml. Pass --apply to write endpoint_ref fields.
+
+    Pure deterministic — reads base_url_env NAME (not value).
+    No env var reading. No URL value access.
+    """
+    pool = _load_pool()
+    models = pool.get("models", [])
+    result = []
+    for m in models:
+        new_status = auto_classify_endpoint_ref(m)
+        old_status = m.get("endpoint_ref", None)
+        changed = (old_status is None or old_status != new_status)
+        result.append({
+            "id": m["id"],
+            "base_url_env": m.get("base_url_env", ""),
+            "lifecycle_status": m.get("lifecycle_status", ""),
+            "from": old_status,
+            "to": new_status,
+            "changed": changed,
+        })
+        if args.apply:
+            m["endpoint_ref"] = new_status
+
+    if args.apply:
+        _save_pool(pool)
+        status = "ok"
+    else:
+        status = "DRY_RUN"
+
+    statuses: dict[str, int] = {}
+    for r in result:
+        s = r["to"]
+        statuses[s] = statuses.get(s, 0) + 1
+    changed_count = sum(1 for r in result if r["changed"])
+
+    _output({
+        "status": status,
+        "total_models": len(result),
+        "changed": changed_count,
+        "endpoint_refs": statuses,
+        "details": result,
+        "message": "Auto-classified. Pass --apply to write."
+            if status == "DRY_RUN"
+            else f"Written {changed_count} endpoint_ref fields.",
+    })
+    return True
+
+
+def cmd_validate_endpoint_ref(args):
+    """Validate endpoint_ref across all models.
+
+    Checks:
+    - Allowed enum values
+    - Lifecycle constraints:
+      - enabled_assigned / operator_requested: must be base_url_env or unknown
+        If missing/empty → WARN
+      - declared_enabled_unassigned: any valid endpoint_ref → no error
+      - disabled / historical / remove_pending: any valid endpoint_ref → ok
+
+    No URL value read. No env var read.
+    """
+    pool = _load_pool()
+    models = pool.get("models", [])
+
+    errors = []
+    warnings = []
+    valid = set(ENDPOINT_REF_VALUES)
+
+    for m in models:
+        mid = m.get("id", "???")
+        er = m.get("endpoint_ref", "")
+        ls = m.get("lifecycle_status", "")
+
+        # Check allowed values
+        if er and er not in valid:
+            errors.append({
+                "model_id": mid,
+                "field": "endpoint_ref",
+                "issue": "INVALID_VALUE",
+                "detail": f"endpoint_ref='{er}' not in {sorted(valid)}",
+            })
+            continue
+
+        # Lifecycle constraints
+        if ls in ("enabled_assigned", "operator_requested"):
+            if not er:
+                warnings.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "endpoint_ref": er,
+                    "issue": "MISSING",
+                    "detail": f"Active model '{mid}' has no endpoint_ref",
+                })
+            elif er == "missing":
+                errors.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "endpoint_ref": er,
+                    "issue": "REQUIRED_ENDPOINT_MISSING",
+                    "detail": f"Active model '{mid}' endpoint_ref='{er}'",
+                })
+            elif er == "unknown":
+                warnings.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "endpoint_ref": er,
+                    "issue": "UNKNOWN_ENDPOINT",
+                    "detail": f"Active model '{mid}' endpoint_ref=unknown (should audit)",
+                })
+
+        elif ls == "declared_enabled_unassigned":
+            if not er:
+                warnings.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "endpoint_ref": er,
+                    "issue": "MISSING_OPTIONAL",
+                    "detail": f"DEU model '{mid}' has no endpoint_ref (D-B pending, optional)",
+                })
+            elif er not in valid:
+                errors.append({
+                    "model_id": mid,
+                    "issue": "INVALID_VALUE",
+                    "detail": f"endpoint_ref='{er}' not in {sorted(valid)}",
+                })
+
+        else:
+            # candidate, disabled, historical, remove_pending, or unknown lifecycle
+            if not er:
+                warnings.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "endpoint_ref": er,
+                    "issue": "MISSING",
+                    "detail": f"Model '{mid}' ({ls}) has no endpoint_ref",
+                })
+            elif er == "missing":
+                warnings.append({
+                    "model_id": mid,
+                    "lifecycle_status": ls,
+                    "endpoint_ref": er,
+                    "issue": "UNEXPECTED_MISSING",
+                    "detail": f"Model '{mid}' ({ls}) endpoint_ref='missing' (not required)",
+                })
+
+    _output({
+        "status": "ok" if not errors else "ERRORS_FOUND",
+        "total_models": len(models),
+        "error_count": len(errors),
+        "warning_count": len(warnings),
+        "errors": errors,
+        "warnings": warnings,
+        "note": "endpoint_ref is additive schema (Phase 3 PR-6). F6 readiness gate not affected.",
     })
     return len(errors) == 0
 
@@ -1843,6 +2062,17 @@ def main():
     p_vcs = sub.add_parser("validate-credential-status",
                            help="Validate credential_status across lifecycle constraints")
     p_vcs.set_defaults(func=cmd_validate_credential_status)
+
+    # --- Phase 3 PR-6: endpoint_ref schema ---
+    p_er = sub.add_parser("endpoint-ref",
+                          help="Auto-classify endpoint_ref for all models (dry-run or --apply)")
+    p_er.add_argument("--dry-run", action="store_true", help="Show changes without writing (default)")
+    p_er.add_argument("--apply", action="store_true", help="Write endpoint_ref to model_pool.yaml")
+    p_er.set_defaults(func=cmd_endpoint_ref, dry_run=True, apply=False)
+
+    p_ver = sub.add_parser("validate-endpoint-ref",
+                           help="Validate endpoint_ref across lifecycle constraints")
+    p_ver.set_defaults(func=cmd_validate_endpoint_ref)
 
     args = parser.parse_args()
     try:
