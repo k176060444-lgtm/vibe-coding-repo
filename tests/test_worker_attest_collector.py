@@ -70,9 +70,12 @@ class TestPlanBuilder:
         assert plan["collector"] == "5bao_ssh_canary"
         assert plan["dry_run"] is True
 
-    def test_9bao_rejected(self):
-        with pytest.raises(ValueError):
-            wac.build_collection_plan("9bao", dry_run=True)
+    def test_9bao_plan_valid(self):
+        """9bao plan is now valid (PR-4H)."""
+        plan = wac.build_collection_plan("9bao", dry_run=True)
+        assert plan["transport_type"] == "ssh"
+        assert plan["collector"] == "9bao_ssh_canary"
+        assert plan["dry_run"] is True
 
     def test_10bao_rejected(self):
         with pytest.raises(ValueError):
@@ -304,9 +307,11 @@ class TestASTSafety:
         return ast.parse(SCRIPT.read_text(encoding="utf-8"))
 
     def _is_in_ssh_function(self, tree: ast.AST, lineno: int) -> bool:
-        """Check if the given line is inside _execute_ssh_5bao."""
+        """Check if the given line is inside _execute_ssh_5bao or _execute_ssh_9bao."""
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "_execute_ssh_5bao":
+            if isinstance(node, ast.FunctionDef) and node.name in (
+                "_execute_ssh_5bao", "_execute_ssh_9bao"
+            ):
                 if node.lineno <= lineno <= (node.end_lineno or float("inf")):
                     return True
         return False
@@ -317,7 +322,7 @@ class TestASTSafety:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name.split(".")[0] == "subprocess":
-                        # Only allowed inside _execute_ssh_5bao (SSH transport)
+                        # Only allowed inside SSH function (5bao/9bao)
                         assert self._is_in_ssh_function(tree, node.lineno), \
                             f"subprocess import at {node.lineno} outside SSH function"
             if isinstance(node, ast.ImportFrom):
@@ -364,8 +369,10 @@ class TestASTSafety:
         It must NEVER be used to read API keys, base URLs, or any
         secret-bearing env var. Accesses should be:
         - _SSH_5BAO_KEY: reads VIBEDEV_SSH_KEY (path, not secret value)
+        - _SSH_9BAO_KEY: reads VIBEDEV_SSH_KEY (path, not secret value)
         - collect_21bao_local: operator gate
         - collect_5bao_remote: operator gate
+        - collect_9bao_remote: operator gate
         - main() CLI: operator gate
         """
         tree = self._parse()
@@ -375,9 +382,9 @@ class TestASTSafety:
                 if isinstance(node.value, ast.Name) and node.value.id == "os":
                     if node.attr in ("environ", "getenv"):
                         offenders.append((node.lineno, node.attr))
-        # 4 os.environ accesses are expected: SSH key path config + 3 gates
-        assert len(offenders) >= 3, f"Too few os.environ accesses: {offenders}"
-        assert len(offenders) <= 5, \
+        # 6 os.environ accesses are expected: 2 SSH key path config + 4 gates
+        assert len(offenders) >= 4, f"Too few os.environ accesses: {offenders}"
+        assert len(offenders) <= 9, \
             f"Too many os.environ accesses: {offenders}"
 
     def test_no_subprocess_call(self):
@@ -552,7 +559,7 @@ class TestSelfCheckEndToEnd:
         r = wac.self_check()
         assert r["status"] == "PASS", \
             f"Self-check FAILED: {[c for c in r['checks'] if not c['passed']]}"
-        assert r["detail"].startswith("21/21")
+        assert r["detail"].startswith("27/27")
 
 
 # ── 11. Receipt validates against worker_attest_plan schema ────────────────
@@ -668,10 +675,138 @@ class TestCanaryRealRead:
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute):
                 if isinstance(node.value, ast.Name) and node.value.id == "subprocess":
-                    # Check if inside _execute_ssh_5bao (approved)
+                    # Check if inside SSH function (5bao/9bao approved)
                     for fn in ast.walk(tree):
-                        if isinstance(fn, ast.FunctionDef) and fn.name == "_execute_ssh_5bao":
+                        if isinstance(fn, ast.FunctionDef) and fn.name in (
+                            "_execute_ssh_5bao", "_execute_ssh_9bao"
+                        ):
                             if fn.lineno <= node.lineno <= (fn.end_lineno or float("inf")):
                                 break
                     else:
                         pytest.fail(f"subprocess reference at line {node.lineno}")
+
+
+# ── 12. 9bao SSH canary (PR-4H) ──────────────────────────────────────────────
+
+
+class Test9baoSshCanary:
+    """9bao SSH canary must mirror 5bao safety: refuse 5bao/21bao,
+    dual-gated real reads, audit-safe dry-run, AST-verified subprocess
+    containment."""
+
+    def test_9bao_plan_has_ssh_transport(self):
+        plan = wac.build_collection_plan("9bao", dry_run=True)
+        assert plan["transport_type"] == "ssh"
+        assert plan["collector"] == "9bao_ssh_canary"
+        assert plan["node"] == "9bao"
+
+    def test_9bao_dry_run_returns_not_collected(self):
+        plan = wac.build_collection_plan("9bao", dry_run=True)
+        r = wac.collect_9bao_remote(plan, operator_approved_real_read=False)
+        assert r["collection_status"] == "not_collected"
+        fof = r["forbidden_operation_flags"]
+        for k, v in fof.items():
+            assert v is False, f"forbidden flag '{k}' is {v} on 9bao dry-run"
+
+    def test_9bao_real_mode_without_approval_skipped(self):
+        plan = wac.build_collection_plan("9bao", dry_run=False)
+        r = wac.collect_9bao_remote(plan, operator_approved_real_read=False)
+        assert r["collection_status"] == "skipped"
+        assert r["forbidden_operation_flags"]["ssh_attempted"] is False
+
+    def test_9bao_real_mode_with_approval_no_env_skipped(self):
+        env_save = os.environ.pop("WORKER_ATTEST_OPERATOR_APPROVED", None)
+        try:
+            plan = wac.build_collection_plan("9bao", dry_run=False)
+            r = wac.collect_9bao_remote(plan, operator_approved_real_read=True)
+            assert r["collection_status"] == "skipped"
+            assert r["forbidden_operation_flags"]["ssh_attempted"] is False
+        finally:
+            if env_save is not None:
+                os.environ["WORKER_ATTEST_OPERATOR_APPROVED"] = env_save
+
+    def test_9bao_rejects_5bao_node(self):
+        plan = wac.build_collection_plan("5bao", dry_run=True)
+        r = wac.collect_9bao_remote(plan, operator_approved_real_read=False)
+        assert r["collection_status"] == "error"
+        assert "not in 9bao" in r.get("error", "")
+
+    def test_9bao_rejects_21bao_node(self):
+        plan = wac.build_collection_plan("21bao", dry_run=True)
+        r = wac.collect_9bao_remote(plan, operator_approved_real_read=False)
+        assert r["collection_status"] == "error"
+        assert "not in 9bao" in r.get("error", "")
+
+    def test_9bao_rejects_local_exec_transport(self):
+        plan = wac.build_collection_plan("9bao", dry_run=True)
+        plan["transport_type"] = "local_exec"
+        r = wac.collect_9bao_remote(plan, operator_approved_real_read=False)
+        assert r["collection_status"] == "error"
+        assert "ssh" in r.get("error", "")
+
+    def test_9bao_dry_run_audit_safe(self):
+        plan = wac.build_collection_plan("9bao", dry_run=True)
+        r = wac.collect_9bao_remote(plan, operator_approved_real_read=False)
+        out = json.dumps(r)
+        for bad in (
+            "sk-ant-", "sk-proj-", "ghp_", "gho_", "glpat-", "xai-",
+            "AKIA", "BEGIN", "192.168.9.6", "vibeworker",
+            "/home/vibeworker", "opencode.env",
+        ):
+            assert bad not in out, f"9bao dry-run leaks '{bad}'"
+        assert r["receipt"]["redaction_status"]["no_secret_value"] is True
+        assert r["receipt"]["redaction_status"]["no_base_url_value"] is True
+        assert r["receipt"]["redaction_status"]["no_real_endpoint_url"] is True
+
+    def test_9bao_receipt_validates(self):
+        plan = wac.build_collection_plan("9bao", dry_run=True)
+        r = wac.collect_9bao_remote(plan, operator_approved_real_read=False)
+        from worker_attest_plan import validate_receipt
+        v = validate_receipt(r["receipt"])
+        assert v["valid"], f"9bao receipt invalid: {v.get('errors')}"
+
+    def test_9bao_ssh_host_is_9bao_not_5bao(self):
+        """PR-4H invariant: 9bao SSH must target 192.168.9.6, never 5bao's IP."""
+        assert wac._SSH_9BAO_HOST == "192.168.9.6"
+        assert wac._SSH_5BAO_HOST == "192.168.5.6"
+        # Both use the same shared key
+        assert wac._SSH_9BAO_KEY == wac._SSH_5BAO_KEY
+
+    def test_9bao_no_5bao_or_21bao_in_ssh_target(self):
+        """AST verify: 9bao SSH cmd must reference 9bao host only, never 5bao."""
+        import ast
+        tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+        # Find _execute_ssh_9bao function
+        ssh9_fn = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_execute_ssh_9bao":
+                ssh9_fn = node
+                break
+        assert ssh9_fn is not None, "_execute_ssh_9bao must exist"
+        # Get function source
+        fn_src = ast.get_source_segment(SCRIPT.read_text(encoding="utf-8"), ssh9_fn)
+        assert "_SSH_9BAO_HOST" in fn_src
+        assert "_SSH_5BAO_HOST" not in fn_src, "9bao SSH must not reference 5bao host"
+        assert "192.168.5.6" not in fn_src, "9bao SSH must not hardcode 5bao IP"
+        # 5bao SSH function check (mirror)
+        ssh5_fn = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_execute_ssh_5bao":
+                ssh5_fn = node
+                break
+        assert ssh5_fn is not None, "_execute_ssh_5bao must still exist"
+        fn5_src = ast.get_source_segment(SCRIPT.read_text(encoding="utf-8"), ssh5_fn)
+        assert "_SSH_5BAO_HOST" in fn5_src
+        assert "_SSH_9BAO_HOST" not in fn5_src, "5bao SSH must not reference 9bao host"
+        assert "192.168.9.6" not in fn5_src, "5bao SSH must not hardcode 9bao IP"
+
+    def test_9bao_remote_script_excludes_opencode_env(self):
+        """9bao remote script must not read opencode.env (only config.json/jsonc)."""
+        from worker_attest_collector import _9BAO_REMOTE_COLLECTOR_SCRIPT
+        # Allowed
+        assert "~/.config/opencode/config.json" in _9BAO_REMOTE_COLLECTOR_SCRIPT
+        # Forbidden
+        assert "opencode.env" not in _9BAO_REMOTE_COLLECTOR_SCRIPT
+        # No value-extraction
+        assert "os.environ[" not in _9BAO_REMOTE_COLLECTOR_SCRIPT
+        assert "os.environ.get" not in _9BAO_REMOTE_COLLECTOR_SCRIPT
