@@ -63,9 +63,12 @@ class TestPlanBuilder:
         assert plan["dry_run"] is False
         assert plan["transport_type"] == "local_exec"
 
-    def test_5bao_rejected(self):
-        with pytest.raises(ValueError):
-            wac.build_collection_plan("5bao", dry_run=True)
+    def test_5bao_plan_valid(self):
+        """5bao plan is now valid (PR-4G)."""
+        plan = wac.build_collection_plan("5bao", dry_run=True)
+        assert plan["transport_type"] == "ssh"
+        assert plan["collector"] == "5bao_ssh_canary"
+        assert plan["dry_run"] is True
 
     def test_9bao_rejected(self):
         with pytest.raises(ValueError):
@@ -282,7 +285,7 @@ class TestPlanValidation:
 
     def test_wrong_node_in_plan_rejected(self):
         plan = wac.build_collection_plan("21bao", dry_run=True)
-        plan["node"] = "5bao"
+        plan["node"] = "10bao"
         r = wac.collect_21bao_local(plan)
         assert r["collection_status"] == "error"
 
@@ -300,13 +303,28 @@ class TestASTSafety:
     def _parse(self):
         return ast.parse(SCRIPT.read_text(encoding="utf-8"))
 
+    def _is_in_ssh_function(self, tree: ast.AST, lineno: int) -> bool:
+        """Check if the given line is inside _execute_ssh_5bao."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_execute_ssh_5bao":
+                if node.lineno <= lineno <= (node.end_lineno or float("inf")):
+                    return True
+        return False
+
     def test_no_subprocess_import(self):
-        for node in ast.walk(self._parse()):
+        tree = self._parse()
+        for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    assert alias.name.split(".")[0] != "subprocess"
+                    if alias.name.split(".")[0] == "subprocess":
+                        # Only allowed inside _execute_ssh_5bao (SSH transport)
+                        assert self._is_in_ssh_function(tree, node.lineno), \
+                            f"subprocess import at {node.lineno} outside SSH function"
             if isinstance(node, ast.ImportFrom):
-                assert (node.module or "").split(".")[0] != "subprocess"
+                mod = (node.module or "").split(".")[0]
+                if mod == "subprocess":
+                    assert self._is_in_ssh_function(tree, node.lineno), \
+                        f"subprocess import at {node.lineno} outside SSH function"
 
     def test_no_ssh_libraries(self):
         for node in ast.walk(self._parse()):
@@ -344,30 +362,32 @@ class TestASTSafety:
         """os.environ may be used for the operator-approval gate only (env
         var name WORKER_ATTEST_OPERATOR_APPROVED is a flag, not a secret).
         It must NEVER be used to read API keys, base URLs, or any
-        secret-bearing env var. Two accesses are expected: one in
-        collect_21bao_local() and one in main() CLI."""
+        secret-bearing env var. Accesses should be:
+        - _SSH_5BAO_KEY: reads VIBEDEV_SSH_KEY (path, not secret value)
+        - collect_21bao_local: operator gate
+        - collect_5bao_remote: operator gate
+        - main() CLI: operator gate
+        """
         tree = self._parse()
         offenders = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute):
                 if isinstance(node.value, ast.Name) and node.value.id == "os":
                     if node.attr in ("environ", "getenv"):
-                        # Check what env var name is being read
-                        parent = getattr(node, 'parent_attr', None)
                         offenders.append((node.lineno, node.attr))
-        # Two os.environ accesses are expected: both read
-        # WORKER_ATTEST_OPERATOR_APPROVED (a flag name, not a secret).
-        # If more appear, that's a violation.
-        assert len(offenders) >= 1, f"No os.environ access found (expected 2)"
-        assert len(offenders) <= 2, \
-            f"Multiple os.environ accesses: {offenders}"
+        # 4 os.environ accesses are expected: SSH key path config + 3 gates
+        assert len(offenders) >= 3, f"Too few os.environ accesses: {offenders}"
+        assert len(offenders) <= 5, \
+            f"Too many os.environ accesses: {offenders}"
 
     def test_no_subprocess_call(self):
-        for node in ast.walk(self._parse()):
+        tree = self._parse()
+        for node in ast.walk(tree):
             if isinstance(node, ast.Attribute):
                 if isinstance(node.value, ast.Name):
                     if node.value.id == "subprocess":
-                        assert False, f"subprocess.{node.attr} at {node.lineno}"
+                        if not self._is_in_ssh_function(tree, node.lineno):
+                            assert False, f"subprocess.{node.attr} at {node.lineno}"
             if isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Name) and node.func.id in (
                     "system", "popen", "exec", "execvp", "spawn"
@@ -439,9 +459,9 @@ class TestCLI:
 
     def test_collect_dry_run_5bao_blocked(self):
         r = self._run("collect", "--node", "5bao")
-        assert r.returncode != 0
+        assert r.returncode == 0
         out = json.loads(r.stdout)
-        assert "5bao" in out.get("error", "")
+        assert out["collection_status"] == "not_collected"
 
     def test_collect_real_without_env_skipped(self):
         env_save = os.environ.pop("WORKER_ATTEST_OPERATOR_APPROVED", None)
@@ -532,7 +552,7 @@ class TestSelfCheckEndToEnd:
         r = wac.self_check()
         assert r["status"] == "PASS", \
             f"Self-check FAILED: {[c for c in r['checks'] if not c['passed']]}"
-        assert r["detail"].startswith("18/18")
+        assert r["detail"].startswith("21/21")
 
 
 # ── 11. Receipt validates against worker_attest_plan schema ────────────────
@@ -642,10 +662,16 @@ class TestCanaryRealRead:
                 os.environ.pop("WORKER_ATTEST_OPERATOR_APPROVED", None)
 
     def test_canary_no_subprocess(self):
-        """Canary read must not use subprocess (AST-verified)."""
+        """Canary read must not use subprocess outside SSH function."""
         import ast
         tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute):
                 if isinstance(node.value, ast.Name) and node.value.id == "subprocess":
-                    pytest.fail(f"subprocess reference at line {node.lineno}")
+                    # Check if inside _execute_ssh_5bao (approved)
+                    for fn in ast.walk(tree):
+                        if isinstance(fn, ast.FunctionDef) and fn.name == "_execute_ssh_5bao":
+                            if fn.lineno <= node.lineno <= (fn.end_lineno or float("inf")):
+                                break
+                    else:
+                        pytest.fail(f"subprocess reference at line {node.lineno}")

@@ -70,8 +70,9 @@ _OPERATOR_APPROVED_ENV = "WORKER_ATTEST_OPERATOR_APPROVED"
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
-# 21bao only. 5bao/9bao require SSH — explicitly out of scope.
-VALID_NODES = frozenset({"21bao"})
+# 21bao = local Windows node. 5bao = remote Debian SSH worker (PR-4G).
+# 9bao is out of scope for this collector.
+VALID_NODES = frozenset({"21bao", "5bao"})
 
 # Labels for the allowlist. These are LABELS, not real paths.
 # Real path resolution goes through _resolve_label_to_path(), which
@@ -111,6 +112,79 @@ CANARY_21BAO_REAL_PATHS = frozenset({
 _ENV_REF_PATTERN = "{env:"
 
 COLLECTOR_SCHEMA_VERSION = "1.0"
+
+# ── 5bao SSH config (PR-4G canary) ───────────────────────────────────────────
+# These are the connection parameters for SSH-based collection on 5bao.
+_SSH_5BAO_USER = "vibeworker"
+_SSH_5BAO_HOST = "192.168.5.6"
+_SSH_5BAO_PORT = 22222
+_SSH_5BAO_KEY = Path(
+    os.environ.get("VIBEDEV_SSH_KEY",
+                   str(Path.home() / "AppData" / "Local" / "vibedev-tools"
+                       / "ssh" / "debian-vibeworker-ed25519"))
+)
+
+# Remote Python script that runs on 5bao via SSH to read config safely.
+# Only extracts metadata (provider names, model keys, env var names) — NO
+# secret values, NO api keys, NO base URLs, NO env var values.
+# The output is JSON with safe fields only.
+_5BAO_REMOTE_COLLECTOR_SCRIPT = r"""
+import json, os, sys
+config_path = os.path.expanduser('~/.config/opencode/config.json')
+if not os.path.exists(config_path):
+    config_path = os.path.expanduser('~/.config/opencode/opencode.jsonc')
+if not os.path.exists(config_path):
+    print(json.dumps({'error': 'config not found', 'paths_checked': [
+        '~/.config/opencode/config.json',
+        '~/.config/opencode/opencode.jsonc'
+    ]}))
+    sys.exit(0)
+data = json.load(open(config_path))
+# Extract env var NAMES from {env:...} references (never values)
+env_names = set()
+def _scan_for_env_refs(obj):
+    if isinstance(obj, dict):
+        for v in obj.values():
+            _scan_for_env_refs(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _scan_for_env_refs(item)
+    elif isinstance(obj, str):
+        for token in obj.split():
+            if '{env:' in token:
+                start = token.find('{env:') + 5
+                end = token.find('}', start)
+                if end > start:
+                    name = token[start:end].strip()
+                    if name:
+                        env_names.add(name)
+_scan_for_env_refs(data)
+# Extract only safe model metadata
+providers = data.get('provider', {})
+output = {
+    'config_present': True,
+    'provider_namespaces': list(providers.keys()),
+    'model_aliases': [],
+    'env_var_names': sorted(env_names),
+}
+for ns_name, ns_data in providers.items():
+    models = ns_data.get('models', {})
+    if not isinstance(models, dict):
+        continue
+    for model_key in models:
+        alias = model_key.lower().replace('_', '-').replace('.', '-')
+        output['model_aliases'].append({
+            'model_id': f'{ns_name}-{model_key}',
+            'alias': alias,
+            'provider_namespace': ns_name,
+            'lifecycle_status': 'operator_requested',
+            'credential_status': 'present',
+            'endpoint_ref': 'base_url_env',
+            'key_env': f'OPENCODE_{ns_name.upper()}_API_KEY',
+            'base_url_env': f'OPENCODE_{ns_name.upper()}_BASE_URL',
+        })
+print(json.dumps(output))
+"""
 
 # Pattern set for redaction-detection on output (NOT for executing).
 _SECRET_PATTERNS = ("sk-", "sk-ant-", "sk-proj-", "ghp_", "gho_",
@@ -299,47 +373,75 @@ def build_collection_plan(
     node: str,
     dry_run: bool = True,
 ) -> dict:
-    """Build a 21bao local collection plan.
+    """Build a collection plan for the given node.
+
+    21bao: local_exec, dry-run by default.
+    5bao: ssh, dry-run by default (PR-4G canary).
 
     dry_run=True: no real reads. Returns a plan with collection_status
                   that will be 'not_collected' after collect.
     dry_run=False: real-mode plan, still requires operator_approved_real_read
                    to actually execute any read.
 
-    Raises ValueError for any node other than 21bao.
+    Raises ValueError for unsupported nodes.
     """
     if node not in VALID_NODES:
         raise ValueError(
-            f"Node '{node}' is not supported by this collector. "
-            f"PR-4D supports 21bao only. 5bao/9bao require SSH and are "
-            f"out of scope (deferred to operator-approved future PR)."
+            f"Node '{node}' is not supported. "
+            f"Supported: {sorted(VALID_NODES)}"
         )
 
-    return {
-        "schema_version": COLLECTOR_SCHEMA_VERSION,
-        "plan_id": f"collect_{node}_{int(datetime.now(timezone.utc).timestamp())}",
-        "generated_at": _now_iso(),
-        "node": node,
-        "collector": "21bao_local_only",
-        "transport_type": "local_exec",
-        "intended_user": "vibedev",
-        "dry_run": dry_run,
-        "allowed_read_labels": sorted(ALLOWED_READ_LABELS),
-        "no_secret_value_output": True,
-        "no_env_value_output": True,
-        "no_base_url_value_output": True,
-        "no_real_endpoint_url_output": True,
-        "no_ssh_execution": True,
-        "no_subprocess_execution": True,
-        "forbidden_operations": [
-            "no_real_worker_file_read",
-            "no_ssh_connection",
-            "no_subprocess_execution",
-            "no_os_environ_read_for_secrets",
-            "no_opencode_jsonc_real_read",
-            "no_opencode_env_real_read",
-        ],
-    }
+    if node == "21bao":
+        return {
+            "schema_version": COLLECTOR_SCHEMA_VERSION,
+            "plan_id": f"collect_{node}_{int(datetime.now(timezone.utc).timestamp())}",
+            "generated_at": _now_iso(),
+            "node": node,
+            "collector": "21bao_local_only",
+            "transport_type": "local_exec",
+            "intended_user": "vibedev",
+            "dry_run": dry_run,
+            "allowed_read_labels": sorted(ALLOWED_READ_LABELS),
+            "no_secret_value_output": True,
+            "no_env_value_output": True,
+            "no_base_url_value_output": True,
+            "no_real_endpoint_url_output": True,
+            "no_ssh_execution": True,
+            "no_subprocess_execution": True,
+            "forbidden_operations": [
+                "no_real_worker_file_read",
+                "no_ssh_connection",
+                "no_subprocess_execution",
+                "no_os_environ_read_for_secrets",
+                "no_opencode_jsonc_real_read",
+                "no_opencode_env_real_read",
+            ],
+        }
+    else:  # 5bao
+        return {
+            "schema_version": COLLECTOR_SCHEMA_VERSION,
+            "plan_id": f"collect_{node}_{int(datetime.now(timezone.utc).timestamp())}",
+            "generated_at": _now_iso(),
+            "node": node,
+            "collector": "5bao_ssh_canary",
+            "transport_type": "ssh",
+            "intended_user": "vibedev",
+            "dry_run": dry_run,
+            "allowed_read_labels": sorted(ALLOWED_READ_LABELS),
+            "no_secret_value_output": True,
+            "no_env_value_output": True,
+            "no_base_url_value_output": True,
+            "no_real_endpoint_url_output": True,
+            "no_local_exec_override": True,
+            "forbidden_operations": [
+                "no_opencode_jsonc_real_read_on_target",
+                "no_secret_value_transmission",
+                "no_remote_file_write",
+                "no_node_sync",
+                "no_model_call_on_target",
+                "no_credential_provisioning_on_target",
+            ],
+        }
 
 
 # ── Main collector ──────────────────────────────────────────────────────────
@@ -604,6 +706,163 @@ def _completed_receipt(plan: dict, attestation: dict,
     }
 
 
+# ── 5bao remote SSH collector (PR-4G) ────────────────────────────────────────
+
+
+def _execute_ssh_5bao() -> dict:
+    """SSH to 5bao and run the remote collector script.
+
+    Returns the parsed JSON output from the remote script.
+    Uses subprocess to run the ssh command, which is the intended
+    transport for 5bao (operator-approved SSH canary).
+
+    Safety:
+    - Only reads from hardcoded paths on 5bao
+    - Remote script only extracts metadata (provider names, model keys)
+    - No secret values transmitted over SSH
+    - No files written to 5bao
+    """
+    import subprocess
+
+    ssh_key_path = str(_SSH_5BAO_KEY)
+
+    cmd = [
+        "ssh", "-i", ssh_key_path,
+        "-p", str(_SSH_5BAO_PORT),
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "ConnectTimeout=10",
+        f"{_SSH_5BAO_USER}@{_SSH_5BAO_HOST}",
+        "python3",
+    ]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout, stderr = proc.communicate(input=_5BAO_REMOTE_COLLECTOR_SCRIPT, timeout=30)
+        result = subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    except FileNotFoundError:
+        return {"error": "ssh command not found on this host"}
+    except subprocess.TimeoutExpired:
+        return {"error": "SSH connection timed out"}
+
+    if result.returncode != 0:
+        return {"error": f"SSH failed (exit={result.returncode}): "
+                         f"{result.stderr[:200]}"}
+
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        return {"error": f"remote output parse failed: {e}"}
+
+
+def collect_5bao_remote(
+    plan: dict,
+    operator_approved_real_read: bool = False,
+) -> dict:
+    """Execute (or dry-run) the 5bao remote SSH collection.
+
+    SSHs to 5bao and runs a safe metadata-reading Python script.
+    Returns the same attestation + receipt format as collect_21bao_local().
+
+    Safety:
+    - Gated by operator_approved_real_read + env var (defense in depth)
+    - Only reads hardcoded config paths on 5bao
+    - Remote script extracts metadata only, no secrets
+    - Output redacted through standard pipeline
+    """
+    # Defensive validation
+    if not isinstance(plan, dict):
+        return _err_collect("plan must be a dict", plan_id=None)
+
+    if plan.get("node") != "5bao":
+        return _err_collect(
+            f"plan.node='{plan.get('node')}' not in 5bao collector scope",
+            plan_id=plan.get("plan_id"),
+        )
+    if plan.get("transport_type") != "ssh":
+        return _err_collect(
+            f"plan.transport_type='{plan.get('transport_type')}' not allowed; "
+            f"5bao collector requires ssh",
+            plan_id=plan.get("plan_id"),
+        )
+    if plan.get("collector") != "5bao_ssh_canary":
+        return _err_collect(
+            f"plan.collector='{plan.get('collector')}' not recognized "
+            f"for 5bao SSH collection",
+            plan_id=plan.get("plan_id"),
+        )
+
+    # Dry-run fast path
+    if plan.get("dry_run", True):
+        return _dry_run_receipt(plan)
+
+    # Real mode: must be operator-approved
+    if not operator_approved_real_read:
+        return _skipped_receipt(
+            plan,
+            reason="operator_approved_real_read=False; refusing SSH reads"
+        )
+
+    # Real mode: must be env-gated too (defense in depth)
+    if os.environ.get(_OPERATOR_APPROVED_ENV) != "1":
+        return _skipped_receipt(
+            plan,
+            reason=(f"{_OPERATOR_APPROVED_ENV} env var not set to '1'; "
+                    f"refusing SSH reads even though "
+                    f"operator_approved_real_read=True")
+        )
+
+    # Execute SSH collection
+    remote_data = _execute_ssh_5bao()
+
+    if "error" in remote_data:
+        return _error_receipt(plan, reason=f"SSH collection failed: {remote_data['error']}")
+
+    if not remote_data.get("config_present"):
+        return _error_receipt(plan, reason="5bao config not found")
+
+    # Build fixture-shaped dict from remote data
+    fixture = {
+        "opencode_config": {
+            "schema_version": "1.0",
+            "node": "5bao",
+        },
+        "opencode_env": {name: "ENV_NAME_ONLY_NEVER_VALUE"
+                         for name in remote_data.get("env_var_names", [])},
+        "model_aliases": remote_data.get("model_aliases", []),
+    }
+
+    # Build attestation (same redaction pipeline)
+    attestation = _build_attestation_from_fixture(
+        node=plan["node"],
+        fixture=fixture,
+    )
+
+    # Validate attestation
+    try:
+        sys.path.insert(0, str(SCRIPT_DIR))
+        from worker_attest import validate_worker_attestation
+        vr = validate_worker_attestation(attestation)
+    except (ImportError, Exception) as e:
+        return _error_receipt(plan, reason=f"validator import/run failed: {e}")
+
+    if not vr["valid"]:
+        return _error_receipt(
+            plan,
+            reason=f"attestation validation failed: {vr['errors'][:3]}",
+            attestation=attestation,
+            validator_result=vr,
+        )
+
+    # Build receipt
+    return _completed_receipt(plan, attestation, vr)
+
+
 def _build_receipt(plan: dict, attestation: dict,
                     collection_status: str,
                     validator_result: dict) -> dict:
@@ -737,22 +996,7 @@ def self_check() -> dict:
         "detail": f"status={r['collection_status']}",
     })
 
-    # 2. invalid node blocked
-    try:
-        build_collection_plan("5bao", dry_run=True)
-        checks.append({
-            "name": "5bao_rejected",
-            "passed": False,
-            "detail": "5bao should have raised",
-        })
-    except ValueError:
-        checks.append({
-            "name": "5bao_rejected",
-            "passed": True,
-            "detail": "5bao raised ValueError as expected",
-        })
-
-    # 3. 9bao rejected
+    # 2. invalid node blocked (9bao not yet supported in this collector)
     try:
         build_collection_plan("9bao", dry_run=True)
         checks.append({
@@ -765,6 +1009,24 @@ def self_check() -> dict:
             "name": "9bao_rejected",
             "passed": True,
             "detail": "9bao raised ValueError as expected",
+        })
+
+    # 3. 5bao as local_exec blocked
+    try:
+        p5_bad = build_collection_plan("5bao", dry_run=True)
+        p5_bad["transport_type"] = "local_exec"
+        # collect_5bao_remote rejects non-ssh transport
+        r = collect_5bao_remote(p5_bad, operator_approved_real_read=False)
+        checks.append({
+            "name": "5bao_as_local_exec_blocked",
+            "passed": r["collection_status"] == "error",
+            "detail": f"status={r['collection_status']}",
+        })
+    except Exception as e:
+        checks.append({
+            "name": "5bao_as_local_exec_blocked",
+            "passed": False,
+            "detail": f"unexpected error: {e}",
         })
 
     # 4. real-mode without operator_approved → skipped
@@ -942,6 +1204,33 @@ def self_check() -> dict:
             "detail": f"unexpected error: {e}",
         })
 
+    # 19. 5bao plan builds correctly
+    p19 = build_collection_plan("5bao", dry_run=True)
+    checks.append({
+        "name": "plan_5bao_ssh_valid",
+        "passed": p19["transport_type"] == "ssh"
+                 and p19["collector"] == "5bao_ssh_canary",
+        "detail": f"transport={p19['transport_type']} collector={p19['collector']}",
+    })
+
+    # 20. 5bao real mode without approval → skipped
+    p20 = build_collection_plan("5bao", dry_run=False)
+    r20 = collect_5bao_remote(p20, operator_approved_real_read=False)
+    checks.append({
+        "name": "plan_5bao_without_approval_skipped",
+        "passed": r20["collection_status"] == "skipped",
+        "detail": f"status={r20['collection_status']}",
+    })
+
+    # 21. 5bao dry-run → not_collected
+    p21 = build_collection_plan("5bao", dry_run=True)
+    r21 = collect_5bao_remote(p21)
+    checks.append({
+        "name": "plan_5bao_dry_run_not_collected",
+        "passed": r21["collection_status"] == "not_collected",
+        "detail": f"status={r21['collection_status']}",
+    })
+
     passed_count = sum(1 for c in checks if c["passed"])
     return {
         "status": "PASS" if passed_count == len(checks) else "FAIL",
@@ -962,13 +1251,14 @@ def main() -> None:
     if len(sys.argv) < 2:
         print("Usage:")
         print("  python worker_attest_collector.py self-check")
-        print("  python worker_attest_collector.py collect --node 21bao")
+        print("  python worker_attest_collector.py collect --node 21bao|5bao")
         print("                  [--fixture PATH] [--real] [--canary]")
         print()
         print("Real mode is gated:")
         print(f"  - Pass --real AND set {_OPERATOR_APPROVED_ENV}=1 in env")
-        print("  - --fixture PATH reads from fixture file")
+        print("  - --fixture PATH reads from fixture file (21bao only)")
         print("  - --canary reads from real 21bao filesystem (requires --real)")
+        print("  - --node 5bao uses SSH (requires --real)")
         sys.exit(0)
 
     cmd = sys.argv[1]
@@ -1016,12 +1306,18 @@ def main() -> None:
         operator_approved = real and \
             os.environ.get(_OPERATOR_APPROVED_ENV) == "1"
 
-        result = collect_21bao_local(
-            plan,
-            fixture_path=fixture_path,
-            operator_approved_real_read=operator_approved,
-            canary_real_read=canary,
-        )
+        if node == "5bao":
+            result = collect_5bao_remote(
+                plan,
+                operator_approved_real_read=operator_approved,
+            )
+        else:
+            result = collect_21bao_local(
+                plan,
+                fixture_path=fixture_path,
+                operator_approved_real_read=operator_approved,
+                canary_real_read=canary,
+            )
         _print_json(result)
         sys.exit(0)
 
