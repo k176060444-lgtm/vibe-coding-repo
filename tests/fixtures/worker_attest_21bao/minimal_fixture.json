@@ -1,0 +1,23 @@
+{
+  "opencode_config": {
+    "schema_version": "1.0",
+    "node": "21bao",
+    "provider_namespaces": ["opencode-go"]
+  },
+  "opencode_env": {
+    "OPENCODE_GO_API_KEY": "ENV_NAME_ONLY_NEVER_VALUE",
+    "OPENCODE_GO_BASE_URL": "ENV_NAME_ONLY_NEVER_VALUE"
+  },
+  "model_aliases": [
+    {
+      "model_id": "opencode-go-mimo-v2-5",
+      "alias": "opencode-mimo",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "operator_requested",
+      "credential_status": "present",
+      "endpoint_ref": "base_url_env",
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
+    }
+  ]
+}

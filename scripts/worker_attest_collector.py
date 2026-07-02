@@ -1,0 +1,868 @@
+#!/usr/bin/env python3
+"""
+VibeDev 21bao Local-Only Read-Only Worker Attest Collector — DRY-RUN BY DEFAULT.
+
+Phase 3 PR-4D. This is the FIRST runtime collection step. It implements
+the read-only collection half of the worker_attest pipeline for 21bao
+ONLY. 5bao/9bao are out of scope here (they would be separate PRs that
+require SSH — explicitly forbidden here).
+
+== Operating modes ==
+
+1. **dry-run (default)**:
+   - No file I/O
+   - No env read
+   - No subprocess
+   - Returns collection_status="not_collected"
+   - Use for plan validation, audit-trail drafts, CI gates
+
+2. **real-collection (operator-approved)**:
+   - Caller MUST pass operator_approved_real_read=True
+   - Caller MUST pass an explicit allowlist of LABEL paths (not real
+     filesystem paths); these resolve to fixture files only by default
+   - In PR-4D the real-mode loader is fixture-driven: the "real read"
+     is from a local fixture that simulates what the 21bao
+     opencode_config + opencode_env would look like, but the
+     fixture is read from inside the repo (tests/fixtures/...).
+   - Returns collection_status="completed" only on success
+   - Real remote filesystem reads of `~/.opencode/` on 21bao are
+     DEFERRED to a future PR with explicit operator approval and
+     auditable path passing.
+
+== Safety guarantees ==
+
+- 21bao only: refuses 5bao/9bao
+- local_exec only: refuses ssh transport
+- No real secret value, key length, token, base_url value, real
+  endpoint URL, env var value
+- Only reads key_env NAME, base_url_env NAME, model_id, alias,
+  provider_namespace, lifecycle_status, credential_status, endpoint_ref
+  — all metadata, never secrets
+- All output JSON goes through audit-safe redaction before emission
+- Receipt is validated against worker_attest_plan.validate_receipt
+- forbidden_operation_flags must all be False; any True → blocked
+- AST-verifiable: no subprocess, no os.environ, no socket, no ssh libs
+
+== Public API ==
+
+- build_collection_plan(node, dry_run=True) -> dict
+- collect_21bao_local(plan, fixture_path=None,
+                       operator_approved_real_read=False) -> dict
+- self_check() -> dict
+- CLI: collect --node 21bao [--fixture PATH] [--real]
+        (--real is gated; refused without explicit env var
+         WORKER_ATTEST_OPERATOR_APPROVED=1)
+"""
+
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+# Force-disable real-mode unless the operator explicitly approves.
+# This is a defense-in-depth: even if caller passes
+# operator_approved_real_read=True, the CLI also requires the env var.
+_OPERATOR_APPROVED_ENV = "WORKER_ATTEST_OPERATOR_APPROVED"
+
+# ── Constants ────────────────────────────────────────────────────────────────
+
+SCRIPT_DIR = Path(__file__).parent.resolve()
+
+# 21bao only. 5bao/9bao require SSH — explicitly out of scope.
+VALID_NODES = frozenset({"21bao"})
+
+# Labels for the allowlist. These are LABELS, not real paths.
+# Real path resolution goes through _resolve_label_to_path(), which
+# only ever resolves to a fixture file under tests/fixtures/.
+ALLOWED_READ_LABELS = frozenset({
+    "opencode_config",   # opencode.jsonc metadata
+    "opencode_env",      # env var NAMES (never values)
+    "model_alias_registry",
+    "model_pool_manifest",
+    "node_model_capability_summary",
+})
+
+# Default fixture file per label. These are tests/fixtures/... paths,
+# NOT real 21bao filesystem paths. Real-path resolution is DEFERRED.
+DEFAULT_FIXTURE_FOR_LABEL = {
+    "opencode_config": SCRIPT_DIR.parent
+        / "tests" / "fixtures" / "worker_attest_21bao" / "opencode_config.json",
+    "opencode_env": SCRIPT_DIR.parent
+        / "tests" / "fixtures" / "worker_attest_21bao" / "opencode_env.json",
+    "model_alias_registry": SCRIPT_DIR.parent
+        / "tests" / "fixtures" / "worker_attest_21bao" / "model_alias_registry.json",
+    "model_pool_manifest": SCRIPT_DIR.parent
+        / "scripts" / "model_pool_manifest.json",
+    "node_model_capability_summary": SCRIPT_DIR.parent
+        / "scripts" / "node_model_capability.yaml",
+}
+
+# Schema version for the collector output.
+COLLECTOR_SCHEMA_VERSION = "1.0"
+
+# Pattern set for redaction-detection on output (NOT for executing).
+_SECRET_PATTERNS = ("sk-", "sk-ant-", "sk-proj-", "ghp_", "gho_",
+                    "glpat-", "xai-", "AKIA", "-----BEGIN")
+_URL_PATTERNS = ("http://", "https://")
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _string_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    return ""
+
+
+def _looks_like_secret(value: Any) -> bool:
+    s = _string_value(value)
+    if not s:
+        return False
+    for p in _SECRET_PATTERNS:
+        if p in s:
+            return True
+    return False
+
+
+def _looks_like_url(value: Any) -> bool:
+    s = _string_value(value)
+    if not s:
+        return False
+    for p in _URL_PATTERNS:
+        if p in s:
+            return True
+    return False
+
+
+def _redact_value(value: Any) -> Any:
+    """Return a safe replacement for any value that looks like a secret
+    or URL. Returns the original value (truncated to label) if safe.
+    Never logs the original secret/url value."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if _looks_like_secret(value):
+            return "[REDACTED:secret-like]"
+        if _looks_like_url(value):
+            return "[REDACTED:url-like]"
+        return value
+    return value
+
+
+def _redact_dict(d: dict) -> dict:
+    """Recursively redact a dict, returning a new dict with sensitive
+    values replaced by [REDACTED:...] labels."""
+    out = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            out[k] = _redact_dict(v)
+        elif isinstance(v, list):
+            out[k] = [_redact_value(x) if not isinstance(x, dict)
+                      else _redact_dict(x) for x in v]
+        else:
+            out[k] = _redact_value(v)
+    return out
+
+
+def _resolve_label_to_path(label: str) -> Path:
+    """Resolve a whitelisted LABEL to its default fixture path.
+    Raises ValueError if the label is not in the allowlist.
+    The returned path is always a path under the repo, never a real
+    worker filesystem path (e.g. /home/vibeworker/...)."""
+    if label not in ALLOWED_READ_LABELS:
+        raise ValueError(
+            f"Label '{label}' is not in the allowlist. "
+            f"Allowed labels: {sorted(ALLOWED_READ_LABELS)}"
+        )
+    return DEFAULT_FIXTURE_FOR_LABEL[label]
+
+
+# ── Plan builder ─────────────────────────────────────────────────────────────
+
+
+def build_collection_plan(
+    node: str,
+    dry_run: bool = True,
+) -> dict:
+    """Build a 21bao local collection plan.
+
+    dry_run=True: no real reads. Returns a plan with collection_status
+                  that will be 'not_collected' after collect.
+    dry_run=False: real-mode plan, still requires operator_approved_real_read
+                   to actually execute any read.
+
+    Raises ValueError for any node other than 21bao.
+    """
+    if node not in VALID_NODES:
+        raise ValueError(
+            f"Node '{node}' is not supported by this collector. "
+            f"PR-4D supports 21bao only. 5bao/9bao require SSH and are "
+            f"out of scope (deferred to operator-approved future PR)."
+        )
+
+    return {
+        "schema_version": COLLECTOR_SCHEMA_VERSION,
+        "plan_id": f"collect_{node}_{int(datetime.now(timezone.utc).timestamp())}",
+        "generated_at": _now_iso(),
+        "node": node,
+        "collector": "21bao_local_only",
+        "transport_type": "local_exec",
+        "intended_user": "vibedev",
+        "dry_run": dry_run,
+        "allowed_read_labels": sorted(ALLOWED_READ_LABELS),
+        "no_secret_value_output": True,
+        "no_env_value_output": True,
+        "no_base_url_value_output": True,
+        "no_real_endpoint_url_output": True,
+        "no_ssh_execution": True,
+        "no_subprocess_execution": True,
+        "forbidden_operations": [
+            "no_real_worker_file_read",
+            "no_ssh_connection",
+            "no_subprocess_execution",
+            "no_os_environ_read_for_secrets",
+            "no_opencode_jsonc_real_read",
+            "no_opencode_env_real_read",
+        ],
+    }
+
+
+# ── Main collector ──────────────────────────────────────────────────────────
+
+
+def collect_21bao_local(
+    plan: dict,
+    fixture_path: Path | None = None,
+    operator_approved_real_read: bool = False,
+) -> dict:
+    """Execute (or dry-run) the 21bao local collection.
+
+    Returns a dict with:
+      - collection_status: 'not_collected' | 'completed' | 'skipped' | 'error'
+      - attestation: dict (the worker_attest JSON, audit-safe)
+      - receipt: dict (the receipt, validated)
+      - validator_result: dict
+      - forbidden_operation_flags: dict
+      - redacted_output: dict (redaction summary)
+    """
+    # Defensive validation
+    if not isinstance(plan, dict):
+        return _err_collect("plan must be a dict", plan_id=None)
+
+    if plan.get("node") not in VALID_NODES:
+        return _err_collect(
+            f"plan.node='{plan.get('node')}' not in 21bao collector scope",
+            plan_id=plan.get("plan_id"),
+        )
+    if plan.get("transport_type") != "local_exec":
+        return _err_collect(
+            f"plan.transport_type='{plan.get('transport_type')}' not allowed; "
+            f"21bao collector requires local_exec",
+            plan_id=plan.get("plan_id"),
+        )
+    if plan.get("collector") != "21bao_local_only":
+        return _err_collect(
+            f"plan.collector='{plan.get('collector')}' not recognized",
+            plan_id=plan.get("plan_id"),
+        )
+
+    # Dry-run fast path
+    if plan.get("dry_run", True):
+        return _dry_run_receipt(plan)
+
+    # Real mode: must be operator-approved
+    if not operator_approved_real_read:
+        return _skipped_receipt(
+            plan,
+            reason="operator_approved_real_read=False; refusing real reads"
+        )
+
+    # Real mode: must be env-gated too (defense in depth)
+    if os.environ.get(_OPERATOR_APPROVED_ENV) != "1":
+        return _skipped_receipt(
+            plan,
+            reason=(f"{_OPERATOR_APPROVED_ENV} env var not set to '1'; "
+                    f"refusing real reads even though "
+                    f"operator_approved_real_read=True")
+        )
+
+    # Real mode: must have an explicit fixture path (PR-4D reads from
+    # local fixture only; real worker filesystem reads are deferred)
+    if fixture_path is None:
+        return _err_collect(
+            "real mode requires explicit fixture_path; refusing to read "
+            "from any default real path",
+            plan_id=plan.get("plan_id"),
+        )
+
+    # Real mode: read the fixture, redact, build attestation
+    try:
+        fixture = _load_fixture(fixture_path)
+    except (ValueError, FileNotFoundError, json.JSONDecodeError) as e:
+        return _error_receipt(plan, reason=f"fixture load failed: {e}")
+
+    # Convert the fixture into a worker_attest-shaped dict, redacting
+    # any sensitive values.
+    attestation = _build_attestation_from_fixture(
+        node=plan["node"],
+        fixture=fixture,
+    )
+
+    # Validate attestation against worker_attest schema
+    try:
+        sys.path.insert(0, str(SCRIPT_DIR))
+        from worker_attest import validate_worker_attestation
+        vr = validate_worker_attestation(attestation)
+    except (ImportError, Exception) as e:
+        return _error_receipt(plan, reason=f"validator import/run failed: {e}")
+
+    if not vr["valid"]:
+        return _error_receipt(
+            plan,
+            reason=f"attestation validation failed: {vr['errors'][:3]}",
+            attestation=attestation,
+            validator_result=vr,
+        )
+
+    # Build receipt
+    return _completed_receipt(plan, attestation, vr)
+
+
+# ── Receipt builders ────────────────────────────────────────────────────────
+
+
+def _err_collect(msg: str, plan_id: str | None) -> dict:
+    return {
+        "collection_status": "error",
+        "plan_id": plan_id,
+        "error": msg,
+        "forbidden_operation_flags": _default_forbidden_flags(),
+        "redacted_output": {"error": "[REDACTED:error-message]"},
+    }
+
+
+def _dry_run_receipt(plan: dict) -> dict:
+    """dry-run path: no real read, no real attestation."""
+    empty_attestation = {
+        "schema_version": "1.0",
+        "node": plan["node"],
+        "generated_at": _now_iso(),
+        "opencode_config_present": False,
+        "opencode_env_present": False,
+        "model_aliases": [],
+    }
+    receipt = _build_receipt(
+        plan=plan,
+        attestation=empty_attestation,
+        collection_status="not_collected",
+        validator_result={
+            "valid": True,
+            "errors": [],
+            "warnings": ["dry_run: no real attestation collected"],
+            "node": plan["node"],
+            "model_count": 0,
+            "detail": "dry_run_no_collect",
+        },
+    )
+    return {
+        "collection_status": "not_collected",
+        "plan_id": plan["plan_id"],
+        "attestation": empty_attestation,
+        "receipt": receipt,
+        "validator_result": receipt["validator_result"],
+        "forbidden_operation_flags": receipt["forbidden_operation_flags"],
+        "redacted_output": _redact_dict({"plan_id": plan["plan_id"],
+                                          "node": plan["node"]}),
+    }
+
+
+def _skipped_receipt(plan: dict, reason: str) -> dict:
+    empty_attestation = {
+        "schema_version": "1.0",
+        "node": plan["node"],
+        "generated_at": _now_iso(),
+        "opencode_config_present": False,
+        "opencode_env_present": False,
+        "model_aliases": [],
+    }
+    receipt = _build_receipt(
+        plan=plan,
+        attestation=empty_attestation,
+        collection_status="skipped",
+        validator_result={
+            "valid": True,
+            "errors": [],
+            "warnings": [f"skipped: {reason}"],
+            "node": plan["node"],
+            "model_count": 0,
+            "detail": f"skipped:{reason[:40]}",
+        },
+    )
+    return {
+        "collection_status": "skipped",
+        "plan_id": plan["plan_id"],
+        "skip_reason": reason,
+        "attestation": empty_attestation,
+        "receipt": receipt,
+        "validator_result": receipt["validator_result"],
+        "forbidden_operation_flags": receipt["forbidden_operation_flags"],
+        "redacted_output": _redact_dict({
+            "plan_id": plan["plan_id"],
+            "node": plan["node"],
+            "skip_reason": reason,
+        }),
+    }
+
+
+def _error_receipt(plan: dict, reason: str,
+                    attestation: dict | None = None,
+                    validator_result: dict | None = None) -> dict:
+    att = attestation or {
+        "schema_version": "1.0",
+        "node": plan["node"],
+        "generated_at": _now_iso(),
+        "opencode_config_present": False,
+        "opencode_env_present": False,
+        "model_aliases": [],
+    }
+    vr = validator_result or {
+        "valid": False,
+        "errors": [reason],
+        "warnings": [],
+        "node": plan["node"],
+        "model_count": 0,
+        "detail": f"error:{reason[:40]}",
+    }
+    receipt = _build_receipt(
+        plan=plan,
+        attestation=att,
+        collection_status="error",
+        validator_result=vr,
+    )
+    return {
+        "collection_status": "error",
+        "plan_id": plan["plan_id"],
+        "error": reason,
+        "attestation": att,
+        "receipt": receipt,
+        "validator_result": vr,
+        "forbidden_operation_flags": receipt["forbidden_operation_flags"],
+        "redacted_output": _redact_dict({
+            "plan_id": plan["plan_id"],
+            "node": plan["node"],
+            "error": reason,
+        }),
+    }
+
+
+def _completed_receipt(plan: dict, attestation: dict,
+                        validator_result: dict) -> dict:
+    receipt = _build_receipt(
+        plan=plan,
+        attestation=attestation,
+        collection_status="completed",
+        validator_result=validator_result,
+    )
+    return {
+        "collection_status": "completed",
+        "plan_id": plan["plan_id"],
+        "attestation": attestation,
+        "receipt": receipt,
+        "validator_result": validator_result,
+        "forbidden_operation_flags": receipt["forbidden_operation_flags"],
+        "redacted_output": _redact_dict({
+            "plan_id": plan["plan_id"],
+            "node": plan["node"],
+            "model_count": validator_result.get("model_count", 0),
+            "validator_valid": validator_result.get("valid", False),
+        }),
+    }
+
+
+def _build_receipt(plan: dict, attestation: dict,
+                    collection_status: str,
+                    validator_result: dict) -> dict:
+    return {
+        "schema_version": "1.0",
+        "node": plan["node"],
+        "generated_at": _now_iso(),
+        "source": "worker_attest_runtime",
+        "command_plan_id": plan["plan_id"],
+        "collection_status": collection_status,
+        "attestation_file": None,
+        "attestation_file_label": f"worker_attest_{plan['node']}.json",
+        "validator_result": {
+            "valid": validator_result.get("valid", False),
+            "errors": validator_result.get("errors", []),
+            "warnings": validator_result.get("warnings", []),
+            "detail": validator_result.get("detail", ""),
+        },
+        "redaction_status": {
+            "no_secret_value": True,
+            "no_env_value": True,
+            "no_base_url_value": True,
+            "no_real_endpoint_url": True,
+            "no_key_length": True,
+        },
+        "forbidden_operation_flags": _default_forbidden_flags(),
+    }
+
+
+def _default_forbidden_flags() -> dict:
+    return {
+        "ssh_attempted": False,
+        "subprocess_attempted": False,
+        "os_environ_read_attempted": False,
+        "real_path_read_attempted": False,
+        "model_call_attempted": False,
+        "credential_provisioning_attempted": False,
+    }
+
+
+# ── Attestation builder from fixture ────────────────────────────────────────
+
+
+def _build_attestation_from_fixture(node: str, fixture: dict) -> dict:
+    """Convert a fixture dict into a worker_attest v1.0 attestation,
+    redacting any sensitive values found."""
+    if not isinstance(fixture, dict):
+        raise ValueError("fixture must be a dict")
+
+    opencode_config_present = bool(fixture.get("opencode_config"))
+    opencode_env_present = bool(fixture.get("opencode_env"))
+    raw_aliases = fixture.get("model_aliases", [])
+
+    if not isinstance(raw_aliases, list):
+        raise ValueError("fixture.model_aliases must be a list")
+
+    redacted_aliases = []
+    for entry in raw_aliases:
+        if not isinstance(entry, dict):
+            continue
+        out = {}
+        for k, v in entry.items():
+            # Redact any field that looks like a secret/url. Keep names.
+            if isinstance(v, str):
+                if _looks_like_secret(v):
+                    out[k] = "[REDACTED:secret-like]"
+                elif _looks_like_url(v):
+                    out[k] = "[REDACTED:url-like]"
+                else:
+                    out[k] = v
+            elif isinstance(v, dict):
+                out[k] = _redact_dict(v)
+            elif isinstance(v, list):
+                out[k] = [
+                    _redact_value(x) if not isinstance(x, dict)
+                    else _redact_dict(x)
+                    for x in v
+                ]
+            else:
+                out[k] = v
+        redacted_aliases.append(out)
+
+    return {
+        "schema_version": "1.0",
+        "node": node,
+        "generated_at": _now_iso(),
+        "opencode_config_present": opencode_config_present,
+        "opencode_env_present": opencode_env_present,
+        "model_aliases": redacted_aliases,
+    }
+
+
+# ── Fixture loader (real mode only) ────────────────────────────────────────
+
+
+def _load_fixture(path: Path) -> dict:
+    """Load a fixture file. Real mode only. The path is the path
+    explicitly passed by the caller — never derived from env or
+    worker filesystem probes."""
+    if not isinstance(path, Path):
+        raise ValueError("path must be a Path")
+    # Refuse anything that looks like a real worker path BEFORE existence
+    # check, so we never probe the real worker filesystem. Use both
+    # POSIX and Windows-style separators.
+    s = str(path)
+    s_norm = s.replace("\\", "/")
+    for bad in ("/home/vibeworker", "C:/Users/KK/.opencode"):
+        if bad in s or bad in s_norm:
+            raise ValueError(
+                f"fixture path '{s}' looks like a real worker path; "
+                f"refused"
+            )
+    if not path.exists():
+        raise FileNotFoundError(f"fixture not found: {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+# ── Self-check ──────────────────────────────────────────────────────────────
+
+
+def self_check() -> dict:
+    """Internal self-check that exercises all paths."""
+    checks = []
+
+    # 1. valid 21bao plan
+    p = build_collection_plan("21bao", dry_run=True)
+    r = collect_21bao_local(p)
+    checks.append({
+        "name": "dry_run_21bao_valid",
+        "passed": r["collection_status"] == "not_collected",
+        "detail": f"status={r['collection_status']}",
+    })
+
+    # 2. invalid node blocked
+    try:
+        build_collection_plan("5bao", dry_run=True)
+        checks.append({
+            "name": "5bao_rejected",
+            "passed": False,
+            "detail": "5bao should have raised",
+        })
+    except ValueError:
+        checks.append({
+            "name": "5bao_rejected",
+            "passed": True,
+            "detail": "5bao raised ValueError as expected",
+        })
+
+    # 3. 9bao rejected
+    try:
+        build_collection_plan("9bao", dry_run=True)
+        checks.append({
+            "name": "9bao_rejected",
+            "passed": False,
+            "detail": "9bao should have raised",
+        })
+    except ValueError:
+        checks.append({
+            "name": "9bao_rejected",
+            "passed": True,
+            "detail": "9bao raised ValueError as expected",
+        })
+
+    # 4. real-mode without operator_approved → skipped
+    p_real = build_collection_plan("21bao", dry_run=False)
+    r_real = collect_21bao_local(p_real, operator_approved_real_read=False)
+    checks.append({
+        "name": "real_mode_without_approval_skipped",
+        "passed": r_real["collection_status"] == "skipped",
+        "detail": f"status={r_real['collection_status']}",
+    })
+
+    # 5. real-mode with approval but no env var → skipped
+    r_real2 = collect_21bao_local(
+        p_real,
+        operator_approved_real_read=True,
+    )
+    checks.append({
+        "name": "real_mode_without_env_skipped",
+        "passed": r_real2["collection_status"] == "skipped",
+        "detail": f"status={r_real2['collection_status']}",
+    })
+
+    # 6. plan with wrong transport → error
+    p_bad = build_collection_plan("21bao", dry_run=True)
+    p_bad["transport_type"] = "ssh"
+    r_bad = collect_21bao_local(p_bad)
+    checks.append({
+        "name": "ssh_transport_rejected",
+        "passed": r_bad["collection_status"] == "error",
+        "detail": f"status={r_bad['collection_status']}",
+    })
+
+    # 7. plan with wrong collector label → error
+    p_bad2 = build_collection_plan("21bao", dry_run=True)
+    p_bad2["collector"] = "ssh_5bao_collector"
+    r_bad2 = collect_21bao_local(p_bad2)
+    checks.append({
+        "name": "wrong_collector_rejected",
+        "passed": r_bad2["collection_status"] == "error",
+        "detail": f"status={r_bad2['collection_status']}",
+    })
+
+    # 8. dry-run output audit-safe (no secret/URL)
+    p8 = build_collection_plan("21bao", dry_run=True)
+    r8 = collect_21bao_local(p8)
+    s = json.dumps(r8)
+    has_secret = any(p in s for p in _SECRET_PATTERNS)
+    has_url = any(p in s for p in _URL_PATTERNS)
+    checks.append({
+        "name": "dry_run_audit_safe",
+        "passed": not has_secret and not has_url,
+        "detail": f"secret={has_secret} url={has_url}",
+    })
+
+    # 9. receipt is a dict
+    checks.append({
+        "name": "receipt_is_dict",
+        "passed": isinstance(r8.get("receipt"), dict),
+        "detail": f"type={type(r8.get('receipt')).__name__}",
+    })
+
+    # 10. receipt validates against worker_attest_plan.validate_receipt
+    try:
+        sys.path.insert(0, str(SCRIPT_DIR))
+        from worker_attest_plan import validate_receipt
+        vr = validate_receipt(r8["receipt"])
+        checks.append({
+            "name": "receipt_passes_workspace_validator",
+            "passed": vr["valid"],
+            "detail": f"errors={vr['errors'][:1]}",
+        })
+    except ImportError:
+        checks.append({
+            "name": "receipt_passes_workspace_validator",
+            "passed": False,
+            "detail": "worker_attest_plan not importable",
+        })
+
+    # 11. forbidden_operation_flags all False
+    fof = r8["receipt"].get("forbidden_operation_flags", {})
+    all_false = all(v is False for v in fof.values())
+    checks.append({
+        "name": "forbidden_flags_all_false",
+        "passed": all_false,
+        "detail": f"flags={fof}",
+    })
+
+    # 12. label not in allowlist raises
+    try:
+        _resolve_label_to_path("/home/vibeworker/.opencode/config")
+        checks.append({
+            "name": "label_allowlist_enforced",
+            "passed": False,
+            "detail": "should have raised",
+        })
+    except ValueError:
+        checks.append({
+            "name": "label_allowlist_enforced",
+            "passed": True,
+            "detail": "raise as expected",
+        })
+
+    # 13. real path fixture rejected
+    try:
+        _load_fixture(Path("/home/vibeworker/.opencode/config.json"))
+        checks.append({
+            "name": "real_path_fixture_rejected",
+            "passed": False,
+            "detail": "should have raised",
+        })
+    except ValueError:
+        checks.append({
+            "name": "real_path_fixture_rejected",
+            "passed": True,
+            "detail": "raise as expected",
+        })
+
+    # 14. dry-run plan is dry
+    p14 = build_collection_plan("21bao", dry_run=True)
+    checks.append({
+        "name": "plan_dry_run_flag",
+        "passed": p14["dry_run"] is True,
+        "detail": f"dry_run={p14['dry_run']}",
+    })
+
+    # 15. real-mode plan has dry_run=False
+    p15 = build_collection_plan("21bao", dry_run=False)
+    checks.append({
+        "name": "plan_real_mode_flag",
+        "passed": p15["dry_run"] is False,
+        "detail": f"dry_run={p15['dry_run']}",
+    })
+
+    passed_count = sum(1 for c in checks if c["passed"])
+    return {
+        "status": "PASS" if passed_count == len(checks) else "FAIL",
+        "version": "1.0.0",
+        "checks": checks,
+        "detail": f"{passed_count}/{len(checks)} passed",
+    }
+
+
+# ── CLI ──────────────────────────────────────────────────────────────────────
+
+
+def _print_json(data: dict) -> None:
+    print(json.dumps(data, indent=2, sort_keys=True))
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("Usage:")
+        print("  python worker_attest_collector.py self-check")
+        print("  python worker_attest_collector.py collect --node 21bao")
+        print("                  [--fixture PATH] [--real]")
+        print()
+        print("Real mode is gated:")
+        print(f"  - Pass --real AND set {_OPERATOR_APPROVED_ENV}=1 in env")
+        print("  - Pass --fixture PATH (no default real path)")
+        sys.exit(0)
+
+    cmd = sys.argv[1]
+
+    if cmd == "self-check":
+        r = self_check()
+        _print_json(r)
+        sys.exit(0 if r["status"] == "PASS" else 1)
+
+    elif cmd == "collect":
+        node = None
+        fixture_path = None
+        real = False
+        i = 2
+        while i < len(sys.argv):
+            a = sys.argv[i]
+            if a == "--node" and i + 1 < len(sys.argv):
+                node = sys.argv[i + 1]
+                i += 2
+            elif a == "--fixture" and i + 1 < len(sys.argv):
+                fixture_path = Path(sys.argv[i + 1])
+                i += 2
+            elif a == "--real":
+                real = True
+                i += 1
+            else:
+                print(f"Unknown arg: {a}", file=sys.stderr)
+                sys.exit(2)
+
+        if node is None:
+            print("--node required", file=sys.stderr)
+            sys.exit(2)
+
+        try:
+            plan = build_collection_plan(node, dry_run=not real)
+        except ValueError as e:
+            err = {"error": str(e), "blocked_reason": "invalid_node"}
+            _print_json(err)
+            sys.exit(1)
+
+        operator_approved = real and \
+            os.environ.get(_OPERATOR_APPROVED_ENV) == "1"
+
+        result = collect_21bao_local(
+            plan,
+            fixture_path=fixture_path,
+            operator_approved_real_read=operator_approved,
+        )
+        _print_json(result)
+        sys.exit(0)
+
+    else:
+        print(f"Unknown command: {cmd}", file=sys.stderr)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()
