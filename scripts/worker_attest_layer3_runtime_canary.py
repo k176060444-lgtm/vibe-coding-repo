@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
-G-L3R — 21bao Local-Only Sanctioned Live Runtime Receipt Canary.
+G-L3R — 21bao Local-Only Sanctioned Canary Receipt (Schema+Gate Validation).
 
 Implements the 21bao local-exec/control node canary for G-L3R.
+**This module does NOT verify live runtime state.** Evidence is sourced
+exclusively from repo-local files (model_pool.yaml, node_model_capability.yaml,
+and worker_attest fixture JSON). See scope note in collect_21bao_all_receipts
+for the complete caveat.
 
 === SCOPE ===
 - Local-only: reads model_pool.yaml, node_model_capability.yaml,
@@ -16,7 +20,8 @@ Implements the 21bao local-exec/control node canary for G-L3R.
 === GATES ===
 Double-gate: operator_approval_id + node scope=21bao + collector_mode.
 Authorized = operator_approval_id is non-empty AND node="21bao"
-AND collector_mode in {real_read, dry_run, ssh_canary}.
+AND collector_mode in {real_read, dry_run} ONLY.
+ssh_canary is explicitly rejected (21bao is local-exec/control, not SSH).
 Unauthorized → G_L3R_NOT_COLLECTED (advisory), no evidence collected.
 
 === RECEIPT SCHEMA ===
@@ -102,7 +107,8 @@ def check_operator_gate(
     The gate passes only if:
       - operator_approval_id is a non-empty string
       - node is "21bao"
-      - collector_mode is one of {real_read, dry_run, ssh_canary}
+      - collector_mode is one of {real_read, dry_run} ONLY.
+        ssh_canary is explicitly rejected (21bao is local-exec/control).
 
     Returns: dict with passed (bool), reason (str), collection_status (str)
     """
@@ -119,7 +125,12 @@ def check_operator_gate(
             f"(only {TARGET_NODE} accepted)"
         )
 
-    if not collector_mode or collector_mode not in _l3rp.VALID_COLLECTOR_MODES:
+    if collector_mode == "ssh_canary":
+        errors.append(
+            "21bao local-only canary rejects collector_mode='ssh_canary' "
+            "(no SSH capability; use real_read or dry_run)"
+        )
+    elif not collector_mode or collector_mode not in _l3rp.VALID_COLLECTOR_MODES:
         errors.append(
             f"collector_mode must be one of "
             f"{sorted(_l3rp.VALID_COLLECTOR_MODES)}"
@@ -176,10 +187,10 @@ def collect_21bao_receipt_for_model(
     operator_approval_id: str,
     collector_mode: str,
 ) -> dict:
-    """Build a single G-L3R live receipt for one model on 21bao.
+    """Build a single G-L3R 21bao local canary receipt for one model.
 
     Reads local repo data (model_pool.yaml, node_model_capability.yaml,
-    fixtures) to determine the "observed" runtime state. NEVER accesses
+    fixtures) to determine the "observed" state. NEVER accesses
     remote workers, NEVER calls model APIs.
 
     Returns a dict with all 18 required receipt fields.
@@ -263,13 +274,17 @@ def collect_21bao_all_receipts(
     nmc_path: Path = NMC_PATH,
     fixture_dir: Path = FIXTURE_DIR,
 ) -> dict:
-    """Collect live runtime receipts for ALL models on 21bao.
+    """Collect local canary receipts for all models on 21bao.
 
     This is the main collection function. It:
     1. Checks operator gate (must pass)
     2. Reads local model_pool.yaml + node_model_capability.yaml
     3. Reads fixture evidence
     4. Produces one receipt per model
+
+    Evidence is sourced from repo-local YAML/fixture files only.
+    No live runtime state is verified (no SSH, no model calls, no
+    runtime_visible/environment probing on the node).
 
     Returns a dict with:
       - gate_result (gate validation)
@@ -555,7 +570,7 @@ def self_check() -> dict:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="worker_attest_layer3_runtime_canary.py",
-        description="G-L3R 21bao local-only runtime receipt canary.",
+        description="G-L3R 21bao local-only canary receipt (schema+gate validation).",
     )
     parser.add_argument(
         "cmd",
@@ -572,8 +587,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--collector-mode",
         default="real_read",
-        choices=["real_read", "dry_run", "ssh_canary"],
-        help="Collector mode (default: real_read)",
+        choices=["real_read", "dry_run"],
+        help="Collector mode (default: real_read). ssh_canary rejected (21bao local-only).",
     )
     return parser.parse_args(argv)
 

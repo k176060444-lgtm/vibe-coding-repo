@@ -1,11 +1,11 @@
-"""
-Tests for scripts/worker_attest_layer3_runtime_canary.py — G-L3R 21bao local
-runtime receipt canary.
+"""Tests for scripts/worker_attest_layer3_runtime_canary.py — G-L3R 21bao local
+canary receipt (schema+gate validation).
 
 Coverage:
 - Unauthorized → NOT_COLLECTED advisory
 - Authorized receipts collected (18 fields each)
 - 21bao scope correct; 5bao/9bao rejected
+- ssh_canary rejected for 21bao local-only
 - Active model mismatch → BLOCKED
 - Missing authorized receipt → BLOCKED / worker_attest_missing
 - DEU evidence → PASS_WITH_WARN (no promotion)
@@ -81,9 +81,10 @@ class TestOperatorGate:
         g = l3rc.check_operator_gate("op-001", "21bao", "dry_run")
         assert g["passed"]
 
-    def test_ssh_canary_accepted(self):
+    def test_ssh_canary_rejected_for_21bao_local_only(self):
         g = l3rc.check_operator_gate("op-001", "21bao", "ssh_canary")
-        assert g["passed"]
+        assert not g["passed"]
+        assert "ssh_canary" in g["reason"].lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
