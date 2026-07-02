@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "node": "21bao",
+  "generated_at": "2026-07-02T03:00:00Z",
+  "source": "worker_attest_runtime",
+  "command_plan_id": "plan_21bao_test_old_schema",
+  "collection_status": "not_collected",
+  "attestation_file": null,
+  "validator_result": {
+    "valid": null,
+    "errors": [],
+    "warnings": [],
+    "detail": "not_validated_yet"
+  },
+  "redaction_status": {
+    "no_secret_value": true,
+    "no_env_value": true,
+    "no_base_url_value": true,
+    "no_real_endpoint_url": true,
+    "no_key_length": true
+  },
+  "forbidden_operation_flags": {
+    "ssh_attempted": false,
+    "subprocess_attempted": false,
+    "os_environ_read_attempted": false,
+    "real_path_read_attempted": false,
+    "model_call_attempted": false,
+    "credential_provisioning_attempted": false
+  }
+}
