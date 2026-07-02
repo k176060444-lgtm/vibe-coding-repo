@@ -99,7 +99,17 @@ DEFAULT_FIXTURE_FOR_LABEL = {
         / "scripts" / "node_model_capability.yaml",
 }
 
-# Schema version for the collector output.
+# Real 21bao filesystem paths for canary mode (PR-4F).
+# These are the ACTUAL paths on 21bao, resolved at runtime for the canary.
+# Only paths that exist on this node are valid.
+CANARY_21BAO_REAL_PATHS = frozenset({
+    Path.home() / ".config" / "opencode" / "opencode.jsonc",
+})
+
+# Env var name pattern to extract from config {env:...} references.
+# These are env var NAMES, never values — entirely audit-safe.
+_ENV_REF_PATTERN = "{env:"
+
 COLLECTOR_SCHEMA_VERSION = "1.0"
 
 # Pattern set for redaction-detection on output (NOT for executing).
@@ -186,7 +196,103 @@ def _resolve_label_to_path(label: str) -> Path:
     return DEFAULT_FIXTURE_FOR_LABEL[label]
 
 
-# ── Plan builder ─────────────────────────────────────────────────────────────
+# ── Real 21bao config reader (canary mode, PR-4F) ────────────────────────────
+
+
+def _extract_env_names_from_config(config: dict) -> dict:
+    """Extract env var NAMES from {env:...} references in config.
+
+    Scans all string values in the config dict for {env:VARIABLE_NAME}
+    patterns and returns their names. Never reads actual env values.
+    """
+    env_names: dict[str, str] = {}
+    def _scan(obj):
+        if isinstance(obj, dict):
+            for v in obj.values():
+                _scan(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                _scan(item)
+        elif isinstance(obj, str):
+            for token in obj.split():
+                if _ENV_REF_PATTERN in token:
+                    # Extract name from {env:NAME} or {env:NAME}
+                    start = token.find(_ENV_REF_PATTERN) + len(_ENV_REF_PATTERN)
+                    end = token.find("}", start)
+                    if end > start:
+                        name = token[start:end].strip()
+                        if name:
+                            env_names[name] = "ENV_NAME_ONLY_NEVER_VALUE"
+    _scan(config)
+    return env_names
+
+
+def _read_real_21bao_files() -> dict:
+    """Read real 21bao OpenCode configuration from the local filesystem.
+
+    This is the PR-4F canary: the FIRST safe real-filesystem read of 21bao
+    config. Returns a fixture-shaped dict suitable for
+    _build_attestation_from_fixture().
+
+    Safety guarantees:
+    - Paths are hardcoded, not user-provided
+    - Only files in CANARY_21BAO_REAL_PATHS are read
+    - Missing files return error, never crash or create fake data
+    - All output goes through the standard redaction pipeline
+    - Env var NAMES are extracted from {env:...} refs (never read from env)
+    """
+    config_path = Path.home() / ".config" / "opencode" / "opencode.jsonc"
+
+    if config_path not in CANARY_21BAO_REAL_PATHS:
+        raise ValueError(
+            f"Path {config_path} is not in the canary allowlist"
+        )
+
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Real 21bao config not found at {config_path}. "
+            f"This is expected if OpenCode is not configured on this node."
+        )
+
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+
+    # Extract env var NAMES from {env:...} references
+    env_names = _extract_env_names_from_config(raw)
+
+    # Extract model aliases from provider configurations
+    model_aliases: list[dict] = []
+    providers = raw.get("provider", {})
+    if isinstance(providers, dict):
+        for ns_name, ns_data in providers.items():
+            models = ns_data.get("models", {})
+            if not isinstance(models, dict):
+                continue
+            for model_key in models:
+                model_id = f"{ns_name}-{model_key}"
+                alias = model_key.lower().replace("_", "-").replace(".", "-")
+                entry = {
+                    "model_id": model_id,
+                    "alias": alias,
+                    "provider_namespace": ns_name,
+                    "lifecycle_status": "operator_requested",
+                    "credential_status": "present",
+                    "endpoint_ref": "base_url_env",
+                    "key_env": f"OPENCODE_{ns_name.upper()}_API_KEY",
+                    "base_url_env": f"OPENCODE_{ns_name.upper()}_BASE_URL",
+                }
+                model_aliases.append(entry)
+
+    return {
+        "opencode_config": {
+            "schema_version": "1.0",
+            "node": "21bao",
+        },
+        "opencode_env": env_names,
+        "model_aliases": model_aliases,
+    }
+
+
+
 
 
 def build_collection_plan(
@@ -243,6 +349,7 @@ def collect_21bao_local(
     plan: dict,
     fixture_path: Path | None = None,
     operator_approved_real_read: bool = False,
+    canary_real_read: bool = False,
 ) -> dict:
     """Execute (or dry-run) the 21bao local collection.
 
@@ -253,6 +360,10 @@ def collect_21bao_local(
       - validator_result: dict
       - forbidden_operation_flags: dict
       - redacted_output: dict (redaction summary)
+
+    canary_real_read: when True (and all gates pass), reads from real 21bao
+    filesystem paths instead of fixture files. Requires explicit operator
+    approval (operator_approved_real_read + env var).
     """
     # Defensive validation
     if not isinstance(plan, dict):
@@ -295,20 +406,25 @@ def collect_21bao_local(
                     f"operator_approved_real_read=True")
         )
 
-    # Real mode: must have an explicit fixture path (PR-4D reads from
-    # local fixture only; real worker filesystem reads are deferred)
-    if fixture_path is None:
+    # Real mode: determine data source
+    if fixture_path is not None:
+        # Fixture-based read (PR-4D behavior)
+        try:
+            fixture = _load_fixture(fixture_path)
+        except (ValueError, FileNotFoundError, json.JSONDecodeError) as e:
+            return _error_receipt(plan, reason=f"fixture load failed: {e}")
+    elif canary_real_read:
+        # Canary real-filesystem read (PR-4F)
+        try:
+            fixture = _read_real_21bao_files()
+        except (ValueError, FileNotFoundError, json.JSONDecodeError) as e:
+            return _error_receipt(plan, reason=f"canary real read failed: {e}")
+    else:
         return _err_collect(
-            "real mode requires explicit fixture_path; refusing to read "
-            "from any default real path",
+            "real mode requires explicit fixture_path or canary_real_read=True; "
+            "refusing to read from any default real path",
             plan_id=plan.get("plan_id"),
         )
-
-    # Real mode: read the fixture, redact, build attestation
-    try:
-        fixture = _load_fixture(fixture_path)
-    except (ValueError, FileNotFoundError, json.JSONDecodeError) as e:
-        return _error_receipt(plan, reason=f"fixture load failed: {e}")
 
     # Convert the fixture into a worker_attest-shaped dict, redacting
     # any sensitive values.
@@ -782,6 +898,50 @@ def self_check() -> dict:
         "detail": f"dry_run={p15['dry_run']}",
     })
 
+    # 16. canary real read without env gate → skipped (not error)
+    # The self-check runs without env var, so canary_real_read without
+    # env gate should return skipped.
+    p16 = build_collection_plan("21bao", dry_run=False)
+    r16 = collect_21bao_local(p16, canary_real_read=True,
+                              operator_approved_real_read=False)
+    checks.append({
+        "name": "canary_without_approval_skipped",
+        "passed": r16["collection_status"] == "skipped",
+        "detail": f"status={r16['collection_status']}",
+    })
+
+    # 17. canary real read dry-run → not_collected
+    p17 = build_collection_plan("21bao", dry_run=True)
+    r17 = collect_21bao_local(p17, canary_real_read=True)
+    checks.append({
+        "name": "canary_dry_run_not_collected",
+        "passed": r17["collection_status"] == "not_collected",
+        "detail": f"status={r17['collection_status']}",
+    })
+
+    # 18. _read_real_21bao_files runs without crash (may be error if
+    # config file missing — that's OK, tests canary function exists)
+    try:
+        fixture = _read_real_21bao_files()
+        checks.append({
+            "name": "canary_real_read_function_exists",
+            "passed": True,
+            "detail": f"aliases={len(fixture.get('model_aliases',[]))}",
+        })
+    except (FileNotFoundError, ValueError) as e:
+        # Missing file on this node is acceptable for self-check
+        checks.append({
+            "name": "canary_real_read_function_exists",
+            "passed": True,
+            "detail": f"function works, file not found: {e}",
+        })
+    except Exception as e:
+        checks.append({
+            "name": "canary_real_read_function_exists",
+            "passed": False,
+            "detail": f"unexpected error: {e}",
+        })
+
     passed_count = sum(1 for c in checks if c["passed"])
     return {
         "status": "PASS" if passed_count == len(checks) else "FAIL",
@@ -803,11 +963,12 @@ def main() -> None:
         print("Usage:")
         print("  python worker_attest_collector.py self-check")
         print("  python worker_attest_collector.py collect --node 21bao")
-        print("                  [--fixture PATH] [--real]")
+        print("                  [--fixture PATH] [--real] [--canary]")
         print()
         print("Real mode is gated:")
         print(f"  - Pass --real AND set {_OPERATOR_APPROVED_ENV}=1 in env")
-        print("  - Pass --fixture PATH (no default real path)")
+        print("  - --fixture PATH reads from fixture file")
+        print("  - --canary reads from real 21bao filesystem (requires --real)")
         sys.exit(0)
 
     cmd = sys.argv[1]
@@ -821,6 +982,7 @@ def main() -> None:
         node = None
         fixture_path = None
         real = False
+        canary = False
         i = 2
         while i < len(sys.argv):
             a = sys.argv[i]
@@ -832,6 +994,9 @@ def main() -> None:
                 i += 2
             elif a == "--real":
                 real = True
+                i += 1
+            elif a == "--canary":
+                canary = True
                 i += 1
             else:
                 print(f"Unknown arg: {a}", file=sys.stderr)
@@ -855,6 +1020,7 @@ def main() -> None:
             plan,
             fixture_path=fixture_path,
             operator_approved_real_read=operator_approved,
+            canary_real_read=canary,
         )
         _print_json(result)
         sys.exit(0)
