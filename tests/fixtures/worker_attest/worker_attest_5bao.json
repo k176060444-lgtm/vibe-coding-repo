@@ -3,13 +3,23 @@
   "node": "5bao",
   "generated_at": "2026-07-02T01:30:00Z",
   "opencode_config_present": true,
-  "opencode_env_present": false,
+  "opencode_env_present": true,
   "model_aliases": [
     {
       "model_id": "opencode-go-mimo-v2-5",
       "alias": "opencode-mimo",
       "provider_namespace": "opencode-go",
       "lifecycle_status": "operator_requested",
+      "credential_status": "present",
+      "endpoint_ref": "base_url_env",
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
+    },
+    {
+      "model_id": "opencode-go-mimo-v2-5-pro",
+      "alias": "opencode-mimo-pro",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "enabled_assigned",
       "credential_status": "present",
       "endpoint_ref": "base_url_env",
       "key_env": "OPENCODE_GO_API_KEY",
@@ -26,14 +36,64 @@
       "base_url_env": "OPENCODE_GO_BASE_URL"
     },
     {
-      "model_id": "anthropic-claude-sonnet-4",
-      "alias": "claude",
-      "provider_namespace": "anthropic",
-      "lifecycle_status": "declared_enabled_unassigned",
+      "model_id": "opencode-go-deepseek-v4-pro",
+      "alias": "opencode-ds4pro",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "enabled_assigned",
       "credential_status": "present",
       "endpoint_ref": "base_url_env",
-      "key_env": "OPENCODE_ANTHROPIC_API_KEY",
-      "base_url_env": "OPENCODE_ANTHROPIC_BASE_URL"
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
+    },
+    {
+      "model_id": "opencode-go-glm-5-1",
+      "alias": "opencode-glm51",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "enabled_assigned",
+      "credential_status": "present",
+      "endpoint_ref": "base_url_env",
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
+    },
+    {
+      "model_id": "opencode-go-glm-5-2",
+      "alias": "opencode-glm52",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "enabled_assigned",
+      "credential_status": "present",
+      "endpoint_ref": "base_url_env",
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
+    },
+    {
+      "model_id": "opencode-go-kimi-k2-6",
+      "alias": "opencode-kimi-k26",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "enabled_assigned",
+      "credential_status": "present",
+      "endpoint_ref": "base_url_env",
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
+    },
+    {
+      "model_id": "opencode-go-qwen3-7-max",
+      "alias": "opencode-qwen3-max",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "enabled_assigned",
+      "credential_status": "present",
+      "endpoint_ref": "base_url_env",
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
+    },
+    {
+      "model_id": "opencode-go-qwen3-7-plus",
+      "alias": "opencode-qwen3-plus",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "enabled_assigned",
+      "credential_status": "present",
+      "endpoint_ref": "base_url_env",
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
     }
   ]
 }
