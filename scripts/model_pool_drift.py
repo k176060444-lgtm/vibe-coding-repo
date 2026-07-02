@@ -395,15 +395,236 @@ def self_check() -> dict:
     }
 
 
+# ── Layer 2: worker_attest fixture adapter ──────────────────────────────────
+
+FIXTURES_DIR = SCRIPT_DIR.parent / "tests" / "fixtures" / "worker_attest"
+LAYER2_BLOCK = frozenset({
+    "worker_attest_missing", "worker_node_mismatch", "worker_schema_mismatch",
+    "worker_provider_namespace_mismatch", "worker_lifecycle_status_mismatch",
+})
+LAYER2_WARN = frozenset({
+    "worker_alias_missing", "worker_extra_alias", "worker_credential_status_mismatch",
+    "worker_endpoint_ref_mismatch", "worker_attestation_invalid",
+})
+
+
+def _load_fixture(fixture_path: Path) -> dict:
+    if not fixture_path.exists():
+        raise ValueError(f"Fixture not found: {fixture_path}")
+    try:
+        data = json.loads(fixture_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Fixture JSON parse error: {e}")
+    if "node" not in data:
+        raise ValueError("Fixture missing 'node' field")
+    if "model_aliases" not in data:
+        raise ValueError("Fixture missing 'model_aliases' field")
+    return data
+
+
+def detect_drift_layer2(
+    fixture_path: Path | None = None,
+    node: str | None = None,
+    pool: dict | None = None,
+    nmc: dict | None = None,
+) -> dict:
+    """Local-only drift Layer 2: compare worker_attest fixture vs pool vs matrix.
+
+    No SSH, no real worker access, no env read. Pure local fixture comparison.
+    """
+    # ── Resolve fixture path ──
+    if fixture_path is None:
+        if node is None:
+            return _layer2_err("No fixture path or node specified")
+        fixture_path = FIXTURES_DIR / f"worker_attest_{node}.json"
+
+    # ── Load fixture ──
+    try:
+        fixture = _load_fixture(fixture_path)
+    except ValueError as e:
+        return _layer2_err(str(e))
+
+    # ── Validate fixture schema ──
+    try:
+        from worker_attest import validate_worker_attestation
+        vr = validate_worker_attestation(fixture)
+        if not vr["valid"]:
+            return {
+                "drift_detected": True, "drift_count": 1, "warn_count": 0,
+                "drift_categories": ["worker_attestation_invalid"],
+                "warn_categories": [],
+                "details": [{"category": "worker_attestation_invalid", "severity": "BLOCK",
+                             "detail": f"Fixture invalid: {'; '.join(vr['errors'][:3])}"}],
+                "warnings": vr.get("warnings", []), "layer": 2,
+                "node": fixture.get("node"), "fixture_path": str(fixture_path),
+                "model_count": {}, "blocked_reason": "worker_attestation_invalid",
+            }
+    except ImportError:
+        return _layer2_err("worker_attest module not available for validation")
+
+    # ── Load pool and NMC ──
+    if pool is None:
+        try:
+            pool = _load_yaml(POOL_PATH)
+        except ValueError as e:
+            return _layer2_err(f"Cannot load pool: {e}")
+    if nmc is None:
+        try:
+            nmc = _load_yaml(NMC_PATH)
+        except ValueError as e:
+            return _layer2_err(f"Cannot load NMC: {e}")
+
+    node_name = fixture.get("node", "")
+    pool_models = {m["id"]: m for m in pool.get("models", [])}
+    matrix_by_node = {}
+    for n, ndata in nmc.get("nodes", {}).items():
+        matrix_by_node[n] = {e["model_id"]: e for e in ndata.get("matrix", [])}
+    matrix = matrix_by_node.get(node_name, {})
+    aliases = fixture.get("model_aliases", [])
+    fixture_by_id = {a["model_id"]: a for a in aliases}
+
+    drift_cats = []
+    warn_cats = []
+    details = []
+    details_warn = []
+
+    # ── Check node match ──
+    if node_name not in matrix_by_node:
+        drift_cats.append("worker_node_mismatch")
+        details.append({"category": "worker_node_mismatch", "severity": "BLOCK",
+                        "node": node_name,
+                        "detail": f"Fixture node '{node_name}' not in NMC matrix"})
+
+    # ── alias missing (matrix has model not in fixture) ──
+    for mid in matrix:
+        if mid not in fixture_by_id:
+            ls = pool_models.get(mid, {}).get("lifecycle_status", "")
+            if ls == "declared_enabled_unassigned":
+                continue
+            warn_cats.append("worker_alias_missing")
+            details_warn.append({"category": "worker_alias_missing", "severity": "WARN",
+                                 "model_id": mid, "node": node_name,
+                                 "detail": f"Matrix has '{mid}' but fixture does not"})
+
+    # ── extra alias (fixture has model not in pool/matrix) ──
+    for aid in fixture_by_id:
+        if aid not in pool_models:
+            warn_cats.append("worker_extra_alias")
+            details_warn.append({"category": "worker_extra_alias", "severity": "WARN",
+                                 "model_id": aid, "node": node_name,
+                                 "detail": f"Fixture has '{aid}' but not in pool"})
+        elif aid not in matrix:
+            warn_cats.append("worker_extra_alias")
+            details_warn.append({"category": "worker_extra_alias", "severity": "WARN",
+                                 "model_id": aid, "node": node_name,
+                                 "detail": f"Fixture has '{aid}' but not in matrix"})
+
+    # ── field-by-field comparison ──
+    for mid in fixture_by_id:
+        fe = fixture_by_id[mid]
+        if mid not in pool_models or mid not in matrix:
+            continue
+        pe = pool_models[mid]
+
+        # provider_namespace
+        f_ns = fe.get("provider_namespace", "")
+        p_ns = pe.get("provider_namespace", "")
+        if f_ns and p_ns and f_ns != p_ns:
+            drift_cats.append("worker_provider_namespace_mismatch")
+            details.append({"category": "worker_provider_namespace_mismatch",
+                            "severity": "BLOCK", "model_id": mid, "node": node_name,
+                            "detail": f"provider_namespace mismatch: fixture='{f_ns}' pool='{p_ns}'"})
+
+        # lifecycle_status
+        f_ls = fe.get("lifecycle_status", "")
+        p_ls = pe.get("lifecycle_status", "")
+        if f_ls and p_ls and f_ls != p_ls:
+            if p_ls == "declared_enabled_unassigned":
+                warn_cats.append("worker_lifecycle_status_mismatch")
+                details_warn.append({"category": "worker_lifecycle_status_mismatch",
+                                     "severity": "WARN", "model_id": mid, "node": node_name,
+                                     "detail": f"lifecycle_status: fixture='{f_ls}' pool='{p_ls}' (DEU, fixture may be stale)"})
+            else:
+                drift_cats.append("worker_lifecycle_status_mismatch")
+                details.append({"category": "worker_lifecycle_status_mismatch",
+                                "severity": "BLOCK", "model_id": mid, "node": node_name,
+                                "detail": f"lifecycle_status: fixture='{f_ls}' pool='{p_ls}'"})
+
+        # credential_status
+        f_cs = fe.get("credential_status", "")
+        p_cs = pe.get("credential_status", "")
+        if f_cs and p_cs and f_cs != p_cs:
+            warn_cats.append("worker_credential_status_mismatch")
+            details_warn.append({"category": "worker_credential_status_mismatch",
+                                 "severity": "WARN", "model_id": mid, "node": node_name,
+                                 "detail": f"credential_status: fixture='{f_cs}' pool='{p_cs}'"})
+
+        # endpoint_ref
+        f_er = fe.get("endpoint_ref", "")
+        p_er = pe.get("endpoint_ref", "")
+        if f_er and p_er and f_er != p_er:
+            warn_cats.append("worker_endpoint_ref_mismatch")
+            details_warn.append({"category": "worker_endpoint_ref_mismatch",
+                                 "severity": "WARN", "model_id": mid, "node": node_name,
+                                 "detail": f"endpoint_ref: fixture='{f_er}' pool='{p_er}'"})
+
+    drift_count = len(drift_cats)
+    warn_count = len(warn_cats)
+    return {
+        "drift_detected": drift_count > 0,
+        "drift_count": drift_count,
+        "warn_count": warn_count,
+        "drift_categories": sorted(set(drift_cats)),
+        "warn_categories": sorted(set(warn_cats)),
+        "details": details,
+        "warnings": details_warn,
+        "layer": 2,
+        "node": node_name,
+        "fixture_path": str(fixture_path),
+        "model_count": {"pool": len(pool_models), "matrix": len(matrix), "fixture": len(aliases)},
+        "blocked_reason": None if drift_count == 0 else f"Layer 2 drift: {drift_count} BLOCK(s) in {sorted(set(drift_cats))}",
+    }
+
+
+def _layer2_err(msg: str) -> dict:
+    return {"drift_detected": True, "drift_count": 1, "warn_count": 0,
+            "drift_categories": ["worker_attest_missing"], "warn_categories": [],
+            "details": [{"category": "worker_attest_missing", "severity": "BLOCK", "detail": msg}],
+            "warnings": [], "layer": 2, "node": None, "fixture_path": None,
+            "model_count": {}, "blocked_reason": f"worker_attest_missing: {msg}"}
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--self-check":
         result = self_check()
         print(json.dumps(result, indent=2))
         sys.exit(0 if result["status"] == "PASS" else 1)
     elif len(sys.argv) > 1 and sys.argv[1] in ("detect", "diff"):
-        report = detect_drift_layer1()
+        # Layer 1 only unless --layer2 specified
+        if "--layer2" in sys.argv:
+            fixture_path = None
+            node = None
+            for i, a in enumerate(sys.argv):
+                if a == "--fixture" and i + 1 < len(sys.argv):
+                    fixture_path = Path(sys.argv[i + 1])
+                elif a == "--node" and i + 1 < len(sys.argv):
+                    node = sys.argv[i + 1]
+            report = detect_drift_layer2(fixture_path=fixture_path, node=node)
+        else:
+            report = detect_drift_layer1()
         print(json.dumps(report, indent=2))
-        sys.exit(0 if not report["drift_detected"] else 1)
+        sys.exit(0 if not report.get("drift_detected", True) else 1)
+    elif len(sys.argv) > 1 and sys.argv[1] in ("layer2",):
+        fixture_path = None
+        node = None
+        for i, a in enumerate(sys.argv):
+            if a == "--fixture" and i + 1 < len(sys.argv):
+                fixture_path = Path(sys.argv[i + 1])
+            elif a == "--node" and i + 1 < len(sys.argv):
+                node = sys.argv[i + 1]
+        report = detect_drift_layer2(fixture_path=fixture_path, node=node)
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if not report.get("drift_detected", True) else 1)
     elif len(sys.argv) > 1 and sys.argv[1] == "drift":
         report = detect_drift_layer1()
         print(json.dumps(report, indent=2))
