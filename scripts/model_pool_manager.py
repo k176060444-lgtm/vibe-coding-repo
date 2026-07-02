@@ -1223,6 +1223,29 @@ def _node_matrix_to_yaml(node_matrix, skipped, total_models):
                      sort_keys=False, Dumper=dumper)
 
 
+
+
+# --- baseline02 Phase 3 PR-3: drift Layer 1 (local-only) ---
+
+
+def cmd_diff(args):
+    """Run drift Layer 1: pool ↔ matrix consistency. Local-only, read-only.
+
+    Phase 2 design §2 Layer 1. Compares scripts/model_pool.yaml against
+    scripts/node_model_capability.yaml. Returns drift report; non-zero exit
+    code if drift detected (BLOCK).
+    """
+    from model_pool_drift import detect_drift_layer1
+    report = detect_drift_layer1()
+    _output(report)
+    return not report.get("drift_detected", True)
+
+
+def cmd_drift(args):
+    """Same as cmd_diff (Phase 3 PR-3 covers Layer 1 only)."""
+    return cmd_diff(args)
+
+
 def cmd_generate_node_capability(args):
     """Generate scripts/node_model_capability.yaml from model_pool.yaml.
 
@@ -1578,6 +1601,15 @@ def main():
     p_vnc.add_argument("--cross-full", action="store_true",
                        help="Also cross-reference all model_ids/providers against model_pool.yaml")
     p_vnc.set_defaults(func=cmd_validate_node_capability)
+
+    # --- baseline02 Phase 3 PR-3: drift Layer 1 ---
+    p_diff = sub.add_parser("diff", help="Drift Layer 1: pool ↔ matrix consistency (local-only)")
+    p_diff.add_argument("--json", action="store_true", help="JSON output (default)")
+    p_diff.set_defaults(func=cmd_diff)
+
+    p_drift = sub.add_parser("drift", help="Same as 'diff'; fail-fast summary across all layers (currently Layer 1 only)")
+    p_drift.add_argument("--json", action="store_true", help="JSON output (default)")
+    p_drift.set_defaults(func=cmd_drift)
 
     args = parser.parse_args()
     try:
