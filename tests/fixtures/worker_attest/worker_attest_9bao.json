@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "node": "9bao",
+  "generated_at": "2026-07-02T01:30:00Z",
+  "opencode_config_present": true,
+  "opencode_env_present": true,
+  "model_aliases": [
+    {
+      "model_id": "opencode-go-mimo-v2-5",
+      "alias": "opencode-mimo",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "operator_requested",
+      "credential_status": "present",
+      "endpoint_ref": "base_url_env",
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
+    },
+    {
+      "model_id": "opencode-go-deepseek-v4-flash",
+      "alias": "opencode-ds4flash",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "enabled_assigned",
+      "credential_status": "present",
+      "endpoint_ref": "base_url_env",
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
+    },
+    {
+      "model_id": "opencode-go-kimi-k2-6",
+      "alias": "opencode-kimi26",
+      "provider_namespace": "opencode-go",
+      "lifecycle_status": "enabled_assigned",
+      "credential_status": "present",
+      "endpoint_ref": "base_url_env",
+      "key_env": "OPENCODE_GO_API_KEY",
+      "base_url_env": "OPENCODE_GO_BASE_URL"
+    }
+  ]
+}
