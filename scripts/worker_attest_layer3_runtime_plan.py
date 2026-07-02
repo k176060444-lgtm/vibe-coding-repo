@@ -81,7 +81,7 @@ NON_ACTIVE_LIFECYCLE_STATUSES = frozenset(
 )
 
 # Allowed collector_modes — operator must approve one per live call.
-VALID_COLLECTOR_MODES = frozenset({"dry_run", "real_read", "ssh_canary"})
+VALID_COLLECTOR_MODES = frozenset({"dry_run", "real_read", "ssh_canary", "sanctioned_ssh_canary_5bao"})
 
 # Allowed collection_status values on a live receipt.
 VALID_COLLECTION_STATUS = frozenset({
