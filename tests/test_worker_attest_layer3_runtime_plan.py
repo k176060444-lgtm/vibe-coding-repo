@@ -653,7 +653,7 @@ class TestRequiredFields:
         assert l3rp.VALID_NODES == frozenset({"21bao", "5bao", "9bao"})
 
     def test_collector_modes_documented(self):
-        expected = {"dry_run", "real_read", "ssh_canary", "sanctioned_ssh_canary_5bao"}
+        expected = {"dry_run", "real_read", "ssh_canary", "sanctioned_ssh_canary_5bao", "sanctioned_ssh_canary_9bao"}
         assert l3rp.VALID_COLLECTOR_MODES == expected
 
     def test_collection_status_documented(self):
