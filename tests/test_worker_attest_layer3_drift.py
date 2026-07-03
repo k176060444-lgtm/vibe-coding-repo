@@ -52,18 +52,19 @@ class TestRealRepo:
         assert report["final_verdict"] == "G_L3F_CANDIDATE_DRIFT", (
             f"Expected CANDIDATE_DRIFT for real repo, got {report['final_verdict']}"
         )
-
     def test_deepseek_v4_pro_candidate_gap(self):
         """DeepSeek V4 Pro is an active model with runtime_visible=unknown
-        on all 3 nodes. Must appear as CANDIDATE_DRIFT, not ignored."""
+        on 21bao (residual). 5bao/9bao have runtime_visible=True after
+        evidence-based normalization. Only 21bao should show as candidate_drift.
+        """
         report = l3f.run_layer3_drift()
         ds4pro_gaps = [
             f for f in report["findings"]
             if f.get("model_id") == "opencode-go-deepseek-v4-pro"
             and f.get("severity") == "candidate_drift"
         ]
-        assert len(ds4pro_gaps) >= 3, (
-            f"DeepSeek V4 Pro should have candidate_drift on all 3 nodes, "
+        assert len(ds4pro_gaps) >= 1, (
+            f"DeepSeek V4 Pro should have candidate_drift on 21bao only, "
             f"got {len(ds4pro_gaps)}"
         )
         for gap in ds4pro_gaps:
@@ -122,14 +123,18 @@ class TestCandidateDrift:
             assert f.get("lifecycle_class") in ("active",)
 
     def test_runtime_visible_not_ok_is_candidate(self):
-        """Active model with runtime_visible != ok → candidate_drift."""
+        """Active model with runtime_visible != ok → candidate_drift.
+        5bao/9bao now have runtime_visible=True after evidence-based normalization.
+        Only 21bao residual should show as runtime_visible_not_ok.
+        """
         report = l3f.run_layer3_drift()
         rv_findings = [
             f for f in report["findings"]
             if f.get("drift_type") == "runtime_visible_not_ok"
         ]
-        assert len(rv_findings) >= 3, (
-            f"Expected runtime_visible_not_ok on all 3 nodes, got {len(rv_findings)}"
+        assert len(rv_findings) >= 1, (
+            f"Expected runtime_visible_not_ok on 21bao only, "
+            f"got {len(rv_findings)}"
         )
         for f in rv_findings:
             assert f["severity"] == "candidate_drift"
