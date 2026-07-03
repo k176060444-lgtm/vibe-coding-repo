@@ -56,8 +56,6 @@ except ImportError:
 
 SCHEMA_VERSION = "1.0.0"
 SOURCE = "worker_attest_layer3_d4_sanctioned_live_evidence"
-# D4 collector merge base anchor (PR #321 merge = all 3 fix PRs).
-CURRENT_ANCHOR = "baad421f3213f666ce5b1448e7923b0ad2c640f7"
 
 # Target model identity — deepseek-v4-pro (the D4 blocker).
 TARGET_MODEL = "deepseek-v4-pro"
@@ -123,6 +121,47 @@ def _load_nmc() -> dict:
         return {}
     with open(path, "r") as f:
         return yaml.safe_load(f) or {}
+
+
+def _resolve_anchor() -> str:
+    """Resolve the current git commit SHA for evidence anchoring.
+
+    Reads the repo HEAD at runtime via ``git rev-parse HEAD`` so the
+    anchor always reflects the exact state of the repo at collection
+    time. Fail-closed: raises RuntimeError if HEAD is unavailable or
+    the output is not a valid 40-character hex hash.
+
+    Returns:
+        The 40-character hex SHA of the current HEAD commit.
+
+    Raises:
+        RuntimeError: if git is not on PATH, the command fails, times
+            out, or returns malformed output.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=REPO,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git rev-parse HEAD failed (exit={result.returncode}): "
+                f"{result.stderr.strip()}"
+            )
+        anchor = result.stdout.strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", anchor):
+            raise RuntimeError(
+                f"git HEAD anchor malformed: expected 40-char hex, "
+                f"got {anchor!r}"
+            )
+        return anchor
+    except FileNotFoundError:
+        raise RuntimeError("git not found on PATH — cannot resolve repo anchor")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("git rev-parse HEAD timed out")
 
 
 # ── Redaction utilities ──────────────────────────────────────────────────────
@@ -570,7 +609,7 @@ def _build_receipt(
 
     receipt: dict = {
         "schema_version": SCHEMA_VERSION,
-        "anchor": CURRENT_ANCHOR,
+        "anchor": _resolve_anchor(),
         "node": node,
         "source_node": SOURCE,
         "target_model": TARGET_MODEL,

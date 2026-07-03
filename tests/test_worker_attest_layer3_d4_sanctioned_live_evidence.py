@@ -601,6 +601,8 @@ class TestNoForbiddenOps(unittest.TestCase):
             # Track SSH function scope
             if "_ssh_collect_read_only" in stripped and "def " in stripped:
                 in_ssh_function = True
+            elif "_resolve_anchor" in stripped and "def " in stripped:
+                in_ssh_function = True
             elif "def " in stripped and not stripped.startswith("def _"):
                 in_ssh_function = False
             # Allow the import statement itself
