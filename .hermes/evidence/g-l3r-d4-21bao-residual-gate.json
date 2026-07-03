@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0.0",
+  "gate_id": "G-L3R-D4-21BAO-RESIDUAL-GATE",
+  "created_at": "2026-07-03T23:00:00Z",
+  "anchor": "9681cca87abff7d89d73ade8ee165f3a7b8e6fbf",
+  "operator_decision_id": "OPERATOR-20260703-G-L3R-D4-RESIDUAL-GATE-001",
+  "predecessor_plans": [
+    "PR #333 — g-l3r-d4-post-evidence-normalization-plan.json"
+  ],
+  "preconditions_met": [
+    {
+      "precondition": "NMC runtime_visible for 5bao and 9bao updated to True",
+      "status": "completed",
+      "reference": "PR #334, anchor 9681cca"
+    },
+    {
+      "precondition": "21bao asymmetry documented in g-l3r-d4-21bao-namespace-asymmetry.md",
+      "status": "completed",
+      "reference": "PR #324, docs/baseline02/g-l3r-d4-21bao-namespace-asymmetry.md"
+    },
+    {
+      "precondition": "Explicit operator decision issued to narrow the blocker",
+      "status": "completed",
+      "reference": "OPERATOR-20260703-G-L3R-D4-RESIDUAL-GATE-001"
+    }
+  ],
+  "evidence_state": {
+    "21bao": {
+      "runtime_visible": "unknown",
+      "runtime_visible_source": "21bao_local_nmc",
+      "classification": "R8_documented_residual",
+      "receipt_ref": ".hermes/evidence/g-l3r-d4-clean-main-v1/21bao-receipt.json",
+      "asymmetry_doc": "docs/baseline02/g-l3r-d4-21bao-namespace-asymmetry.md"
+    },
+    "5bao": {
+      "runtime_visible": true,
+      "runtime_visible_source": "5bao_ssh_opencode_config",
+      "classification": "closure_evidence",
+      "evidence_pr": 332,
+      "evidence_anchor": "09b1d97f0cab774e3eb023c9768a40d8165a1d46",
+      "approval_id": "OPERATOR-20260703-G-L3R-D4-LIVE-EVIDENCE-003",
+      "nmc_normalization_pr": 334,
+      "nmc_normalization_anchor": "9681cca87abff7d89d73ade8ee165f3a7b8e6fbf",
+      "receipt_ref": ".hermes/evidence/g-l3r-d4-clean-main-v1/5bao-receipt.json"
+    },
+    "9bao": {
+      "runtime_visible": true,
+      "runtime_visible_source": "9bao_ssh_opencode_config",
+      "classification": "closure_evidence",
+      "evidence_pr": 332,
+      "evidence_anchor": "09b1d97f0cab774e3eb023c9768a40d8165a1d46",
+      "approval_id": "OPERATOR-20260703-G-L3R-D4-LIVE-EVIDENCE-003",
+      "nmc_normalization_pr": 334,
+      "nmc_normalization_anchor": "9681cca87abff7d89d73ade8ee165f3a7b8e6fbf",
+      "receipt_ref": ".hermes/evidence/g-l3r-d4-clean-main-v1/9bao-receipt.json"
+    }
+  },
+  "verdict": {
+    "gate_verdict": "G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY",
+    "closes_global_blocker": false,
+    "closes_21bao_blocker": false,
+    "two_of_three_confirmed": true,
+    "three_of_three_confirmed": false,
+    "is_g_l4_ready": false,
+    "is_readiness_ready": false,
+    "is_model_call_verified_ready": false,
+    "is_operator_approved_promotion": false,
+    "is_gray_acceptance": false,
+    "is_baseline03_ready": false
+  },
+  "scope_constraints": [
+    "not-G_L3R_BLOCKED-resolved",
+    "not-G-L4-ready",
+    "not-readiness-ready",
+    "not-model_call_verified-ready",
+    "not-operator_approved-promotion",
+    "not-NMC-write-back",
+    "not-model_pool-write-back",
+    "not-G-READINESS",
+    "not-G-GRAY",
+    "not-G-D-A",
+    "not-G-D-B",
+    "not-PR-7",
+    "not-Baseline03",
+    "not-Stage8"
+  ],
+  "forbidden_operation_flags": {
+    "model_invocation_attempted": false,
+    "credential_provisioning_attempted": false,
+    "node_sync_attempted": false,
+    "runtime_field_promotion_attempted": false,
+    "deu_assignment_attempted": false,
+    "write_back_attempted": false,
+    "ssh_live_collection_attempted": false
+  }
+}

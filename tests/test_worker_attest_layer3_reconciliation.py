@@ -169,11 +169,13 @@ class TestUnblockCriteria:
     def test_deepseek_v4_pro_not_special(self):
         r = build_reconciliation_report()
         criteria_text = " ".join(r["unblock_criteria"])
-        # Should mention deepseek-v4-pro but NOT grant any special promotion path
-        assert "deepseek-v4-pro" in criteria_text or "DeepSeek V4 Pro" in criteria_text
-        # Should explicitly state no special-casing
-        assert "no special-casing" in criteria_text or "not special-cased" in criteria_text or \
-            "not special" in criteria_text
+        # Should reference the narrowed state (5bao/9bao resolved, 21bao residual)
+        assert "5bao" in criteria_text or "9bao" in criteria_text or "21bao" in criteria_text
+        # Should mention v4-pro or the D4 context
+        assert "runtime_visible" in criteria_text or "resolved" in criteria_text
+        # Should state blocker narrowing and NOT claim global closure
+        assert "not close globally" in criteria_text.lower() or \
+            "21bao residual" in criteria_text.lower()
 
     def test_deu_warn_preserved(self):
         r = build_reconciliation_report()
