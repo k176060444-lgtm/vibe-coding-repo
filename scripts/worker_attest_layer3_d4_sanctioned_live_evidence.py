@@ -56,8 +56,8 @@ except ImportError:
 
 SCHEMA_VERSION = "1.0.0"
 SOURCE = "worker_attest_layer3_d4_sanctioned_live_evidence"
-# D4 PR #316 merge commit (current main anchor).
-CURRENT_ANCHOR = "c579b03d077208be43babc27096f4bed34181283"
+# D4 collector merge base anchor (PR #321 merge = all 3 fix PRs).
+CURRENT_ANCHOR = "baad421f3213f666ce5b1448e7923b0ad2c640f7"
 
 # Target model identity — deepseek-v4-pro (the D4 blocker).
 TARGET_MODEL = "deepseek-v4-pro"

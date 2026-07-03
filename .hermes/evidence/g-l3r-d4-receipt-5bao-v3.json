@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "anchor": "c579b03d077208be43babc27096f4bed34181283",
+  "anchor": "baad421f3213f666ce5b1448e7923b0ad2c640f7",
   "node": "5bao",
   "source_node": "worker_attest_layer3_d4_sanctioned_live_evidence",
   "target_model": "deepseek-v4-pro",
@@ -39,5 +39,5 @@
   "collector_mode": "5bao_sanctioned_ssh_read",
   "operator_approval_id": "operator-approved-clean-main-g-l3r-d4-v3-20260703",
   "collection_status": "completed",
-  "generated_at": "2026-07-03T07:32:37Z"
+  "generated_at": "2026-07-03T07:35:00Z"
 }

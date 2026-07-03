@@ -2,7 +2,7 @@
   "schema_version": "1.0.0",
   "source": "worker_attest_layer3_d4_sanctioned_live_evidence",
   "anchor": "baad421f3213f666ce5b1448e7923b0ad2c640f7",
-  "generated_at": "2026-07-03T07:32:25Z",
+  "generated_at": "2026-07-03T07:35:00Z",
   "target_model": "deepseek-v4-pro",
   "canonical_model_id": "opencode-go-deepseek-v4-pro",
   "provider_namespace": "opencode-go",
@@ -45,17 +45,17 @@
   "receipts": [
     {
       "path": ".hermes/evidence/g-l3r-d4-receipt-21bao-v3.json",
-      "sha256": "236b49f0890413ba9ac68d5ddad589eafd0531f1e9e97530c3e833e19d19941a",
+      "sha256": "19bb275fc94e011690b45f23f243877eb3f4b7d822f1d574974d19d9101aed0a",
       "collection_mode": "21bao_local_sanctioned_read"
     },
     {
       "path": ".hermes/evidence/g-l3r-d4-receipt-5bao-v3.json",
-      "sha256": "3e4e77b110b694ae1306288020c14e7656a2b7ebdeb672ddb0426eb2da616c13",
+      "sha256": "a9c0f3c3736fc24f30be37bbdaccaae6a2ebb10e919c8f9f091cdd54ad479a9c",
       "collection_mode": "5bao_sanctioned_ssh_read"
     },
     {
       "path": ".hermes/evidence/g-l3r-d4-receipt-9bao-v3.json",
-      "sha256": "39775046b3a3656de16a29e3164101d28c087c8cbbef8af3c6c16782cb5905fc",
+      "sha256": "57431647658080c1682e7b0ede12f318b7c4fa916f0eb98c7fa73e6d3ebe8325",
       "collection_mode": "9bao_sanctioned_ssh_read"
     }
   ],
