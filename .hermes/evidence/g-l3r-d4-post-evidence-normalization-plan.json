@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0.0",
+  "plan_id": "G-L3R-D4-POST-EVIDENCE-NORMALIZATION-PLAN",
+  "created_at": "2026-07-03T21:15:00Z",
+  "evidence_anchor": "09b1d97f0cab774e3eb023c9768a40d8165a1d46",
+  "merge_anchor": "18807ddbef5d962b67dd102220cdb118432d4f7c",
+  "source_pr": 332,
+  "approval_id": "OPERATOR-20260703-G-L3R-D4-LIVE-EVIDENCE-003",
+  "operator_decision_required_for_execution": true,
+  "scope_constraints": [
+    "not-G_L3R_BLOCKED-resolved",
+    "not-G-L4-ready",
+    "not-readiness-ready",
+    "not-model_call_verified-ready",
+    "not-operator_approved-ready",
+    "not-NMC-write-back",
+    "not-model_pool-write-back",
+    "not-G-READINESS",
+    "not-G-GRAY",
+    "not-G-D-A",
+    "not-G-D-B",
+    "not-PR-7",
+    "not-Baseline03",
+    "not-Stage8"
+  ],
+  "evidence_state": {
+    "21bao": {
+      "runtime_visible_observed": false,
+      "runtime_visible_source": "21bao_local_nmc",
+      "receipt_sha256": "161a63bfb542ef5887437d1d3da6153282a76957e7ce68a77e6b2abd55e9155a",
+      "receipt_path": ".hermes/evidence/g-l3r-d4-clean-main-v1/21bao-receipt.json",
+      "classification": "R8_documented_residual"
+    },
+    "5bao": {
+      "runtime_visible_observed": true,
+      "runtime_visible_source": "5bao_ssh_opencode_config",
+      "receipt_sha256": "276282ec5a8fe827671df7af2bee1547621cb3418190b5a8fa10ff67d27bec92",
+      "receipt_path": ".hermes/evidence/g-l3r-d4-clean-main-v1/5bao-receipt.json",
+      "classification": "closure_evidence"
+    },
+    "9bao": {
+      "runtime_visible_observed": true,
+      "runtime_visible_source": "9bao_ssh_opencode_config",
+      "receipt_sha256": "82251a651455202752a36bce1b6db54d7f01f226f7529ef57a593e49c6ae651e",
+      "receipt_path": ".hermes/evidence/g-l3r-d4-clean-main-v1/9bao-receipt.json",
+      "classification": "closure_evidence"
+    }
+  },
+  "verdict_referenced": {
+    "evidence_status": "G_L3R_D4_CLEAN_MAIN_LIVE_EVIDENCE_2OF3_PASS",
+    "blocker_status": "G_L3R_D4_NOT_3OF3",
+    "blocker_state": "G_L3R_BLOCKER_REMAINS_PARTIALLY_OPEN_FOR_21BAO",
+    "closes_blocker": false,
+    "is_readiness": false,
+    "is_g_l4_ready": false,
+    "is_model_call_verified_ready": false,
+    "is_operator_approved_ready": false
+  },
+  "proposed_normalization": {
+    "description": "DESIGN ONLY — not authorized. Each field requires a separate bounded PR and explicit operator authorization.",
+    "21bao": {
+      "runtime_visible": {"current": "unknown", "proposed": "NO_CHANGE", "rationale": "R8 documented residual; observed=false in PR #332"},
+      "model_call_verified": {"current": "unknown", "proposed": "NO_CHANGE", "rationale": "no smoke test authorized"},
+      "operator_approved": {"current": "unknown", "proposed": "NO_CHANGE", "rationale": "no operator decision"},
+      "elevates": false
+    },
+    "5bao": {
+      "runtime_visible": {"current": "unknown", "proposed": "True", "rationale": "PR #332 evidence shows runtime_visible_observed=true via SSH"},
+      "model_call_verified": {"current": "unknown", "proposed": "NO_CHANGE", "rationale": "evidence only confirms config presence, not invocation success"},
+      "operator_approved": {"current": "unknown", "proposed": "NO_CHANGE", "rationale": "no operator decision"},
+      "elevates": "runtime_visible_only"
+    },
+    "9bao": {
+      "runtime_visible": {"current": "unknown", "proposed": "True", "rationale": "PR #332 evidence shows runtime_visible_observed=true via SSH"},
+      "model_call_verified": {"current": "unknown", "proposed": "NO_CHANGE", "rationale": "evidence only confirms config presence, not invocation success"},
+      "operator_approved": {"current": "unknown", "proposed": "NO_CHANGE", "rationale": "no operator decision"},
+      "elevates": "runtime_visible_only"
+    }
+  },
+  "proposed_blocker_narrowing_gate": {
+    "verdict_when_satisfied": "G_L3R_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY",
+    "preconditions": [
+      "NMC runtime_visible for 5bao and 9bao updated to True via separate bounded PR (per proposed_normalization)",
+      "21bao asymmetry remains documented in g-l3r-d4-21bao-namespace-asymmetry.md",
+      "Explicit new operator decision issued to narrow the blocker",
+      "Narrowing PR explicitly preserves R8 documentation"
+    ],
+    "what_it_does_NOT_do": [
+      "does not close global G_L3R_BLOCKED (only narrows)",
+      "does not elevate 21bao",
+      "does not enable G-L4 / readiness / gray / Baseline03",
+      "does not authorize any subsequent NMC field promotion"
+    ]
+  },
+  "forbidden_field_promotions": {
+    "21bao_runtime_visible": "FORBIDDEN — would be a false claim",
+    "any_model_call_verified": "FORBIDDEN — no smoke test authorized",
+    "any_operator_approved": "FORBIDDEN — no operator decision"
+  },
+  "executes": false,
+  "writes_back_to_nmc": false,
+  "writes_back_to_model_pool": false
+}
