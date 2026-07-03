@@ -581,7 +581,7 @@ models:
       wrapper: null
       invocation: null
   source: i15-pool-correction
-  notes: 'Added by I15: node-configured model from 5bao/9bao opencode.jsonc'
+  notes: 'Added by I15: node-configured model from 5bao/9bao opencode.jsonc. Normalized 2026-07-03: legacy deepseek-plan entry; the active d4 model is opencode-go-deepseek-v4-pro (opencode-ds4pro).'
   canonical_provider: deepseek-plan
   provider_namespace: deepseek-plan
   primary_alias: deepseek-v4-pro

@@ -1,11 +1,11 @@
 {
   "schema_version": "1.2",
   "generated_at": "2026-07-02T11:30:00Z",
-  "notes": "endpoint_ref schema added (Phase 3 PR-6); credential_status already present; win→21bao normalization",
+  "notes": "endpoint_ref schema added (Phase 3 PR-6); credential_status already present; win->21bao normalization; 2026-07-03: d4 legacy deepseek-plan disambiguation note",
   "files": {
     "model_pool.yaml": {
-      "sha256": "168cb06be6aac8bea608599cebccd0897355d549554282341effacd92c637eec",
-      "size": 33571
+      "sha256": "20b392f57404071a8941441506234b94725e258a9edb7890c660cb860d1fa525",
+      "size": 33693
     }
   }
 }

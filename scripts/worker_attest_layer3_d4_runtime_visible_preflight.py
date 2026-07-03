@@ -130,7 +130,26 @@ def _find_deepseek_v4_pro_entries(pool: dict) -> list[dict]:
 
 
 def _collect_nmc_entries(nmc: dict) -> dict[str, list]:
-    """Get all node_model_capability entries per node."""
+    """Get all node_model_capability entries per node.
+
+    Reads the canonical schema (`nodes.{node}.matrix`), with a fallback
+    to the legacy `node_model_capability.{node}` key for backwards compat.
+    """
+    # Canonical schema (v1.1+)
+    nodes_dict = nmc.get("nodes", {})
+    if nodes_dict and isinstance(nodes_dict, dict):
+        result: dict[str, list] = {}
+        for node in NODES:
+            n = nodes_dict.get(node, {})
+            if isinstance(n, dict):
+                result[node] = n.get("matrix", []) or []
+            elif isinstance(n, list):
+                result[node] = n
+            else:
+                result[node] = []
+        return result
+
+    # Legacy schema fallback
     cap = nmc.get("node_model_capability", {})
     return {node: cap.get(node, []) for node in NODES}
 
@@ -197,11 +216,23 @@ def build_d4_preflight() -> dict:
             "runtime_visible_known": False,
         }
         for entry in cap_summary[node]:
-            name = str(entry.get("name", "")) if isinstance(entry, dict) else str(entry)
-            if any(x in name.lower() for x in ["deepseek", "ds4pro", "ds-v4-pro"]):
-                mm["nodes"][node]["d4_found_in_nmc"] = True
-                if isinstance(entry, dict) and entry.get("runtime_visible") is True:
-                    mm["nodes"][node]["runtime_visible_known"] = True
+            if not isinstance(entry, dict):
+                continue
+            # Check multiple fields for d4 references
+            check_str = " ".join([
+                str(entry.get("name", "")),
+                str(entry.get("model_id", "")),
+                str(entry.get("primary_alias", "")),
+            ]).lower()
+            if any(x in check_str for x in ["deepseek-v4-pro", "deepseek-v4-flash",
+                                              "ds4pro", "ds4flash", "ds-v4-pro",
+                                              "deepseek-coder", "deepseek-r1",
+                                              "deepseek-reasoner"]):
+                # More specific: this is d4 if "v4-pro" is in any field
+                if "v4-pro" in check_str or "ds4pro" in check_str:
+                    mm["nodes"][node]["d4_found_in_nmc"] = True
+                    if entry.get("runtime_visible") is True:
+                        mm["nodes"][node]["runtime_visible_known"] = True
 
     # ── Root cause classification ─────────────────────────────────────
     n_alias = len(d4_entries)

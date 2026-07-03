@@ -144,17 +144,20 @@ class TestMismatchMatrix:
         for node in ["21bao", "5bao", "9bao"]:
             assert node in mm.get("nodes", {}), "missing node in mismatch_matrix"
 
-    def test_nmc_empty_for_all_nodes(self):
-        """Confirmed: NMC is empty for all nodes. This is part of the root cause."""
+    def test_nmc_has_entries_post_normalization(self):
+        """Post-normalization: NMC has entries for all 3 nodes (data-only fixed this).
+        d4 is found in all 3 nodes, but runtime_visible is still unknown (not promoted).
+        """
         r = build_d4_preflight()
         mm = r.get("mismatch_matrix", {})
         for node in ["21bao", "5bao", "9bao"]:
-            assert mm["nodes"][node]["nmc_has_entries"] is False, \
-                "%s unexpectedly has NMC entries" % node
-            assert mm["nodes"][node]["d4_found_in_nmc"] is False, \
-                "%s unexpectedly has D4 in NMC" % node
+            assert mm["nodes"][node]["nmc_has_entries"] is True, \
+                "%s unexpectedly has no NMC entries" % node
+            assert mm["nodes"][node]["d4_found_in_nmc"] is True, \
+                "%s unexpectedly missing D4 in NMC" % node
+            # runtime_visible still unknown — data-only did NOT promote it
             assert mm["nodes"][node]["runtime_visible_known"] is False, \
-                "%s unexpectedly has runtime_visible" % node
+                "%s runtime_visible unexpectedly promoted to known" % node
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -168,10 +171,12 @@ class TestRootCauses:
         rc = r.get("candidate_root_causes", [])
         assert "naming_alias_mismatch" in rc, \
             "expected naming_alias_mismatch in root causes, got %s" % rc
-        assert "fixture_stale" in rc, \
-            "expected fixture_stale in root causes"
-        assert "data_only_normalization_candidate" in rc, \
-            "expected data_only_normalization_candidate in root causes"
+        # Post-normalization: fixture_stale no longer applies (NMC has entries)
+        # Instead runtime_visible_unknown is the persistent gap
+        assert "fixture_stale" not in rc, \
+            "fixture_stale should be removed after NMC is populated: %s" % rc
+        assert "runtime_visible_unknown" in rc, \
+            "expected runtime_visible_unknown after normalization: %s" % rc
 
     def test_root_causes_list_not_empty(self):
         r = build_d4_preflight()
@@ -249,11 +254,25 @@ class TestVerdict:
         r = build_d4_preflight()
         assert "E2E" not in r["final_verdict"]
 
-    def test_verdict_data_only_candidate(self):
-        """With current repo state, verdict should be DATA_ONLY_CANDIDATE."""
+    def test_verdict_post_normalization(self):
+        """Post-normalization verdict reflects the persistent gap.
+
+        With NMC populated, runtime_visible=unknown for d4.
+        Honest verdict is REQUIRES_SANCTIONED_EVIDENCE (Option B).
+        Data-only normalization can NOT resolve runtime_visible gap.
+        """
         r = build_d4_preflight()
-        assert r["final_verdict"] == "G_L3R_D4_PREFLIGHT_DATA_ONLY_CANDIDATE", \
-            "expected DATA_ONLY_CANDIDATE, got %s" % r["final_verdict"]
+        v = r["final_verdict"]
+        assert v in (
+            "G_L3R_D4_PREFLIGHT_DATA_ONLY_CANDIDATE",
+            "G_L3R_D4_PREFLIGHT_REQUIRES_SANCTIONED_EVIDENCE",
+        ), "unexpected verdict: %s" % v
+        # After our normalization, NMC is populated and runtime_visible_unknown
+        # is the persistent root cause, so REQUIRES_SANCTIONED_EVIDENCE is correct
+        if "runtime_visible_unknown" in r.get("candidate_root_causes", []):
+            # runtime_visible_unknown means we need live evidence
+            assert v == "G_L3R_D4_PREFLIGHT_REQUIRES_SANCTIONED_EVIDENCE", \
+                "with runtime_visible_unknown, should be REQUIRES_SANCTIONED_EVIDENCE, got %s" % v
 
 
 # ══════════════════════════════════════════════════════════════════════════════
