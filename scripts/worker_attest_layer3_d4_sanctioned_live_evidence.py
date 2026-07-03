@@ -230,7 +230,7 @@ for p in config_paths:
             data = json.load(open(p))
             # Extract model IDs and aliases (safe metadata)
             if isinstance(data, dict):
-                for section_name in ["models", "providers"]:
+                for section_name in ["models", "model", "providers", "provider"]:
                     section = data.get(section_name, {})
                     if isinstance(section, dict):
                         for key, val in section.items():
