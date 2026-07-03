@@ -330,6 +330,18 @@ class TestSevenStateSchema:
                             bad.append(f"{nn}[{i}]({e.get('model_id','?')}): {sf}={val!r} (expected True)")
                     else:
                         # All other nodes/states must remain 'unknown'
+                        # Exception: D4 runtime_visible on 5bao/9bao may be True
+                        # (evidence-based normalization per PR #333 plan)
+                        if sf == "runtime_visible" and \
+                           e.get("model_id") == "opencode-go-deepseek-v4-pro" and \
+                           nn in ("5bao", "9bao"):
+                            # 5bao/9bao D4 runtime_visible=True is intentional
+                            if val is not True:
+                                bad.append(
+                                    f"{nn}[{i}]({e.get('model_id','?')}): "
+                                    f"runtime_visible={val!r} (expected True after D4 normalization)"
+                                )
+                            continue
                         if val != "unknown":
                             bad.append(f"{nn}[{i}]({e.get('model_id','?')}): {sf}={val!r} (expected 'unknown')")
         assert bad == [], "\n".join(bad)

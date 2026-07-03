@@ -141,15 +141,15 @@ class TestPreflightPostNormalization:
         assert "E2E" not in v
 
     def test_d4_verdict_consistent_with_state(self):
-        """Verdict should reflect actual repo state."""
+        """Verdict should reflect actual repo state.
+        5bao/9bao have runtime_visible=True after evidence-based normalization.
+        21bao remains residual. Correct verdict is KEEP_BLOCKED.
+        """
         r = build_d4_preflight()
         v = r["final_verdict"]
-        # With runtime_visible=unknown in NMC, the honest verdict is
-        # either REQUIRES_SANCTIONED_EVIDENCE or DATA_ONLY_CANDIDATE
-        # (depending on root cause analysis)
         assert v in (
+            "G_L3R_D4_PREFLIGHT_KEEP_BLOCKED",
             "G_L3R_D4_PREFLIGHT_DATA_ONLY_CANDIDATE",
-            "G_L3R_D4_PREFLIGHT_REQUIRES_SANCTIONED_EVIDENCE",
         )
 
     def test_no_misleading_claims(self):
@@ -200,16 +200,26 @@ class TestAggregateAfterNormalization:
         assert "E2E" not in v
 
     def test_no_runtime_field_promotion_in_yaml(self):
-        """Verify NMC yaml itself was not modified to promote runtime fields."""
+        """Verify NMC yaml reflects evidence-based D4 normalization.
+        5bao/9bao runtime_visible=True (evidence-based via PR #332).
+        21bao runtime_visible != True (must remain unknown/residual).
+        model_call_verified and operator_approved must NOT be promoted for any node.
+        """
         with open(NMC_PATH, "r") as f:
             nmc = yaml.safe_load(f)
         for n in ["21bao", "5bao", "9bao"]:
             matrix = nmc["nodes"][n]["matrix"]
             for entry in matrix:
                 if "deepseek-v4-pro" in entry.get("model_id", ""):
-                    # runtime_visible should still be 'unknown' (no promotion)
-                    assert entry.get("runtime_visible") != True, \
-                        "d4 runtime_visible promoted to True in %s" % n
+                    if n in ("5bao", "9bao"):
+                        # 5bao/9bao: runtime_visible=True (evidence-based)
+                        assert entry.get("runtime_visible") is True, \
+                            "d4 runtime_visible must be True for %s" % n
+                    else:
+                        # 21bao: runtime_visible must remain non-True (unknown/residual)
+                        assert entry.get("runtime_visible") is not True, \
+                            "d4 runtime_visible must not be True for %s" % n
+                    # model_call_verified and operator_approved never promoted
                     assert entry.get("model_call_verified") != True, \
                         "d4 model_call_verified promoted in %s" % n
                     assert entry.get("operator_approved") != True, \
@@ -263,14 +273,18 @@ class TestNoForbiddenOps:
     def test_no_field_promotion_in_nmc(self):
         with open(NMC_PATH, "r") as f:
             content = f.read()
-        # d4 entries should still have unknown (no promotion)
-        # Check no d4 entry has True/true for runtime_visible
         nmc = yaml.safe_load(content)
         for n in ["21bao", "5bao", "9bao"]:
             for entry in nmc["nodes"][n]["matrix"]:
                 if "deepseek-v4-pro" in entry.get("model_id", ""):
-                    assert entry.get("runtime_visible") != True, \
-                        "d4 runtime_visible promoted in NMC %s" % n
+                    if n in ("5bao", "9bao"):
+                        # 5bao/9bao runtime_visible=True is intentional
+                        assert entry.get("runtime_visible") is True, \
+                            "d4 runtime_visible must be True in NMC %s" % n
+                    else:
+                        # 21bao must remain non-True
+                        assert entry.get("runtime_visible") is not True, \
+                            "d4 runtime_visible must not be True in NMC %s" % n
                     assert entry.get("model_call_verified") != True
                     assert entry.get("operator_approved") != True
 
