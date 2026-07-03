@@ -308,9 +308,12 @@ def _ssh_collect_read_only(node: str) -> dict:
 
     try:
         # Run the remote collector script via SSH (read-only, secret-safe).
-        cmd = ssh_common + ["python3", "-c", _REMOTE_COLLECTOR_SCRIPT]
+        # Pipe the script via stdin to avoid multi-line quoting issues
+        # with Windows/MSYS subprocess across SSH.
+        cmd = ssh_common + ["python3"]
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30,
+            cmd, input=_REMOTE_COLLECTOR_SCRIPT,
+            capture_output=True, text=True, timeout=30,
         )
         if result.returncode == 0 and result.stdout.strip():
             try:
