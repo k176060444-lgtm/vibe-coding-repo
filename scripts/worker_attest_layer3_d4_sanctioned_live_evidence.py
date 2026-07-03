@@ -204,8 +204,18 @@ result = {
     "config_paths": [],
 }
 
-# Check opencode binary
+# Check opencode binary: which (PATH) first, then common install paths as fallback
 opencode_path = os.popen("which opencode 2>/dev/null || true").read().strip()
+if not opencode_path:
+    for candidate in [
+        os.path.expanduser("~/.opencode/bin/opencode"),
+        os.path.expanduser("~/.npm-global/bin/opencode"),
+        "/usr/local/bin/opencode",
+    ]:
+        expanded = os.path.expanduser(candidate)
+        if os.path.exists(expanded):
+            opencode_path = expanded
+            break
 result["opencode_exists"] = bool(opencode_path)
 
 # Check opencode config file
@@ -233,6 +243,19 @@ for p in config_paths:
                                     "namespace": val.get("namespace", ""),
                                 }
                                 result["models_found"].append(entry)
+                                # Recurse into nested models (e.g. provider.models)
+                                nested = val.get("models", None)
+                                if isinstance(nested, dict):
+                                    for nkey, nval in nested.items():
+                                        if isinstance(nval, dict):
+                                            nested_entry = {
+                                                "model_id": nkey,
+                                                "id": nval.get("id", ""),
+                                                "alias": nval.get("alias", "") or nval.get("name", ""),
+                                                "provider": key,
+                                                "namespace": val.get("namespace", "") or val.get("npm", ""),
+                                            }
+                                            result["models_found"].append(nested_entry)
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -459,7 +482,10 @@ def _build_receipt(
         # Also check local config
         config_found = evidence.get("opencode_config_found", False)
         config_visible_observed = config_found
-        wrapper_visible_observed = False  # no wrapper check on local
+        # Read wrapper_valid from NMC entries; fall back to False if none
+        wrapper_visible_observed = any(
+            e.get("wrapper_valid") is True for e in nmc_entries
+        ) if nmc_entries else False
         env_loaded_observed_enum = (
             "config_only" if config_found else "not_checked"
         )
