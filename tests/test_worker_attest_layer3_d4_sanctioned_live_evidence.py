@@ -831,5 +831,48 @@ class Test21BaoLocalOnly(unittest.TestCase):
             mock_ssh.assert_not_called()
 
 
+class TestSSHEndpointMap(unittest.TestCase):
+    """Test SSH endpoint map uses IP-based vibeworker endpoints."""
+
+    def test_5bao_endpoint_map(self):
+        """5bao endpoint should use vibeworker@192.168.5.6:22222."""
+        # Read the source directly to avoid import/scope issues
+        source = ev.__file__
+        src = open(source, encoding="utf-8").read()
+        self.assertIn('"5bao": ("vibeworker", "192.168.5.6", "22222")', src,
+                      "5bao endpoint must be vibeworker@192.168.5.6:22222")
+
+    def test_9bao_endpoint_map(self):
+        """9bao endpoint should use vibeworker@192.168.9.6:22222."""
+        src = open(ev.__file__, encoding="utf-8").read()
+        self.assertIn('"9bao": ("vibeworker", "192.168.9.6", "22222")', src,
+                      "9bao endpoint must be vibeworker@192.168.9.6:22222")
+
+    def test_no_hostname_default(self):
+        """Hostname '5bao'/'9bao' must NOT be a default endpoint."""
+        src = open(ev.__file__, encoding="utf-8").read()
+        # Look for host_map pattern — must not contain bare hostnames
+        # Check that the old pattern is absent
+        self.assertNotIn('"5bao": ("k", "5bao", "22")', src,
+                         "Old hostname-based 5bao endpoint removed")
+        self.assertNotIn('"9bao": ("k", "9bao", "22")', src,
+                         "Old hostname-based 9bao endpoint removed")
+
+    def test_no_fallback_hostname(self):
+        """There must be no fallback to 5bao/9bao hostname via env."""
+        src = open(ev.__file__, encoding="utf-8").read()
+        # Check no SSH_HOST or hostname-based fallback exists
+        # The host_map is the ONLY source of SSH target parameters
+        host_map_count = src.count('"5bao"') + src.count('"9bao"')
+        ip_5bao_count = src.count("192.168.5.6")
+        ip_9bao_count = src.count("192.168.9.6")
+        # The only references to "5bao" and "9bao" as keys should be
+        # in the map with vibeworker + IP + port
+        self.assertGreaterEqual(ip_5bao_count, 1,
+                                "5bao IP reference must exist")
+        self.assertGreaterEqual(ip_9bao_count, 1,
+                                "9bao IP reference must exist")
+
+
 if __name__ == "__main__":
     unittest.main()

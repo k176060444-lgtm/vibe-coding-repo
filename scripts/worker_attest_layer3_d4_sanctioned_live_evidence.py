@@ -283,8 +283,8 @@ def _ssh_collect_read_only(node: str) -> dict:
 
     # Map node to SSH connection parameters.
     host_map = {
-        "5bao": ("k", "5bao", "22"),
-        "9bao": ("k", "9bao", "22"),
+        "5bao": ("vibeworker", "192.168.5.6", "22222"),
+        "9bao": ("vibeworker", "192.168.9.6", "22222"),
     }
     user, host, port = host_map.get(node, ("", "", ""))
     if not user:
