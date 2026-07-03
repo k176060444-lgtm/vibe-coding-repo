@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0.0",
+  "anchor": "baad421f3213f666ce5b1448e7923b0ad2c640f7",
+  "node": "9bao",
+  "source_node": "worker_attest_layer3_d4_sanctioned_live_evidence",
+  "target_model": "deepseek-v4-pro",
+  "canonical_model_id": "unknown",
+  "provider_namespace": "unknown",
+  "runtime_provider": "unknown",
+  "aliases_checked": [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "ds4pro",
+    "opencode-ds4pro"
+  ],
+  "runtime_visible_observed": true,
+  "runtime_visible_source": "9bao_ssh_opencode_config",
+  "config_visible_observed": true,
+  "wrapper_visible_observed": false,
+  "env_loaded_observed_enum": "not_found",
+  "credential_status_observed_enum": "not_found",
+  "endpoint_ref_observed_enum": "not_found",
+  "redaction_status": {
+    "redacted": false,
+    "redacted_count": 0
+  },
+  "leak_scan": {
+    "passed": true,
+    "matches_found": 0
+  },
+  "forbidden_operation_flags": {
+    "model_invocation_attempted": false,
+    "credential_provisioning_attempted": false,
+    "node_sync_attempted": false,
+    "runtime_field_promotion_attempted": false,
+    "deu_assignment_attempted": false,
+    "write_back_attempted": false
+  },
+  "collector_mode": "9bao_sanctioned_ssh_read",
+  "operator_approval_id": "operator-approved-clean-main-g-l3r-d4-v3-20260703",
+  "collection_status": "completed",
+  "generated_at": "2026-07-03T07:35:00Z"
+}
