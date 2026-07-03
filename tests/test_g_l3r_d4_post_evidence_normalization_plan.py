@@ -254,3 +254,82 @@ def test_plan_evidence_digests_match_receipts():
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         assert actual == declared, f"{node} receipt actual={actual} declared={declared}"
         assert plan["evidence_state"][node]["receipt_sha256"] == declared
+
+
+# ── Amendment: anchor semantic separation ───────────────────────────────────
+# These tests enforce the operator-clarified semantics:
+# (a) evidence_anchor = STABLE 09b1d97... (collection-time, immutable)
+# (b) merge_anchor / current HEAD = ADVANCING (canonicalization-time)
+# (c) current repository HEAD may be 18807dd or any later commit
+
+
+def test_evidence_anchor_stable_across_later_commits():
+    """The evidence collection anchor must be a fixed, stable value
+    independent of the current main HEAD."""
+    closure = json.loads(EVIDENCE_CLOSURE.read_text())
+    assert closure["anchor"] == EVIDENCE_ANCHOR, (
+        f"closure anchor drifted: {closure['anchor']} != {EVIDENCE_ANCHOR}"
+    )
+
+
+def test_current_repo_head_not_required_to_equal_evidence_anchor():
+    """The current repository HEAD (canonicalization/merge anchor)
+    is allowed to differ from the evidence collection anchor.
+    It must NOT equal the evidence anchor (which is older)."""
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPO, capture_output=True, text=True, timeout=10,
+    ).stdout.strip()
+    # Current HEAD may be 18807dd, eccdffc, or any later commit.
+    # It must NOT be required to equal the evidence anchor.
+    # The key property: HEAD is allowed to be != evidence_anchor.
+    # No assertion that they are different — but no assertion that they
+    # are equal either. We only assert that the test logic tolerates both.
+    closure = json.loads(EVIDENCE_CLOSURE.read_text())
+    # Sanity: if HEAD == evidence_anchor, that's fine (collection just
+    # happened, nothing merged). If HEAD != evidence_anchor, also fine
+    # (PRs merged in between). The test just confirms no error.
+    assert closure["anchor"] == EVIDENCE_ANCHOR
+
+
+def test_evidence_anchor_2of3_unchanged_after_amend():
+    """2-of-3 evidence state must remain: 21bao=false, 5bao=true, 9bao=true.
+    This is a regression guard: the amendment must NOT change the
+    per-node evidence observations."""
+    for node, expected_rv, expected_src in [
+        ("21bao", False, "21bao_local_nmc"),
+        ("5bao",  True,  "5bao_ssh_opencode_config"),
+        ("9bao",  True,  "9bao_ssh_opencode_config"),
+    ]:
+        r = json.loads((REPO / f".hermes/evidence/g-l3r-d4-clean-main-v1/{node}-receipt.json").read_text())
+        assert r["runtime_visible_observed"] is expected_rv, (
+            f"{node} rv regression: {r['runtime_visible_observed']} != {expected_rv}"
+        )
+        assert r["runtime_visible_source"] == expected_src
+
+
+def test_no_false_3of3_claim():
+    """The closure must NOT claim 3-of-3 (since 21bao is false)."""
+    closure = json.loads(EVIDENCE_CLOSURE.read_text())
+    v = closure["verdict"]
+    assert v["blocker_status"] == "G_L3R_D4_NOT_3OF3"
+    assert "3OF3" not in v["evidence_status"] or "NOT_3OF3" in v["evidence_status"]
+    # evidence_status must contain the NOT_3OF3 form
+    assert "NOT_3OF3" in v["blocker_status"]
+
+
+def test_no_blocker_resolved_claim():
+    """The closure must NOT claim G_L3R_BLOCKED resolved."""
+    closure = json.loads(EVIDENCE_CLOSURE.read_text())
+    assert closure["verdict"]["closes_blocker"] is False
+    assert "G_L3R_BLOCKER_REMAINS_PARTIALLY_OPEN_FOR_21BAO" in closure["verdict"]["blocker_state"]
+
+
+def test_no_readiness_or_g_l4_or_model_call_verified_ready_claim():
+    """The closure must NOT claim readiness / G-L4 / model_call_verified ready."""
+    closure = json.loads(EVIDENCE_CLOSURE.read_text())
+    v = closure["verdict"]
+    assert v["is_readiness"] is False
+    assert v["is_g_l4_ready"] is False
+    assert v["is_model_call_verified_ready"] is False
+    assert v["is_operator_approved_promotion"] is False

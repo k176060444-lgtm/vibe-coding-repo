@@ -85,21 +85,29 @@ def test_receipt_bytes_match_closure():
         )
 
 
-def test_closure_anchor_matches_main():
-    """The closure was anchored at clean-main collection time. Compare
-    against the PR's base ref (i.e., the main branch HEAD that the PR
-    branched from), not the current branch HEAD. The closure anchor
-    records the **collection anchor**, which is the main commit at the
-    time the clean-main live evidence was collected.
+def test_closure_anchor_matches_evidence_collection_anchor():
+    """The closure was anchored at clean-main collection time = `09b1d97`.
+
+    Semantic clarification (amended):
+    - The closure's `anchor` field is the **evidence collection anchor**:
+      the commit SHA of the clean-main HEAD at the moment the D4
+      sanctioned live evidence was collected. This is a STABLE,
+      IMMUTABLE reference that is recorded in the closure JSON,
+      per-node receipts, and summary doc. It MUST NOT change.
+    - The current repository HEAD (`git rev-parse HEAD`) is the
+      **canonicalization/merge anchor**: it advances as new PRs
+      are merged. It is recorded separately (in the plan md, line
+      "Merge Anchor") but is NOT a property of the evidence itself.
+    - Therefore the test asserts that the closure anchor equals the
+      fixed evidence collection anchor (`09b1d97`), NOT the current
+      `git rev-parse main` (which is allowed to be `18807dd` or any
+      later commit on the main branch).
     """
     closure = json.loads(CLOSURE_PATH.read_text())
-    # main is the base ref; on the PR branch HEAD is the merge candidate
-    main_head = subprocess.run(
-        ["git", "rev-parse", "main"],
-        cwd=REPO, capture_output=True, text=True, timeout=10,
-    ).stdout.strip()
-    assert closure["anchor"] == main_head, (
-        f"closure anchor={closure['anchor']} main HEAD={main_head}"
+    EVIDENCE_COLLECTION_ANCHOR = "09b1d97f0cab774e3eb023c9768a40d8165a1d46"
+    assert closure["anchor"] == EVIDENCE_COLLECTION_ANCHOR, (
+        f"closure anchor={closure['anchor']} "
+        f"expected evidence collection anchor={EVIDENCE_COLLECTION_ANCHOR}"
     )
 
 
