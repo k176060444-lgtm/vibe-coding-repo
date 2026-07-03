@@ -154,7 +154,6 @@ If future remediation of the 21bao residual is desired, the following conditions
 | Reference | Path |
 |---|---|
 | D4 closure evidence | `.hermes/evidence/g-l3r-d4-runtime-visible-blocker-closed.json` |
-| D4 closure notes | `.hermes/evidence/g-l3r-d4-runtime-visible-blocker-closed.notes.md` |
 | D4 v3 receipt (21bao) | `.hermes/evidence/g-l3r-d4-receipt-21bao-v3.json` |
 | D4 v3 receipt (5bao) | `.hermes/evidence/g-l3r-d4-receipt-5bao-v3.json` |
 | D4 v3 receipt (9bao) | `.hermes/evidence/g-l3r-d4-receipt-9bao-v3.json` |
