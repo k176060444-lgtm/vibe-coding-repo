@@ -158,6 +158,7 @@ If future remediation of the 21bao residual is desired, the following conditions
 | D4 v3 receipt (5bao) | `.hermes/evidence/g-l3r-d4-receipt-5bao-v3.json` |
 | D4 v3 receipt (9bao) | `.hermes/evidence/g-l3r-d4-receipt-9bao-v3.json` |
 | 21bao residual docs | `docs/baseline02/g-l3r-d4-21bao-namespace-asymmetry.md` |
+| NMC staleness analysis | `docs/baseline02/nmc-staleness-analysis.md` |
 | R1 fix | PR #323 |
 | R5 fix | OPS-HYGIENE-001B + OPS-HYGIENE-002 |
 | D4 collector | `scripts/worker_attest_layer3_d4_sanctioned_live_evidence.py` |

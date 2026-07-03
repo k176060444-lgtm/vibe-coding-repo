@@ -19,5 +19,6 @@ Baseline02 is the operator-accepted remediation baseline for the VibeDev cluster
 
 | File | Purpose |
 |---|---|
-| [`g-l3r-closeout.md`](g-l3r-closeout.md) | G-L3R D4 closeout status (single source of truth) |
+| [`nmc-staleness-analysis.md`](nmc-staleness-analysis.md) | NMC runtime_visible coverage vs D4 live evidence timing gap (PR #328) |
 | [`g-l3r-d4-21bao-namespace-asymmetry.md`](g-l3r-d4-21bao-namespace-asymmetry.md) | 21bao provider namespace asymmetry residual (PR #324) |
+| [`g-l3r-closeout.md`](g-l3r-closeout.md) | G-L3R D4 closeout status (single source of truth) |
