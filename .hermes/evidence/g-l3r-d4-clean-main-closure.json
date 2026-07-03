@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0.0",
+  "anchor": "09b1d97f0cab774e3eb023c9768a40d8165a1d46",
+  "operator_approval_id": "OPERATOR-20260703-G-L3R-D4-LIVE-EVIDENCE-003",
+  "generated_at": "2026-07-03T12:36:00Z",
+  "target_model": "deepseek-v4-pro",
+  "canonical_model_id": "opencode-go-deepseek-v4-pro",
+  "provider_namespace": "opencode-go",
+  "scope_constraints": [
+    "not-G_L3R_BLOCKED_resolved",
+    "not-G-L4-ready",
+    "not-readiness-ready",
+    "not-model_call_verified-ready",
+    "not-operator_approved-promotion",
+    "not-nmc-write-back",
+    "not-model_pool-write-back",
+    "not-G-READINESS",
+    "not-G-GRAY",
+    "not-G-D-A",
+    "not-G-D-B",
+    "not-PR-7",
+    "not-Baseline03",
+    "not-Stage8"
+  ],
+  "per_node": {
+    "21bao": {
+      "collector_mode": "21bao_local_sanctioned_read",
+      "source_ref": "21bao_local_nmc",
+      "collection_status": "completed",
+      "runtime_visible_observed": false,
+      "receipt_sha256": "161a63bfb542ef5887437d1d3da6153282a76957e7ce68a77e6b2abd55e9155a",
+      "receipt_bytes": 1415,
+      "receipt_path": ".hermes/evidence/g-l3r-d4-clean-main-v1/21bao-receipt.json",
+      "endpoint_enum_ref": "21bao_local_nmc"
+    },
+    "5bao": {
+      "collector_mode": "5bao_sanctioned_ssh_read",
+      "source_ref": "5bao_ssh_opencode_config",
+      "collection_status": "completed",
+      "runtime_visible_observed": true,
+      "receipt_sha256": "276282ec5a8fe827671df7af2bee1547621cb3418190b5a8fa10ff67d27bec92",
+      "receipt_bytes": 1395,
+      "receipt_path": ".hermes/evidence/g-l3r-d4-clean-main-v1/5bao-receipt.json",
+      "endpoint_enum_ref": "5bao_ssh_opencode_config",
+      "endpoint_hostport": "192.168.5.6:22222"
+    },
+    "9bao": {
+      "collector_mode": "9bao_sanctioned_ssh_read",
+      "source_ref": "9bao_ssh_opencode_config",
+      "collection_status": "completed",
+      "runtime_visible_observed": true,
+      "receipt_sha256": "82251a651455202752a36bce1b6db54d7f01f226f7529ef57a593e49c6ae651e",
+      "receipt_bytes": 1395,
+      "receipt_path": ".hermes/evidence/g-l3r-d4-clean-main-v1/9bao-receipt.json",
+      "endpoint_enum_ref": "9bao_ssh_opencode_config",
+      "endpoint_hostport": "192.168.9.6:22222"
+    }
+  },
+  "verdict": {
+    "evidence_status": "G_L3R_D4_CLEAN_MAIN_LIVE_EVIDENCE_2OF3_PASS",
+    "blocker_status": "G_L3R_D4_NOT_3OF3",
+    "blocker_state": "G_L3R_BLOCKER_REMAINS_PARTIALLY_OPEN_FOR_21BAO",
+    "closes_blocker": false,
+    "is_readiness": false,
+    "is_g_l4_ready": false,
+    "is_model_call_verified_ready": false,
+    "is_operator_approved_promotion": false,
+    "writes_back_to_nmc": false,
+    "writes_back_to_model_pool": false
+  },
+  "leak_scan": {
+    "evidence_level": {"passed": true, "matches_found": 0},
+    "receipt_level": {"passed": true, "matches_found": 0},
+    "summary_level": {"passed": true, "matches_found": 0}
+  },
+  "forbidden_operation_flags": {
+    "model_invocation_attempted": false,
+    "credential_provisioning_attempted": false,
+    "node_sync_attempted": false,
+    "runtime_field_promotion_attempted": false,
+    "deu_assignment_attempted": false,
+    "write_back_attempted": false
+  },
+  "test_results": {
+    "d4_self_check": "passed_23_of_23",
+    "d4_targeted_pytest": "1004_passed_1_skipped",
+    "negative_21bao_ssh": "rejected",
+    "negative_no_approval": "rejected",
+    "negative_wrong_mode": "rejected"
+  },
+  "scope_constraints_verified": true,
+  "anchor_matches_main": true
+}
