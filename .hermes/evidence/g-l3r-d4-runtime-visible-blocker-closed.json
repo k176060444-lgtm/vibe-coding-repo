@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0.0",
+  "source": "worker_attest_layer3_d4_sanctioned_live_evidence",
+  "anchor": "baad421f3213f666ce5b1448e7923b0ad2c640f7",
+  "generated_at": "2026-07-03T07:32:25Z",
+  "target_model": "deepseek-v4-pro",
+  "canonical_model_id": "opencode-go-deepseek-v4-pro",
+  "provider_namespace": "opencode-go",
+  "preflight_verdict": "G_L3R_D4_PREFLIGHT_PASS_SANCTIONED_EVIDENCE",
+  "blocker_status": "CLOSED_BY_5BAO_9BAO",
+  "aggregate_status": "G_L3R_D4_RUNTIME_VISIBLE_BLOCKER_CLOSED",
+  "reconciliation_verdict": "G_L3R_RECONCILIATION_PASS_D4_CLOSED",
+  "nodes": {
+    "21bao": {
+      "runtime_visible_observed": false,
+      "runtime_visible_source": "21bao_local_nmc",
+      "wrapper_visible_observed": true,
+      "config_visible_observed": true,
+      "collection_status": "completed",
+      "classification": "non_blocking_residual",
+      "reason": "NMC runtime_visible is 'unknown' (string), not True. Requires operator promotion or NMC update."
+    },
+    "5bao": {
+      "runtime_visible_observed": true,
+      "runtime_visible_source": "5bao_ssh_opencode_config",
+      "config_visible_observed": true,
+      "collection_status": "completed",
+      "classification": "closure_evidence",
+      "evidence_summary": "PATH fallback found ~/.opencode/bin/opencode; section_name fix entered provider.deepseek-plan.models; deepseek-v4-pro detected under deepseek-plan provider; opencode_exists=True"
+    },
+    "9bao": {
+      "runtime_visible_observed": true,
+      "runtime_visible_source": "9bao_ssh_opencode_config",
+      "config_visible_observed": true,
+      "collection_status": "completed",
+      "classification": "closure_evidence",
+      "evidence_summary": "Same detection path as 5bao: opencode 1.17.8 present, config.json provider.deepseek-plan.models.deepseek-v4-pro found"
+    }
+  },
+  "prs_merged": [
+    "PR #319: stdin-pipe fix (SSH connection stability)",
+    "PR #320: detection correctness (PATH fallback, recursive models, wrapper_valid)",
+    "PR #321: singular section_name compatibility"
+  ],
+  "receipts": [
+    {
+      "path": ".hermes/evidence/g-l3r-d4-receipt-21bao-v3.json",
+      "sha256": "236b49f0890413ba9ac68d5ddad589eafd0531f1e9e97530c3e833e19d19941a",
+      "collection_mode": "21bao_local_sanctioned_read"
+    },
+    {
+      "path": ".hermes/evidence/g-l3r-d4-receipt-5bao-v3.json",
+      "sha256": "3e4e77b110b694ae1306288020c14e7656a2b7ebdeb672ddb0426eb2da616c13",
+      "collection_mode": "5bao_sanctioned_ssh_read"
+    },
+    {
+      "path": ".hermes/evidence/g-l3r-d4-receipt-9bao-v3.json",
+      "sha256": "39775046b3a3656de16a29e3164101d28c087c8cbbef8af3c6c16782cb5905fc",
+      "collection_mode": "9bao_sanctioned_ssh_read"
+    }
+  ],
+  "forbidden_operation_flags": {
+    "model_invocation_attempted": false,
+    "credential_provisioning_attempted": false,
+    "node_sync_attempted": false,
+    "runtime_field_promotion_attempted": false,
+    "deu_assignment_attempted": false,
+    "write_back_attempted": false
+  },
+  "not_authorized_scope": [
+    "G-L4 live inference / model_call_verified promotion",
+    "G-READINESS (readiness ready assertion)",
+    "Formal G-D-A (DEU assignment)",
+    "Formal G-D-B (DEU enablement decision)",
+    "G-GRAY / GRAY_ACCEPTANCE",
+    "PR-7 (model_pool.yaml schema v1.3+)",
+    "Baseline03 (stage 8 hardening)",
+    "Stage8 (production readiness)",
+    "Data write-back to model_pool.yaml or node_model_capability.yaml",
+    "Runtime field promotion (runtime_visible/env_loaded/etc.)"
+  ],
+  "classification": "live / sanctioned / clean-main / D4-runtime-visible / not-readiness"
+}
