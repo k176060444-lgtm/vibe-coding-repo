@@ -108,9 +108,9 @@ Verify that all 8 opencode-go models have valid API credentials and endpoints on
 
 ### 4.5 NMC `operator_approved` and `model_call_verified` Elevation
 
-After smoke tests pass, set `operator_approved=True` and `model_call_verified=True` for the tested models in NMC.
+If smoke tests pass and the operator explicitly authorises a separate bounded PR or work order, NMC field elevation (`operator_approved=True`, `model_call_verified=True`) may be performed for the tested models. This elevation is not automatic and is not authorised by this preflight document.
 
-**Risk**: Low — deterministic file edit after successful verification.
+**Risk**: Low — deterministic file edit, but requires a separate operator-approved PR beyond this preflight map. Not authorised by PR #331.
 
 ---
 
