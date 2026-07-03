@@ -176,9 +176,10 @@ def build_reconciliation_report() -> dict:
     deu_gap = _check_v4_pro_gap(canary_status)
     if deu_gap:
         blockers.append(
-            "deepseek-v4-pro (DeepSeek V4 Pro): runtime_visible/fixture mismatch "
-            "on all 3 nodes — standard active model candidate gap, NOT special-cased. "
-            "Requires sanctioned evidence or operator-authorized data-only normalization."
+            "deepseek-v4-pro (DeepSeek V4 Pro): 5bao/9bao runtime_visible=true "
+            "(PR #332 evidence, PR #334 NMC normalization); 21bao residual "
+            "(R8 namespace asymmetry, G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY). "
+            "Global G_L3R_BLOCKED narrowed to 21bao residual — does not close globally."
         )
 
     report["blocker_summary"] = blockers
@@ -189,11 +190,10 @@ def build_reconciliation_report() -> dict:
     # ── 6. Next recommendation ──────────────────────────────────────────
     if blockers:
         report["next_recommendation"] = (
-            "Resolve deepseek-v4-pro runtime_visible mismatch via sanctioned "
-            "evidence collection (not fixture-only promotion). After unblock, "
-            "consider G-L4 preflight authorisation with DeepSeek V4 Flash / "
-            "Mimo V2.5 (low cost) as default; expensive models require bounded "
-            "smoke + separate operator authorisation."
+            "5bao/9bao D4 runtime_visible resolved (PR #332 evidence, PR #334 NMC). "
+            "21bao residual remains (R8 asymmetry). Global G_L3R_BLOCKED narrowed "
+            "to 21bao residual only. Operator decision required for 21bao resolution. "
+            "G-L4 preflight not yet authorized — separate operator decision needed."
         )
     else:
         report["next_recommendation"] = (
@@ -293,8 +293,9 @@ def _collect_aggregate_verdict() -> dict:
 def _build_unblock_criteria(agg: dict | None, blockers: list[str]) -> list[str]:
     """Build specific unblock criteria based on current blockers.
 
-    Never uses fixture-only promotion. DeepSeek V4 Pro is a standard
-    active model candidate gap (not special-cased).
+    5bao/9bao D4 runtime_visible resolved via evidence (PR #332) and
+    NMC normalization (PR #334). 21bao residual remains (R8 asymmetry).
+    Never uses fixture-only promotion.
     """
     criteria: list[str] = []
 
@@ -306,12 +307,12 @@ def _build_unblock_criteria(agg: dict | None, blockers: list[str]) -> list[str]:
 
     if any("deepseek-v4-pro" in b for b in blockers):
         criteria.extend([
-            "Collect sanctioned runtime_visible evidence for deepseek-v4-pro "
-            "(not fixture-only promotion)",
-            "OR operator authorises data-only normalization with explicit "
-            "scope (recorded as operator_approval_id in receipts)",
-            "DeepSeek V4 Pro follows standard active model rules — no "
-            "special-casing or preferential promotion.",
+            "5bao/9bao runtime_visible resolved via evidence (PR #332) and "
+            "NMC normalization (PR #334). No further action for these nodes.",
+            "21bao residual asymmetry (R8) — operator decision required: "
+            "keep residual or configure 21bao opencode.jsonc provider block.",
+            "Global G_L3R_BLOCKED narrowed to 21bao residual only — "
+            "does not close globally until 21bao resolved or accepted.",
         ])
 
     if not criteria:
