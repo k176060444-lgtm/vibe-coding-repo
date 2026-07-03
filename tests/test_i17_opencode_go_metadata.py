@@ -160,7 +160,7 @@ def test_route_all_unchanged():
     assert len(roles) == 9, f"Expected 9 roles, got {len(roles)}"
     # Check no opencode-go models in route-all
     for role, info in roles.items():
-        model = info.get('recommended', '')
+        model = info.get('recommended', '') or ''
         assert 'opencode-go' not in model, \
             f"Route-all role {role} uses opencode-go model {model} (should be unchanged)"
 
