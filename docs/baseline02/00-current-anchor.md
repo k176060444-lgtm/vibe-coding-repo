@@ -19,6 +19,10 @@ Key facts:
 - 21bao: `non_blocking_residual`
 - **Not**: readiness, G-L4, gray, Baseline03
 
+## NMC Staleness Doc
+
+The NMC staleness analysis (PR #328) documents the timing gap between NMC generation and D4 live evidence collection. See [NMC staleness analysis](nmc-staleness-analysis.md).
+
 ## Phase Scope
 
 This anchor is part of **Baseline02 / G-L3R** only. It does not imply readiness for or entitlement to:
