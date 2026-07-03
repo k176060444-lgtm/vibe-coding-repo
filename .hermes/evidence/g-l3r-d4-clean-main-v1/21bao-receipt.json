@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0.0",
+  "anchor": "09b1d97f0cab774e3eb023c9768a40d8165a1d46",
+  "node": "21bao",
+  "source_node": "worker_attest_layer3_d4_sanctioned_live_evidence",
+  "target_model": "deepseek-v4-pro",
+  "canonical_model_id": "opencode-go-deepseek-v4-pro",
+  "provider_namespace": "opencode-go",
+  "runtime_provider": null,
+  "aliases_checked": [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "ds4pro",
+    "opencode-ds4pro"
+  ],
+  "runtime_visible_observed": false,
+  "runtime_visible_source": "21bao_local_nmc",
+  "config_visible_observed": true,
+  "wrapper_visible_observed": true,
+  "env_loaded_observed_enum": "config_only",
+  "credential_status_observed_enum": "not_checked",
+  "endpoint_ref_observed_enum": "not_checked",
+  "redaction_status": {
+    "redacted": false,
+    "redacted_count": 0
+  },
+  "leak_scan": {
+    "passed": true,
+    "matches_found": 0
+  },
+  "forbidden_operation_flags": {
+    "model_invocation_attempted": false,
+    "credential_provisioning_attempted": false,
+    "node_sync_attempted": false,
+    "runtime_field_promotion_attempted": false,
+    "deu_assignment_attempted": false,
+    "write_back_attempted": false
+  },
+  "collector_mode": "21bao_local_sanctioned_read",
+  "operator_approval_id": "OPERATOR-20260703-G-L3R-D4-LIVE-EVIDENCE-003",
+  "collection_status": "completed",
+  "generated_at": "2026-07-03T12:35:42Z"
+}
