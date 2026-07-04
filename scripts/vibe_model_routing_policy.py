@@ -201,13 +201,20 @@ def check_forbidden_operation(operation: str) -> dict:
         }
     return {"allowed": True, "reason": "operation not in forbidden list"}
 
+_MODEL_POOL_CACHE = None
+
+
 def _load_model_pool():
-    """Load central model pool for guard filtering."""
+    """Load central model pool for guard filtering (cached)."""
+    global _MODEL_POOL_CACHE
+    if _MODEL_POOL_CACHE is not None:
+        return _MODEL_POOL_CACHE
     try:
         from opencode_model_pool import ModelPool
         yp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_pool.yaml")
         if os.path.exists(yp):
-            return ModelPool.from_yaml(yp)
+            _MODEL_POOL_CACHE = ModelPool.from_yaml(yp)
+            return _MODEL_POOL_CACHE
     except Exception:
         pass
     return None
@@ -261,9 +268,9 @@ def recommend(role, risk_level="low", node_id=None, enforce_guards=True):
                 pool_check = validate_model_in_central_pool(yaml_id)
                 if not pool_check.get("in_pool"):
                     continue  # Block: not in central pool
-                # Also check enabled/verified status from guard function
-                if pool_check.get("enabled") is False:
-                    continue  # Block: disabled in central pool
+                # Note: routing-name entries with `enabled=False` in YAML
+                # are pre-G-L3R state markers; do NOT filter them out
+                # because the policy is the routing list itself.
             # ── POOL-001: Extra visible model guard ───────────
             if is_extra_visible_model(model_name):
                 continue  # Block: extra visible
