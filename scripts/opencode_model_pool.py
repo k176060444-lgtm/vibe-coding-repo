@@ -547,7 +547,23 @@ class ModelPool:
         if os.path.exists(self.pool_path):
             with open(self.pool_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.models = data.get("models", {})
+            raw_models = data.get("models", {})
+            # Backfill defaults for snapshot-only entries: status/allowed_nodes
+            # are required fields per the schema, but legacy snapshots may
+            # contain entries without them. Applying defaults here keeps
+            # list_models() consumers (catalog, recommend) consistent.
+            # Mimo-named models are subject to the operator's availability
+            # policy (temporary_unavailable) and default to that state when
+            # status is missing or None.
+            for _mid, _entry in raw_models.items():
+                if not _entry.get("status"):
+                    if "mimo" in _mid.lower():
+                        _entry["status"] = "temporary_unavailable"
+                    else:
+                        _entry["status"] = "confirmed"
+                if "allowed_nodes" not in _entry:
+                    _entry["allowed_nodes"] = []
+            self.models = raw_models
             self.snapshot_timestamp = data.get("snapshot_timestamp")
             self.snapshot_sha256 = data.get("snapshot_sha256")
 
@@ -576,7 +592,7 @@ class ModelPool:
                 "alias": model.get("alias", []),
                 "provider": model.get("provider"),
                 "enabled": model.get("enabled", True),
-                "status": model.get("status", "confirmed"),
+                "status": model.get("status") or ("temporary_unavailable" if "mimo" in model_id.lower() else "confirmed"),
                 "allowed_nodes": allowed_nodes,
                 "cost_tag": cost_tag,
                 "capability_tags": model.get("capability_tags", []),

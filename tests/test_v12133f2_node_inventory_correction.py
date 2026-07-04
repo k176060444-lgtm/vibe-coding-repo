@@ -7,6 +7,9 @@ import json
 # Use local scripts/ directory (not hardcoded worktree path)
 _SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "scripts")
 sys.path.insert(0, os.path.abspath(_SCRIPTS_DIR))
+# Worktree root for subprocess cwd. Resolved from this test file location so
+# tests run from any checkout without env-var setup.
+WORKTREE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 from vibe_worker_registry import (
     DEFAULT_WORKERS, WorkerRegistry, WorkerNode, NodeStatus, TaskType,
@@ -176,7 +179,10 @@ def test_route_all_git_integrator_on_21bao():
 def test_route_all_uses_dynamic_registry_not_hardcoded():
     """route-all must use dynamic registry, not hardcoded fixed list."""
     routes = route_all()
-    for role, r in routes.items():
+    # Filter out metadata keys (e.g. _gate_results) which are not role entries.
+    # See test_route_all_9_roles_output for the same convention.
+    role_routes = {k: v for k, v in routes.items() if not k.startswith("_")}
+    for role, r in role_routes.items():
         assert "node_attribution" in r, f"{role}: missing node_attribution (suggests hardcoded)"
         if r.get("planned_node"):
             assert r["node_attribution"].get("node_id") == r["planned_node"]
@@ -493,7 +499,7 @@ def test_registry_self_check_passes():
     """vibe_worker_registry --self-check still passes."""
     import subprocess
     result = subprocess.run(
-        ["python3", "scripts/vibe_worker_registry.py", "--self-check"],
+        [sys.executable, "scripts/vibe_worker_registry.py", "--self-check"],
         capture_output=True, text=True, cwd=WORKTREE,
     )
     # Should pass (overall=PASS)
@@ -505,7 +511,7 @@ def test_routing_self_check_passes():
     """vibe_model_routing_policy --self-check still passes."""
     import subprocess
     result = subprocess.run(
-        ["python3", "scripts/vibe_model_routing_policy.py", "--self-check"],
+        [sys.executable, "scripts/vibe_model_routing_policy.py", "--self-check"],
         capture_output=True, text=True, cwd=WORKTREE,
     )
     assert result.returncode == 0, f"routing self-check failed: {result.stdout}\n{result.stderr}"
