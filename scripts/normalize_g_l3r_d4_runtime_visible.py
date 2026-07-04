@@ -138,10 +138,27 @@ def normalize() -> dict[str, Any]:
             # ── Forbidden-promotion assertions ───────────────────────────
             # These MUST always hold. The script asserts them on every run
             # so a future change cannot accidentally promote these fields.
-            if entry.get("model_call_verified") is True:
+            #
+            # Stage-aware: G-L4 D4 canaries (PR #341/#342/#343) legitimately
+            # promote model_call_verified=true WITH evidence block. If the
+            # evidence block exists and references valid G-L4 PRs, allow it.
+            # Without evidence, model_call_verified=true is an error.
+            mcv = entry.get("model_call_verified")
+            mcv_ev = entry.get("model_call_verified_evidence")
+            if mcv is True and not isinstance(mcv_ev, dict):
                 errors.append(
-                    f"{node}: model_call_verified promoted (must stay non-True)"
+                    f"{node}: model_call_verified True without evidence block"
                 )
+            elif mcv is True and isinstance(mcv_ev, dict):
+                # G-L4 D4 canary evidence present — allowed promotion
+                # Verify it references a known G-L4 evidence PR
+                source = str(mcv_ev.get("source", ""))
+                anchor = str(mcv_ev.get("evidence_anchor", ""))
+                if not any(pr in source for pr in ("PR #341", "PR #342", "PR #343")):
+                    errors.append(
+                        f"{node}: model_call_verified True with unrecognized "
+                        f"evidence source: {source}"
+                    )
             if entry.get("operator_approved") is True:
                 errors.append(
                     f"{node}: operator_approved promoted (must stay non-True)"
@@ -277,12 +294,24 @@ def self_check() -> dict[str, Any]:
                     f"{expected_anchors[node][1]!r}",
                 )
 
-        # Forbidden promotions
-        check(
-            f"{node}_model_call_verified_not_promoted",
-            d4.get("model_call_verified") is not True,
-            f"model_call_verified={d4.get('model_call_verified')!r}",
-        )
+        # Forbidden promotions — stage-aware
+        # G-L4 D4 canary evidence allows model_call_verified=true
+        mcv = d4.get("model_call_verified")
+        mcv_ev = d4.get("model_call_verified_evidence")
+        if mcv is True and isinstance(mcv_ev, dict):
+            # Allowed: G-L4 evidence exists
+            check(
+                f"{node}_model_call_verified_has_g4_evidence",
+                any(pr in str(mcv_ev.get("source", ""))
+                    for pr in ("PR #341", "PR #342", "PR #343")),
+                f"unrecognized evidence source: {mcv_ev.get('source', '')}",
+            )
+        elif mcv is True:
+            check(
+                f"{node}_model_call_verified_not_promoted",
+                False,
+                f"model_call_verified=True without evidence block",
+            )
         check(
             f"{node}_operator_approved_not_promoted",
             d4.get("operator_approved") is not True,
