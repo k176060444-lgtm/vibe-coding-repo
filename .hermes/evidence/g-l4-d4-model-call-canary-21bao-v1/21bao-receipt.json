@@ -7,6 +7,22 @@
   "four_way_anchor_aligned": true,
   "scope": "G-L4 D4 21bao model-call canary ONLY — not readiness, not gray, not Baseline03",
   "canary_verdict": "G_L4_D4_21BAO_CANARY_PASS",
+  "dangerously_skip_permissions": {
+    "flag_used": true,
+    "mitigation_prompt_class": "harmless_deterministic_minimal",
+    "mitigation_prompt_text_redacted": "[fixed string: 'Output exactly: D4_CANARY_OK']",
+    "mitigation_no_repo_content_sent": true,
+    "mitigation_no_secrets_sent": true,
+    "mitigation_no_tool_execution": true,
+    "mitigation_no_file_modification": true,
+    "mitigation_no_shell_side_effects": true,
+    "mitigation_no_extra_model_calls": true,
+    "mitigation_no_fallback": true,
+    "mitigation_git_status_clean_verified": true,
+    "mitigation_stdout_stderr_redacted": true,
+    "mitigation_credential_values_not_printed": true,
+    "mitigation_note": "All flags verified. --dangerously-skip-permissions was required because opencode.exe in non-interactive mode rejects permission prompts without this flag. The prompt was a fixed harmless string with no dynamic content, file references, secrets, or environment data."
+  },
   "p16_wrapper_decision": {
     "authorization_source": "Operator pre-authorization G-L4-D4-MODEL-CALL-VERIFY-CANARY-21BAO (2026-07-04). BLOCKER-01 resolved: existing Windows local user env accepted without wrapper.",
     "execution_command_class": "opencode.exe run --dangerously-skip-permissions -m <provider>/<model>",
@@ -38,7 +54,7 @@
     "max_tokens_respected": true,
     "call_timestamp": "2026-07-04T04:53:07Z",
     "duration_seconds": 3,
-    "opencode_go_provider_availability_note": "opencode-go provider NOT found on 21bao (Provider not found). D4 model available via legacy deepseek-plan provider. This is documented in PR #340 preflight as legacy_entry."
+    "opencode_go_provider_availability_note": "opencode-go provider NOT found on 21bao (Provider not found). D4 model called via deepseek-plan/deepseek-v4-pro. This is NOT a fallback, NOT a model switch, NOT provider drift — it is the known namespace asymmetry documented in PR #340 preflight (legacy_entry: deepseek-plan-deepseek-v4-pro). The concrete deepseek-plan provider is the only runtime path available on 21bao for this model. If operator requires opencode-go provider, a separate provider configuration session is needed."
   },
   "post_call_state": {
     "nmc_writeback_performed": false,

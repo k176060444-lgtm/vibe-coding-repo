@@ -53,6 +53,29 @@ for this canary call (BLOCKER-01 resolved: accept existing env without wrapper).
 | **Timestamp** | `2026-07-04T04:53:07Z` |
 | **Prompt class** | Harmless deterministic minimal |
 
+### Risk Mitigation: `--dangerously-skip-permissions`
+
+The canary call used `opencode.exe run --dangerously-skip-permissions` because
+non-interactive mode rejects permission prompts without this flag. All
+mitigations confirmed:
+
+| Mitigation | Status |
+|---|---|
+| Flag used | `true` |
+| Prompt class | Harmless deterministic minimal (`"Output exactly: D4_CANARY_OK"`) |
+| No repo content / secrets / credentials sent | ✅ |
+| No tool execution triggered | ✅ |
+| No file / shell / runtime modification | ✅ |
+| No extra model calls | ✅ |
+| No fallback | ✅ |
+| git status clean verified | ✅ |
+| stdout/stderr redacted | ✅ |
+| Credential values NOT printed | ✅ |
+
+This flag was bounded to a single fixed-string prompt with zero dynamic
+content, zero file references, and zero environment access. No side effects
+observed.
+
 ### Important Note: opencode-go Provider Availability
 
 The `opencode-go` provider was **NOT found** on 21bao. The D4 model was
