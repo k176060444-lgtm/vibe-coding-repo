@@ -48,8 +48,8 @@ class TestRealRepo:
     def test_real_verdict_is_candidate_drift_or_pass_with_warn(self):
         """Real repo drift summary verdict.
 
-        Pre-PR #338: verdict was G_L3F_CANDIDATE_DRIFT (21bao residual).
-        Post-PR #338: All 3 nodes D4 runtime_visible=True. The drift
+        Pre-PR #337: verdict was G_L3F_CANDIDATE_DRIFT (21bao residual).
+        Post-PR #337: All 3 nodes D4 runtime_visible=True. The drift
         summary verdict may shift to G_L3F_PASS_WITH_WARN if no other
         active gaps remain, OR stay at G_L3F_CANDIDATE_DRIFT for
         higher-layer gaps on other models.
@@ -294,7 +294,7 @@ class TestV4ProNotSpecial:
     def test_v4_pro_follows_active_rules(self):
         """V4 Pro is active and subject to same checks as other active models.
 
-        Post-PR #338: D4 runtime_visible is 3-of-3. V4 Pro may or may not
+        Post-PR #337: D4 runtime_visible is 3-of-3. V4 Pro may or may not
         appear in findings (depends on whether higher-layer gaps exist),
         but the rules applied to it MUST be the same as for any other
         active model.

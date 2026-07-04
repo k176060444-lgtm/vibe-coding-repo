@@ -332,7 +332,7 @@ class TestSevenStateSchema:
                         if val != "unknown":
                             # Exception: D4 runtime_visible on 5bao/9bao/21bao
                             # may be True (evidence-based normalization per
-                            # PR #333 plan + PR #338 normalization).
+                            # PR #333 plan + PR #337 normalization).
                             if sf == "runtime_visible" and \
                                e.get("model_id") == "opencode-go-deepseek-v4-pro" and \
                                nn in ("5bao", "9bao", "21bao"):

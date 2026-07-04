@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for G-L3R D4 21bao Receipt-to-NMC Normalization (PR #338).
+"""Tests for G-L3R D4 21bao Receipt-to-NMC Normalization (PR #337).
 
 Verifies:
 - 21bao D4 entry has runtime_visible=True with PR #336 evidence

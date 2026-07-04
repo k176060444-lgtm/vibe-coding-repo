@@ -226,13 +226,15 @@ class TestNmcConsistency:
 class TestDocConsistency:
     def test_doc_acknowledges_global_blocker_not_closed(self):
         doc = DOC_PATH.read_text(encoding="utf-8")
-        # The doc has a "What This Verdict Does NOT Mean" table stating
-        # that Global G_L3R_BLOCKED is NOT resolved, and the 21bao options
-        # section says G_L3R_BLOCKED remains open for 21bao.
-        assert "not resolved" in doc.lower() or \
-               "does not close" in doc.lower() or \
-               "remains open" in doc.lower() or \
-               "does NOT mean" in doc
+        # The doc has a "Closes Global Blocker for runtime_visible layer" row stating
+        # YES (runtime_visible blocker resolved), and a separate row stating that
+        # higher-layer items (model_call_verified, operator_approved, G-L4) are NOT
+        # closed. The doc must acknowledge this separation.
+        assert "Closes Global Blocker for runtime_visible layer" in doc
+        assert "Closes model_call_verified" in doc or \
+               "model_call_verified" in doc and "NO" in doc
+        # The doc must still say these higher items are outside G-L3R scope
+        assert "outside g-l3r scope" in doc.lower()
 
     def test_doc_no_2of3_as_3of3(self):
         doc = DOC_PATH.read_text(encoding="utf-8")
@@ -265,9 +267,10 @@ class TestScopeConstraints:
     def test_scope_constraints_in_evidence(self):
         ev = _load_evidence()
         sc = ev.get("scope_constraints", [])
-        assert any("not-g_l3r_blocked-resolved" in s.lower() for s in sc)
+        assert any("runtime_visible-resolved" in s.lower() for s in sc)
         assert any("not-g-l4-ready" in s.lower() for s in sc)
         assert any("not-readiness-ready" in s.lower() for s in sc)
+        assert any("g-l4-outside-g-l3r-scope" in s.lower() for s in sc)
 
     def test_preconditions_met(self):
         ev = _load_evidence()
@@ -283,24 +286,24 @@ class TestScopeConstraints:
 
 
 class TestReconciliationConsistency:
-    def test_reconciliation_has_narrowed_blocker_text(self):
-        """Reconciliation blocker text should mention the narrowed state."""
+    def test_reconciliation_has_closed_blocker_text(self):
+        """Reconciliation blocker text should reflect resolved state."""
         src = RECONCILIATION_PATH.read_text(encoding="utf-8")
-        # Should reference the 21bao history (now resolved at runtime_visible layer)
+        # Should reference the 21bao history (resolved at runtime_visible layer)
         assert "21bao" in src, \
             "Reconciliation should reference 21bao"
-        # Should NOT claim that all 3 nodes are still blocked at the
-        # runtime_visible layer (post-PR #336: all 3 are now visible).
-        # But the higher-layer blocker (model_call_verified etc.) is still open.
-        # Required phrasing: "does not close globally" for safety.
-        assert "does not close globally" in src, \
-            "Reconciliation must not claim global closure"
+        # Should clearly state that D4 runtime_visible blocker is resolved
+        assert "RESOLVED" in src, \
+            "Reconciliation must state that D4 runtime_visible blocker is RESOLVED"
+        # Should make clear that higher-layer items are outside G-L3R scope
+        assert "OUTSIDE G-L3R scope" in src, \
+            "Reconciliation must state that higher-layer items are outside G-L3R scope"
 
     def test_reconciliation_no_on_all_3_nodes(self):
         """Reconciliation should NOT say 'on all 3 nodes' for D4 blocker."""
         src = RECONCILIATION_PATH.read_text(encoding="utf-8")
         # Check the blocker_text string — old phrasing is replaced.
-        # Post-PR #336 wording should NOT say "on all 3 nodes" for D4.
+        # Post-PR #337 wording should NOT say "on all 3 nodes" for D4.
         assert "on all 3 nodes" not in src, \
             "Reconciliation blocker text should not claim mismatch on all 3 nodes"
 

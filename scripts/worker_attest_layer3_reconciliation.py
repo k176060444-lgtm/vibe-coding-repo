@@ -172,18 +172,23 @@ def build_reconciliation_report() -> dict:
             "candidate/runtime data gap, not a canary infrastructure failure." % agg.get("final_verdict")
         )
 
-    # Check if deepseek-v4-pro gap is present at higher layers
-    # (post-PR #336 + PR #338 normalization: all 3 nodes have
-    # runtime_visible=True; remaining gap is model_call_verified layer).
+    # Check if deepseek-v4-pro gap was present historically
+    # (PR #337 normalizes 21bao runtime_visible via PR #336 evidence:
+    #  all 3 nodes now runtime_visible=True at G-L3R layer).
+    # The G-L3R D4 runtime_visible blocker is RESOLVED.
+    # Higher-layer considerations (model_call_verified, operator_approved,
+    # G-L4 readiness) are NOT G-L3R blocker items — they belong to
+    # G-L4 scope and require separate operator authorization.
     deu_gap = _check_v4_pro_gap(canary_status)
     if deu_gap:
         blockers.append(
             "deepseek-v4-pro (DeepSeek V4 Pro): All 3 nodes (21bao/5bao/9bao) "
             "runtime_visible=true (5bao/9bao via PR #332 evidence, "
             "PR #334 NMC normalization; 21bao via PR #336 local evidence, "
-            "PR #338 NMC normalization). Global G_L3R_BLOCKED narrowed to "
-            "model_call_verified / operator_approved / readiness / G-L4 layers — "
-            "does not close globally until those layers resolve."
+            "PR #337 NMC normalization). G-L3R D4 runtime_visible blocker "
+            "RESOLVED (3-of-3). Model_call_verified, operator_approved, "
+            "and G-L4 readiness are OUTSIDE G-L3R scope — they require "
+            "separate operator authorization."
         )
 
     report["blocker_summary"] = blockers
@@ -196,10 +201,10 @@ def build_reconciliation_report() -> dict:
         report["next_recommendation"] = (
             "All 3 nodes (21bao/5bao/9bao) D4 runtime_visible resolved "
             "(5bao/9bao via PR #332 evidence + PR #334 NMC; 21bao via "
-            "PR #336 local evidence + PR #338 NMC normalization). "
-            "Global G_L3R_BLOCKED remains open at the model_call_verified / "
-            "operator_approved / readiness layer. Operator decision required "
-            "for next-step promotion (separate authorization). "
+            "PR #336 local evidence + PR #337 NMC normalization). "
+            "G-L3R D4 runtime_visible blocker is RESOLVED (3-of-3). "
+            "Model_call_verified, operator_approved, and G-L4 readiness "
+            "require separate operator authorization (outside G-L3R scope). "
             "G-L4 preflight not yet authorized."
         )
     else:
@@ -316,12 +321,12 @@ def _build_unblock_criteria(agg: dict | None, blockers: list[str]) -> list[str]:
         criteria.extend([
             "All 3 nodes (21bao/5bao/9bao) D4 runtime_visible resolved via "
             "evidence (PR #332 for 5bao/9bao + PR #334 NMC; PR #336 for "
-            "21bao + PR #338 NMC normalization). No further runtime_visible "
-            "action required for D4.",
-            "Remaining G_L3R_BLOCKED: model_call_verified / "
-            "operator_approved / readiness / G-L4 layers.",
-            "Global G_L3R_BLOCKED narrowed to higher-layer promotion — "
-            "does not close globally until those layers resolve.",
+            "21bao + PR #337 NMC normalization). No further runtime_visible "
+            "action required for D4. G-L3R D4 runtime_visible blocker is "
+            "RESOLVED.",
+            "Model_call_verified, operator_approved, and G-L4 readiness "
+            "are OUTSIDE G-L3R scope. Separate operator authorization "
+            "required for those stages.",
         ])
 
     if not criteria:

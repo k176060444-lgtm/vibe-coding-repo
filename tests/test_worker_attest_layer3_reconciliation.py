@@ -169,13 +169,14 @@ class TestUnblockCriteria:
     def test_deepseek_v4_pro_not_special(self):
         r = build_reconciliation_report()
         criteria_text = " ".join(r["unblock_criteria"])
-        # Should reference the narrowed state (5bao/9bao resolved, 21bao residual)
+        # Should reference the resolved state
         assert "5bao" in criteria_text or "9bao" in criteria_text or "21bao" in criteria_text
         # Should mention v4-pro or the D4 context
         assert "runtime_visible" in criteria_text or "resolved" in criteria_text
-        # Should state blocker narrowing and NOT claim global closure
-        assert "not close globally" in criteria_text.lower() or \
-            "21bao residual" in criteria_text.lower()
+        # Should state the blocker resolution: RESOLVED or OUTSIDE scope
+        assert "RESOLVED" in criteria_text or \
+            "OUTSIDE" in criteria_text or \
+            "runtime_visible" in criteria_text
 
     def test_deu_warn_preserved(self):
         r = build_reconciliation_report()

@@ -253,13 +253,13 @@ class TestDocConsistency:
 
 class TestNoWriteBack:
     def test_nmc_may_be_modified_by_followup(self):
-        """PR #336 did NOT write back. PR #338 (this normalization) does.
+        """PR #336 did NOT write back. PR #337 (this normalization) does.
 
         This test captures the in-PR #336 invariant: at the time PR #336
         was merged, the 21bao NMC entry had runtime_visible=unknown.
-        That invariant is now superseded by PR #338.
+        That invariant is now superseded by PR #337.
 
-        After PR #338:
+        After this PR:
         - 21bao D4 NMC entry has runtime_visible=True with PR #336 evidence
         - PR #336 receipt content unchanged (canonical, immutable)
         - model_pool.yaml D4 entry unchanged (no smoke_results, no 21bao)
@@ -270,9 +270,9 @@ class TestNoWriteBack:
         matrix = nmc.get("nodes", {}).get("21bao", {}).get("matrix", [])
         for entry in matrix:
             if entry.get("model_id") == "opencode-go-deepseek-v4-pro":
-                # Post-PR #338: 21bao D4 is now True backed by PR #336 evidence
+                # Post-PR #337: 21bao D4 is now True backed by PR #336 evidence
                 assert entry.get("runtime_visible") is True, \
-                    "21bao D4 runtime_visible must be True (PR #338 normalization)"
+                    "21bao D4 runtime_visible must be True (PR #337 normalization)"
                 ev = entry.get("runtime_visible_evidence")
                 assert isinstance(ev, dict)
                 assert "PR #336" in str(ev.get("source", ""))
@@ -289,7 +289,7 @@ class TestNoWriteBack:
     def test_model_pool_d4_entry_unchanged(self):
         """model_pool.yaml D4 entry must be unchanged.
 
-        This invariant is preserved across PR #336 AND PR #338: neither
+        This invariant is preserved across PR #336 AND PR #337: neither
         PR writes to model_pool.yaml.
         """
         import yaml

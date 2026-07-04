@@ -1,6 +1,6 @@
 # G-L3R D4 21bao Residual Gate
 
-## Status (Updated via PR #338)
+## Status (Updated via PR #337)
 
 | Field | Value |
 |---|---|
@@ -12,11 +12,12 @@
 | Operator Decision (current) | `OPERATOR-20260704-G-L3R-D4-21BAO-NMC-NORMALIZATION-006` |
 | Operator Decision (legacy) | `OPERATOR-20260703-G-L3R-D4-RESIDUAL-GATE-001` |
 | Created | 2026-07-03 |
-| Updated | 2026-07-04 (this PR #338) |
+| Updated | 2026-07-04 (this PR #337) |
 | Predecessor Plans | PR #333, PR #335, PR #336 |
 | NMC Normalization (5bao/9bao) | PR #334 |
-| NMC Normalization (21bao) | PR #338 (this PR) |
-| Closes Global Blocker | **NO** — narrowed to higher layers |
+| NMC Normalization (21bao) | PR #337 (this PR) |
+| Closes Global Blocker for runtime_visible layer | **YES** — G-L3R D4 runtime_visible blocker resolved (3-of-3) |
+| Closes model_call_verified / operator_approved / G-L4 readiness | **NO** — outside G-L3R scope, need separate authorization |
 
 ## Background
 
@@ -32,7 +33,7 @@ After PR #335 the gate verdict was `G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_
 
 After PR #336 produced canonical local-config runtime-visible evidence for 21bao
 (`deepseek-plan.deepseek-v4-pro` matched in `~/.config/opencode/opencode.jsonc`),
-PR #338 normalizes that evidence into NMC, elevating 21bao D4 to
+PR #337 normalizes that evidence into NMC, elevating 21bao D4 to
 `runtime_visible=True`. **All 3 nodes are now 3-of-3 at the runtime_visible layer.**
 
 The gate verdict is updated to `G_L3R_D4_RUNTIME_VISIBLE_3OF3_NORMALIZED`,
@@ -58,7 +59,7 @@ PR #333          post-evidence normalization plan (design only)
 PR #334          NMC runtime_visible normalization for 5bao/9bao
 PR #335          21bao residual gate (initial narrowing)
 PR #336          21bao local runtime-visible evidence + receipt
-PR #338          NMC runtime_visible normalization for 21bao (this PR)
+PR #337          NMC runtime_visible normalization for 21bao (this PR)
 ```
 
 ## Gate Verdict Semantics
@@ -79,7 +80,7 @@ Mean" below.
 - **All 3 nodes D4 runtime_visible = True** — evidence-based:
   - **5bao / 9bao**: PR #332 clean-main evidence, NMC normalized via PR #334
   - **21bao**: PR #336 local config evidence (matched_key
-    `deepseek-plan.deepseek-v4-pro`), NMC normalized via PR #338 (this PR)
+    `deepseek-plan.deepseek-v4-pro`), NMC normalized via PR #337 (this PR)
 - **G-L3R D4 runtime_visible layer is fully normalized** (3-of-3)
 - **Layer-specific guarantee**: this is a CONFIGURATION FACT, not an
   INVOCATION FACT. `runtime_visible=True` means the local config/wrapper can
@@ -121,20 +122,17 @@ Blockers:
   - deepseek-v4-pro (21bao): residual asymmetry (R8 documented).
 ```
 
-### After PR #338 (this PR)
+### After this PR (PR #337, current)
 
 ```
 Blockers:
   - deepseek-v4-pro (all 3 nodes): runtime_visible=True via evidence
     (5bao/9bao via PR #332 evidence, PR #334 NMC; 21bao via PR #336
-    local config evidence, PR #338 NMC normalization).
-  - HIGHER LAYER blockers remain open:
-      * model_call_verified (3/3 still false)
-      * operator_approved (3/3 still false)
-      * env_loaded (per-model status, promotion not authorized)
-      * G-L4 preflight, G-READINESS, G-D-A/B, G-GRAY, PR-7,
-        Baseline03, Stage8 — all not authorized.
-Global G_L3R_BLOCKED narrowed to higher-layer promotion — does not close globally.
+    local config evidence, PR #337 NMC normalization).
+  - G-L3R D4 runtime_visible blocker: **RESOLVED** (3-of-3).
+  - Model_call_verified / operator_approved / G-L4 readiness:
+    **OUTSIDE G-L3R scope** — require separate operator authorization.
+Global G_L3R_BLOCKED at runtime_visible layer is no longer blocked.
 ```
 
 ### Blocker Summary Update
@@ -152,8 +150,8 @@ operator_approved / G-L4 readiness)".
 | 21bao asymmetry documented | ✅ Complete (PR #324) |
 | Initial operator narrowing decision | ✅ Issued (PR #335) |
 | 21bao local evidence collected | ✅ Complete (PR #336) |
-| 21bao NMC normalization applied | ✅ Complete (PR #338, this PR) |
-| 21bao runtime_visible resolution | ✅ Complete (PR #336 + #338) |
+| 21bao NMC normalization applied | ✅ Complete (PR #337, this PR) |
+| 21bao runtime_visible resolution | ✅ Complete (PR #336 + #337) |
 | model_call_verified smokes | ❌ Not authorized (G-L4 scope) |
 | operator_approved | ❌ Not authorized |
 | G-L4 preflight | ❌ Not authorized |
@@ -183,7 +181,7 @@ status, or endpoint reachability (those are deferred to higher layers).
 
 ## Scope Constraints
 
-This gate (and this PR #338) do NOT authorize:
+This gate (and this PR #337) do NOT authorize:
 
 - Model call / inference
 - Credential provisioning
@@ -194,6 +192,10 @@ This gate (and this PR #338) do NOT authorize:
 - NMC modification beyond `runtime_visible` on the single D4 entry
 - DEU assignment (G-D-A)
 - G-L4 / G-READINESS / G-GRAY / G-D-B / PR-7 / Baseline03 / Stage8
+
+**Note on scope layers**: This gate closes the G-L3R D4 runtime_visible
+blocker (3-of-3 evidence-backed). It does NOT close or authorize the
+higher layers listed above, which are outside G-L3R scope.
 
 ---
 

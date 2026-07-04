@@ -79,7 +79,10 @@
   "verdict": {
     "gate_verdict": "G_L3R_D4_RUNTIME_VISIBLE_3OF3_NORMALIZED",
     "legacy_gate_verdict": "G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY",
+    "d4_runtime_visible_blocker_resolved": true,
+    "d4_runtime_visible_layer_status": "resolved_3of3",
     "closes_global_blocker": false,
+    "global_blocker_note": "G_L3R_BLOCKED umbrella still open for G-L3F drift items (non-D4). D4 runtime_visible layer specifically is resolved and does NOT require G-L4 readiness to close.",
     "closes_runtime_visible_layer": true,
     "two_of_three_confirmed": true,
     "three_of_three_confirmed": true,
@@ -93,20 +96,20 @@
     "is_operator_approved_promotion": false,
     "is_gray_acceptance": false,
     "is_baseline03_ready": false,
-    "narrowed_to_layers": [
-      "model_call_verified",
-      "operator_approved",
-      "G-L4 preflight",
-      "G-READINESS",
-      "G-D-A",
-      "G-D-B",
-      "PR-7",
-      "Baseline03",
-      "Stage8"
-    ]
+    "g-l3r_d4_runtime_visible_scope": {
+      "status": "resolved",
+      "nodes": ["21bao", "5bao", "9bao"],
+      "3_of_3_confirmed": true,
+      "runtime_visible_evidence_pr": "PR #332 (5bao/9bao), PR #336 (21bao)",
+      "nmc_normalization_pr": "PR #334 (5bao/9bao), PR #337 (21bao)",
+      "model_call_verified_outside_scope": true,
+      "operator_approved_outside_scope": true,
+      "g_l4_outside_scope": true,
+      "note": "G-L3R D4 runtime_visible blocker resolved. Higher-layer items (model_call_verified, operator_approved, G-L4 readiness) are outside G-L3R scope."
+    }
   },
   "scope_constraints": [
-    "not-G_L3R_BLOCKED-resolved",
+    "G-L3R-D4-runtime_visible-resolved",
     "not-G-L4-ready",
     "not-readiness-ready",
     "not-model_call_verified-ready",
@@ -119,7 +122,8 @@
     "not-G-D-B",
     "not-PR-7",
     "not-Baseline03",
-    "not-Stage8"
+    "not-Stage8",
+    "G-L4-outside-G-L3R-scope"
   ],
   "forbidden_operation_flags": {
     "model_invocation_attempted": false,

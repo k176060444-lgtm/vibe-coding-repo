@@ -164,7 +164,7 @@ class TestMismatchMatrix:
             "9bao runtime_visible should be True after normalization"
         # 21bao runtime_visible now True (PR #336 evidence-backed normalization)
         assert mm["nodes"]["21bao"]["runtime_visible_known"] is True, \
-            "21bao runtime_visible should be True after PR #338 normalization"
+            "21bao runtime_visible should be True after PR #337 normalization"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

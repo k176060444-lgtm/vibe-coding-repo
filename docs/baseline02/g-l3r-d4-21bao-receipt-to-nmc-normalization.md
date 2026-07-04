@@ -43,7 +43,7 @@ It does **NOT** perform:
 
 ## 21bao Normalization Semantics
 
-### Before PR #338
+### Before this PR
 
 | Layer | 21bao | 5bao | 9bao |
 |---|---|---|---|
@@ -52,7 +52,7 @@ It does **NOT** perform:
 | Canonical D4 entry | `opencode-go-deepseek-v4-pro` | same | same |
 | Evidence-backed `runtime_visible=true`? | NO (R8 residual) | YES (PR #332) | YES (PR #332) |
 
-### After PR #338
+### After this PR
 
 | Layer | 21bao | 5bao | 9bao |
 |---|---|---|---|
@@ -94,7 +94,7 @@ The 21bao D4 NMC entry now carries:
 
 ### D4 Preflight (`worker_attest_layer3_d4_runtime_visible_preflight`)
 
-The preflight still runs against the same logic. After PR #338:
+The preflight still runs against the same logic. After this PR:
 
 - All 3 nodes have `runtime_visible_known=True` in the mismatch matrix.
 - Root cause `runtime_visible_unknown` is no longer triggered.
@@ -113,7 +113,7 @@ The preflight still runs against the same logic. After PR #338:
   3-of-3 at runtime_visible:
   > "deepseek-v4-pro (DeepSeek V4 Pro): All 3 nodes (21bao/5bao/9bao)
   > runtime_visible=true (5bao/9bao via PR #332 evidence, PR #334 NMC
-  > normalization; 21bao via PR #336 local evidence, PR #338 NMC
+  > normalization; 21bao via PR #336 local evidence, PR #337 NMC
   > normalization). Global G_L3R_BLOCKED narrowed to
   > model_call_verified / operator_approved / readiness / G-L4 layers —
   > does not close globally until those layers resolve."

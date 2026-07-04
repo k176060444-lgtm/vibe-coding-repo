@@ -49,8 +49,8 @@ class TestRealRepo:
     def test_verdict_is_pass_with_warn_or_candidate_drift(self):
         """Real repo drift verdict.
 
-        Pre-PR #338: verdict was CANDIDATE_DRIFT (21bao residual).
-        Post-PR #338: All 3 nodes D4 runtime_visible=True. The D4
+        Pre-PR #337: verdict was CANDIDATE_DRIFT (21bao residual).
+        Post-PR #337: All 3 nodes D4 runtime_visible=True. The D4
         runtime_visible candidate_drift is resolved.
 
         Other active-gaps (env_loaded / model_call_verified /
@@ -67,9 +67,9 @@ class TestRealRepo:
     def test_deepseek_v4_pro_candidate_gap(self):
         """DeepSeek V4 Pro is an active model.
 
-        Post-PR #338: All 3 nodes (21bao/5bao/9bao) have runtime_visible=True
+        Post-PR #337: All 3 nodes (21bao/5bao/9bao) have runtime_visible=True
         via evidence-backed normalization (PR #332 for 5bao/9bao,
-        PR #336 + PR #338 for 21bao). So the runtime_visible candidate_drift
+        PR #336 + PR #337 for 21bao). So the runtime_visible candidate_drift
         for D4 is RESOLVED at the runtime_visible layer.
         Other gaps may exist for higher layers (model_call_verified,
         operator_approved, env_loaded), but those are NOT runtime_visible.
@@ -84,10 +84,10 @@ class TestRealRepo:
             and f.get("severity") == "candidate_drift"
             and "runtime_visible" in f.get("detail", "")
         ]
-        # Post-PR #338: no D4 runtime_visible candidate_drift at any node
+        # Post-PR #337: no D4 runtime_visible candidate_drift at any node
         assert len(ds4pro_runtime_gaps) == 0, (
             f"DeepSeek V4 Pro must not have runtime_visible candidate_drift "
-            f"on any node post-PR #338: {ds4pro_runtime_gaps}"
+            f"on any node post-PR #337: {ds4pro_runtime_gaps}"
         )
 
     def test_verdict_not_live_runtime_claim(self):
@@ -124,8 +124,8 @@ class TestCandidateDrift:
     def test_active_missing_from_nmc_is_candidate(self):
         """An active model in pool but missing from NMC → candidate_drift.
 
-        Pre-PR #338: 21bao D4 had runtime_visible=unknown in NMC, producing
-        a candidate_drift. Post-PR #338: 21bao D4 is True.
+        Pre-PR #337: 21bao D4 had runtime_visible=unknown in NMC, producing
+        a candidate_drift. Post-PR #337: 21bao D4 is True.
 
         The drift mechanism itself (Active + not-ok → candidate_drift) is
         still operational for other models. We just expect no D4
@@ -144,7 +144,7 @@ class TestCandidateDrift:
         ]
         assert len(ds4pro_runtime_gaps) == 0, (
             f"D4 must not have runtime_visible candidate_drift after "
-            f"PR #338: {ds4pro_runtime_gaps}"
+            f"PR #337: {ds4pro_runtime_gaps}"
         )
         # Verdict is allowed to vary
         assert report["final_verdict"] in (
@@ -155,7 +155,7 @@ class TestCandidateDrift:
     def test_runtime_visible_not_ok_is_candidate(self):
         """Active model with runtime_visible != ok → candidate_drift.
 
-        Post-PR #338: All 3 nodes (21bao/5bao/9bao) have
+        Post-PR #337: All 3 nodes (21bao/5bao/9bao) have
         runtime_visible=True via evidence-based normalization. So no
         active runtime_visible_not_ok candidate exists for D4.
 
@@ -175,16 +175,16 @@ class TestCandidateDrift:
         # Any remaining finding should NOT be at active lifecycle class.
         for f in rv_findings:
             if f.get("lifecycle_class") == "active":
-                # This would be unexpected after PR #338
+                # This would be unexpected after PR #337
                 assert False, (
                     f"Active runtime_visible_not_ok candidate_drift after "
-                    f"PR #338: {f}"
+                    f"PR #337: {f}"
                 )
 
     def test_deepseek_v4_pro_not_special(self):
         """DeepSeek V4 Pro must NOT be special-cased; same rules apply.
 
-        Post-PR #338: All 3 nodes have evidence-backed runtime_visible=True
+        Post-PR #337: All 3 nodes have evidence-backed runtime_visible=True
         for D4. So D4 produces no active candidate_drift at runtime_visible.
         """
         report = l3f.run_layer3_drift()
@@ -193,11 +193,11 @@ class TestCandidateDrift:
             f for f in ds4pro if f.get("severity") == "candidate_drift"
             and f.get("lifecycle_class") == "active"
         ]
-        # Post-PR #338: D4 is no longer a candidate_drift at runtime_visible
+        # Post-PR #337: D4 is no longer a candidate_drift at runtime_visible
         # because all 3 nodes are normalized with PR #332 / PR #336 evidence.
         assert len(ds4pro_candidate) == 0, (
             "DeepSeek V4 Pro must not produce active candidate_drift "
-            "at runtime_visible after PR #338 normalization"
+            "at runtime_visible after PR #337 normalization"
         )
 
 
