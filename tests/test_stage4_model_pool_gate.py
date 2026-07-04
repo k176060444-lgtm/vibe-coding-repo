@@ -296,9 +296,9 @@ class TestSevenStateSchema:
     }
     # Allowlisted entries where wrapper_valid=False (mimo models, wrapper not validated)
     _WRAPPER_NOT_VALID_ENTRIES = {
-        "21bao": frozenset({"opencode-go-mimo-v2-5", "opencode-go-mimo-v2-5-pro"}),
-        "5bao": frozenset({"opencode-go-mimo-v2-5", "opencode-go-mimo-v2-5-pro"}),
-        "9bao": frozenset({"opencode-go-mimo-v2-5", "opencode-go-mimo-v2-5-pro"}),
+        "21bao": frozenset({"opencode-go-mimo-v2-5-pro"}),
+        "5bao": frozenset({"opencode-go-mimo-v2-5-pro"}),
+        "9bao": frozenset({"opencode-go-mimo-v2-5-pro"}),
     }
 
     def test_runtime_states_are_unknown(self, nmc):
@@ -312,12 +312,12 @@ class TestSevenStateSchema:
         # States promoted on 9bao
         # (Stage 5 Batch C + C4 evidence: model_pool synced, runner PATH fix, node/npm/opencode-go verified)
         PROMOTED_ON_9BAO = {"synced", "wrapper_valid"}
-        # Per-entry model_call_verified — G-L4 D4 evidence (PR #341/#342/#343):
-        # deepseek-v4-pro canary passed on 21bao/5bao/9bao; mimo-v2-5 D-R2 was NOT executed.
+        # Per-entry model_call_verified — G-L4 D4 evidence (PR #341/#342/#343) + D-R2:
+        # deepseek-v4-pro canary passed on 21bao/5bao/9bao; mimo-v2-5 D-R2 executed (f30c55b).
         MODEL_CALL_VERIFIED_ENTRIES = {
-            "21bao": {"opencode-go-deepseek-v4-pro"},
-            "5bao": {"opencode-go-deepseek-v4-pro"},
-            "9bao": {"opencode-go-deepseek-v4-pro"},
+            "21bao": {"opencode-go-deepseek-v4-pro", "opencode-go-mimo-v2-5"},
+            "5bao": {"opencode-go-deepseek-v4-pro", "opencode-go-mimo-v2-5"},
+            "9bao": {"opencode-go-deepseek-v4-pro", "opencode-go-mimo-v2-5"},
         }
         # Per-entry runtime_visible promotions (S7-1 inventory evidence):
         # model_id listed in opencode.jsonc opencode-go provider on all 3 nodes.
