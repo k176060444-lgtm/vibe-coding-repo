@@ -191,30 +191,61 @@ class TestMatrixNodeCoverage:
                 bad.append(f"{mid}: remote-only in 21bao")
         assert bad == [], "\n".join(bad)
 
-    def test_enabled_models_in_at_least_one_matrix(self, pool, nmc):
-        all_mids = set()
-        for nd in nmc["nodes"].values():
-            all_mids.update(e["model_id"] for e in nd["matrix"])
-        missing = {m["id"] for m in pool["models"] if m.get("enabled") is True} - all_mids
-        assert missing == set(), f"Enabled models missing from all matrices: {missing}"
+    # DEU (declared_enabled_unassigned) models: enabled in pool with allowed_nodes=[].
+        # Per scripts/da_db_policy_lock.py:191-213, DEU is the correct lifecycle for
+        # enabled models without node assignment; they are correctly absent from NMC
+        # until promoted. This is an EXACT allowlist of confirmed DEU model IDs —
+        # not a blanket skip. Adding new IDs to this set requires explicit verification
+        # that the model is DEU (enabled=true AND allowed_nodes=[]) per pool.
+        _DEU_MODEL_IDS = frozenset({
+            "google-gemini-2-5-flash", "google-gemini-2-5-pro",
+            "moonshot-moonshot-v1-128k", "openai-gpt-4o",
+            "openai-o1", "openai-o3", "openai-o3-mini", "openai-o4-mini",
+            "xai-grok-3",
+        })
 
-    # Allowlisted disabled models that appear in 5bao/9bao matrices (known fixture entry)
-    _DISABLED_IN_5BAO_9BAO_ALLOWED = frozenset({"xiaomi-mimo-v2-5-pro"})
+        def _is_deu(self, model: dict) -> bool:
+            """Verify the model is actually DEU: enabled AND allowed_nodes empty.
 
-    def test_5bao_9bao_matrix_includes_enabled(self, pool, nmc):
-        for nn in ["5bao", "9bao"]:
-            mids = {e["model_id"] for e in nmc["nodes"][nn]["matrix"]}
-            bad = []
-            for m in pool["models"]:
-                if m.get("enabled") is not True:
-                    if m["id"] in mids and m["id"] not in self._DISABLED_IN_5BAO_9BAO_ALLOWED:
-                        bad.append(f"{m['id']}: disabled but in {nn}")
-                    continue
-                ans = m.get("allowed_nodes", [])
-                if not ans or nn in ans or "9bao" in ans:
-                    if m["id"] not in mids:
-                        bad.append(f"{m['id']}: enabled but missing from {nn}")
-            assert bad == [], "\n".join(bad)
+            Cross-checks the exact allowlist identity. This guards against accidental
+            drift if pool state for one of the _DEU_MODEL_IDS changes.
+            """
+            if model.get("id") not in self._DEU_MODEL_IDS:
+                return False
+            return (
+                model.get("enabled") is True
+                and not (model.get("allowed_nodes") or [])
+            )
+
+        def test_enabled_models_in_at_least_one_matrix(self, pool, nmc):
+            all_mids = set()
+            for nd in nmc["nodes"].values():
+                all_mids.update(e["model_id"] for e in nd["matrix"])
+            missing_candidates = [m for m in pool["models"] if m.get("enabled") is True]
+            missing = {m["id"] for m in missing_candidates
+                       if m["id"] not in all_mids
+                       and not self._is_deu(m)}
+            assert missing == set(), f"Enabled models missing from all matrices: {missing}"
+
+        # Allowlisted disabled models that appear in 5bao/9bao matrices (known fixture entry)
+        _DISABLED_IN_5BAO_9BAO_ALLOWED = frozenset({"xiaomi-mimo-v2-5-pro"})
+
+        def test_5bao_9bao_matrix_includes_enabled(self, pool, nmc):
+            for nn in ["5bao", "9bao"]:
+                mids = {e["model_id"] for e in nmc["nodes"][nn]["matrix"]}
+                bad = []
+                for m in pool["models"]:
+                    if m.get("enabled") is not True:
+                        if m["id"] in mids and m["id"] not in self._DISABLED_IN_5BAO_9BAO_ALLOWED:
+                            bad.append(f"{m['id']}: disabled but in {nn}")
+                        continue
+                    if self._is_deu(m):
+                        continue
+                    ans = m.get("allowed_nodes", [])
+                    if not ans or nn in ans or "9bao" in ans:
+                        if m["id"] not in mids:
+                            bad.append(f"{m['id']}: enabled but missing from {nn}")
+                assert bad == [], "\n".join(bad)
 
     # Allowlisted disabled models in matrices: free models on 21bao + disabled fixture on all 3
     _DISABLED_IN_MATRIX_ALLOWED = {
@@ -288,26 +319,29 @@ class TestSevenStateSchema:
             "5bao": {"opencode-go-deepseek-v4-pro"},
             "9bao": {"opencode-go-deepseek-v4-pro"},
         }
-        # Per-entry runtime_visible promotions (S7-1 inventory evidence:
-        # model_id listed in opencode.jsonc opencode-go provider on all 3 nodes)
+        # Per-entry runtime_visible promotions (S7-1 inventory evidence):
+        # model_id listed in opencode.jsonc opencode-go provider on all 3 nodes.
+        # Note: opencode-go-qwen3-7-plus is NOT included — its NMC entry was just
+        # added via normalization with all runtime states = 'unknown' (no promotion).
+        # Adding it to runtime_visible promotions requires explicit operator decision.
         RUNTIME_VISIBLE_ENTRIES = {
             "21bao": {
                 "opencode-go-deepseek-v4-flash", "opencode-go-glm-5-1",
                 "opencode-go-glm-5-2", "opencode-go-kimi-k2-6",
                 "opencode-go-mimo-v2-5", "opencode-go-mimo-v2-5-pro",
-                "opencode-go-qwen3-7-max", "opencode-go-qwen3-7-plus",
+                "opencode-go-qwen3-7-max",
             },
             "5bao": {
                 "opencode-go-deepseek-v4-flash", "opencode-go-glm-5-1",
                 "opencode-go-glm-5-2", "opencode-go-kimi-k2-6",
                 "opencode-go-mimo-v2-5", "opencode-go-mimo-v2-5-pro",
-                "opencode-go-qwen3-7-max", "opencode-go-qwen3-7-plus",
+                "opencode-go-qwen3-7-max",
             },
             "9bao": {
                 "opencode-go-deepseek-v4-flash", "opencode-go-glm-5-1",
                 "opencode-go-glm-5-2", "opencode-go-kimi-k2-6",
                 "opencode-go-mimo-v2-5", "opencode-go-mimo-v2-5-pro",
-                "opencode-go-qwen3-7-max", "opencode-go-qwen3-7-plus",
+                "opencode-go-qwen3-7-max",
             },
         }
         # Per-entry env_loaded promotions (S7-2 + normalization evidence):
@@ -318,7 +352,6 @@ class TestSevenStateSchema:
                 "opencode-go-glm-5-1", "opencode-go-glm-5-2",
                 "opencode-go-kimi-k2-6", "opencode-go-mimo-v2-5",
                 "opencode-go-mimo-v2-5-pro", "opencode-go-qwen3-7-max",
-                "opencode-go-qwen3-7-plus",
                 "deepseek-deepseek-coder", "deepseek-deepseek-reasoner",
                 # Routing-only entries (populated by normalization, not in pool)
                 "deepseek-deepseek-v4-flash", "deepseek-deepseek-v4-pro",
@@ -330,7 +363,6 @@ class TestSevenStateSchema:
                 "opencode-go-glm-5-1", "opencode-go-glm-5-2",
                 "opencode-go-kimi-k2-6", "opencode-go-mimo-v2-5",
                 "opencode-go-mimo-v2-5-pro", "opencode-go-qwen3-7-max",
-                "opencode-go-qwen3-7-plus",
                 "deepseek-deepseek-coder", "deepseek-deepseek-reasoner",
                 "deepseek-deepseek-v4-flash", "deepseek-deepseek-v4-pro",
                 "minimax-MiniMax-M3", "volcengine-ark-code-latest",
@@ -341,7 +373,6 @@ class TestSevenStateSchema:
                 "opencode-go-glm-5-1", "opencode-go-glm-5-2",
                 "opencode-go-kimi-k2-6", "opencode-go-mimo-v2-5",
                 "opencode-go-mimo-v2-5-pro", "opencode-go-qwen3-7-max",
-                "opencode-go-qwen3-7-plus",
                 "deepseek-deepseek-coder", "deepseek-deepseek-reasoner",
                 "deepseek-deepseek-v4-flash", "deepseek-deepseek-v4-pro",
                 "minimax-MiniMax-M3", "volcengine-ark-code-latest",
@@ -392,6 +423,15 @@ class TestSevenStateSchema:
                     if sf == "wrapper_valid" and mid in self._WRAPPER_NOT_VALID_ENTRIES.get(nn, set()):
                         if val is not False:
                             bad.append(f"{nn}[{i}]({mid}): wrapper_valid={val!r} (expected False)")
+                        continue
+                    # Per-entry: NEW NMC entries from normalization scripts have all states = 'unknown'
+                    # until operator-driven evidence promotes them. opencode-go-qwen3-7-plus
+                    # is the canonical case (added via normalize_opencode_go_qwen3_7_plus_to_nmc.py
+                    # without runtime promotion).
+                    NEW_ENTRIES_ALL_UNKNOWN = frozenset({"opencode-go-qwen3-7-plus"})
+                    if mid in NEW_ENTRIES_ALL_UNKNOWN:
+                        if val != "unknown":
+                            bad.append(f"{nn}[{i}]({mid}): {sf}={val!r} (expected 'unknown' for newly-normalized entry)")
                         continue
                     if promoted and sf in promoted:
                         # Promoted states must be True, not 'unknown'

@@ -1,10 +1,9 @@
 schema_version: '1.1'
 generated_at: '2026-07-04T07:55:00Z'
 generated_from: scripts/model_pool.yaml
-notes: 'G-L4 D4 model_call_verified normalization applied: 21bao, 5bao, 9bao
-  model_call_verified=true per canary evidence (PR #341/#342/#343).
-  G-L3R D4 runtime_visible 3-of-3 preserved from prior normalization.
-  operator_approved remains false for all nodes. readiness/gray NOT entered.'
+notes: 'G-L4 D4 model_call_verified normalization applied: 21bao, 5bao, 9bao model_call_verified=true per canary evidence
+  (PR #341/#342/#343). G-L3R D4 runtime_visible 3-of-3 preserved from prior normalization. operator_approved remains false
+  for all nodes. readiness/gray NOT entered.'
 skipped_models:
   count: 5
   ids:
@@ -17,7 +16,7 @@ nodes:
   21bao:
     runtime_provider: opencode-go
     description: Windows local-exec/control node
-    total_entries: 25
+    total_entries: 26
     matrix:
     - model_id: anthropic-claude-3-5-haiku-20241022
       canonical_provider: anthropic
@@ -183,7 +182,7 @@ nodes:
         collector: worker_attest_layer3_d4_21bao_local_runtime_visible
         matched_key: deepseek-plan.deepseek-v4-pro
         runtime_visible_source: 21bao_local_opencode_config
-        opencode_config_path: "C:\\Users\\KK\\AppData\\Local\\vibedev-tools\\opencode\\opencode.jsonc"
+        opencode_config_path: C:\Users\KK\AppData\Local\vibedev-tools\opencode\opencode.jsonc
         config_key_found: opencode-go
         key_value_redacted: true
       model_call_verified_evidence:
@@ -343,10 +342,34 @@ nodes:
       operator_approved: unknown
       runtime_visible: unknown
       env_loaded: true
+    - model_id: opencode-go-qwen3-7-plus
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      smoke_evidence_pool:
+        5bao:
+          status: confirmed
+          last_verified: '2026-06-27T10:00:00Z'
+          smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+          wrapper: ~/bin/vibedev-opencode
+          invocation: opencode-go/qwen3.7-plus
+        9bao:
+          status: confirmed
+          last_verified: '2026-06-27T10:00:00Z'
+          smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+          wrapper: ~/bin/vibedev-opencode
+          invocation: opencode-go/qwen3.7-plus
   5bao:
     runtime_provider: opencode-go
     description: Remote SSH Debian worker (192.168.5.6:22222)
-    total_entries: 23
+    total_entries: 22
     matrix:
     - model_id: anthropic-claude-3-5-haiku-20241022
       canonical_provider: anthropic
@@ -619,10 +642,34 @@ nodes:
       operator_approved: unknown
       runtime_visible: unknown
       env_loaded: true
+    - model_id: opencode-go-qwen3-7-plus
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      smoke_evidence_pool:
+        5bao:
+          status: confirmed
+          last_verified: '2026-06-27T10:00:00Z'
+          smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+          wrapper: ~/bin/vibedev-opencode
+          invocation: opencode-go/qwen3.7-plus
+        9bao:
+          status: confirmed
+          last_verified: '2026-06-27T10:00:00Z'
+          smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+          wrapper: ~/bin/vibedev-opencode
+          invocation: opencode-go/qwen3.7-plus
   9bao:
     runtime_provider: opencode-go
     description: Remote SSH Debian worker (192.168.9.6:22222)
-    total_entries: 23
+    total_entries: 22
     matrix:
     - model_id: anthropic-claude-3-5-haiku-20241022
       canonical_provider: anthropic
@@ -895,3 +942,27 @@ nodes:
       operator_approved: unknown
       runtime_visible: unknown
       env_loaded: true
+    - model_id: opencode-go-qwen3-7-plus
+      canonical_provider: opencode-go
+      provider_namespace: opencode-go
+      runtime_provider: opencode-go
+      declared: true
+      synced: unknown
+      runtime_visible: unknown
+      env_loaded: unknown
+      wrapper_valid: unknown
+      model_call_verified: unknown
+      operator_approved: unknown
+      smoke_evidence_pool:
+        5bao:
+          status: confirmed
+          last_verified: '2026-06-27T10:00:00Z'
+          smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+          wrapper: ~/bin/vibedev-opencode
+          invocation: opencode-go/qwen3.7-plus
+        9bao:
+          status: confirmed
+          last_verified: '2026-06-27T10:00:00Z'
+          smoke_phase: v1.21.33I16E_OPENCODE_GO_8_MODEL_DUAL_NODE_LIVE_SMOKE
+          wrapper: ~/bin/vibedev-opencode
+          invocation: opencode-go/qwen3.7-plus
