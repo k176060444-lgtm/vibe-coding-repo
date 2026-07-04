@@ -301,3 +301,32 @@ None of these are authorized by this preflight document. Each requires **explici
 - `docs/baseline02/g-l3r-d4-final-runtime-visible-closure.md` — G-L3R D4 closure doc
 - `docs/baseline02/baseline02-to-g-l4-preflight-map.md` — previous preflight planning map (PR #331 era)
 - `tests/test_g_l4_d4_model_call_verification_preflight.py` — preflight record tests
+
+---
+
+## 13. Test-Governance Amendment (PR #340)
+
+During the PR #340 strengthened self-check, two pre-existing tests in
+`tests/test_g_l3r_d4_final_runtime_visible_closure.py` were updated for
+robustness:
+
+1. **`test_four_way_anchor_aligned`**: Changed from single-level parent check
+   (`HEAD~1` / `main~1`) to ancestry traversal up to 5 generations. This
+   supports both pre-merge (branch) and post-merge (main) contexts without
+   requiring live HEAD to equal the closure anchor.
+
+2. **`test_open_prs_zero_before_closure_creation`**: Changed from a strict
+   live GitHub "0 open PRs" assertion to a **record-based** approach. The
+   closure JSON's `four_way_anchor_aligned` and `r5_origin_main_closed` fields
+   are the primary evidence. The live open-PR check recognizes PR #340 as a
+   documented successor (G-L4 preflight), preventing false failures when
+   subsequent preflight PRs exist.
+
+These amendments are **test-governance only**. They do NOT modify:
+- The G-L3R D4 closure semantics (3-of-3 runtime_visible, global blocker open)
+- The G-L4 preflight semantics (preflight drafted only, no execution)
+- Any production code, model_pool, NMC, or runtime config
+
+**Scope constraints unchanged**: `not-G-L4-ready / not-readiness-ready /
+not-model_call_verified-ready / not-operator_approved-promotion / not-gray /
+not-Baseline03`
