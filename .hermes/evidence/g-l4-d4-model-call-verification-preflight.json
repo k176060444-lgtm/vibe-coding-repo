@@ -1,0 +1,258 @@
+{
+  "schema_version": "1.0.0",
+  "gate_id": "G-L4-D4-MODEL-CALL-VERIFICATION-PREFLIGHT",
+  "created_at": "2026-07-04",
+  "preflight_anchor": "ef464b25bd482da8a67886c4b864a4420cfc7e01",
+  "four_way_anchor_aligned": true,
+  "r5_origin_main_closed": true,
+  "ops_hygiene_008": {
+    "pre": "origin/main = 0f2fd87794bd542cd05a8d6908b0665c071f9ef0 (1 commit behind)",
+    "post": "origin/main = ef464b25bd482da8a67886c4b864a4420cfc7e01 (aligned)",
+    "method": "fast-forward git push origin main:main",
+    "ssh_key": "/c/Users/KK/AppData/Local/vibedev-tools/ssh/debian-vibeworker-ed25519"
+  },
+  "scope": "G-L4 D4 model_call_verification preflight planning ONLY — not G-L4 execution, not readiness, not gray, not Baseline03",
+  "preflight_verdict": "G_L4_D4_MODEL_CALL_VERIFICATION_PREFLIGHT_DRAFTED",
+  "prerequisites": {
+    "g_l3r_d4_runtime_visible_closure": {
+      "anchor": "ef464b25bd482da8a67886c4b864a4420cfc7e01",
+      "verdict": "G_L3R_D4_RUNTIME_VISIBLE_3OF3_NORMALIZED",
+      "closure_pr": 339,
+      "closure_merge_commit": "ef464b25bd482da8a67886c4b864a4420cfc7e01",
+      "three_of_three_confirmed": true,
+      "note": "G-L3R D4 runtime_visible is the prerequisite for G-L4 preflight. It is resolved at runtime_visible layer; model_call_verified is OUTSIDE G-L3R scope."
+    },
+    "evidence_chain": {
+      "pr_332": "5bao/9bao D4 runtime_visible sanctioned live evidence",
+      "pr_333": "Post-evidence normalization plan (design only)",
+      "pr_334": "5bao/9bao D4 runtime_visible NMC normalization",
+      "pr_335": "21bao residual gate (initial narrowing)",
+      "pr_336": "21bao D4 runtime_visible local evidence",
+      "pr_337": "21bao D4 runtime_visible NMC normalization → 3-of-3",
+      "pr_338": "Strict replay test hygiene fix (test-only, no production code)",
+      "pr_339": "G-L3R D4 final runtime_visible closure record"
+    }
+  },
+  "d4_identity": {
+    "active_model_id": "opencode-go-deepseek-v4-pro",
+    "canonical_provider": "opencode-go",
+    "provider_namespace": "opencode-go",
+    "model": "deepseek-v4-pro",
+    "primary_alias": "opencode-ds4pro",
+    "aliases": ["opencode-ds4pro", "opencode-deepseek-v4-pro"],
+    "key_env_var": "OPENCODE_GO_API_KEY",
+    "base_url_env_var": "OPENCODE_GO_BASE_URL",
+    "runtime_provider": "opencode-go",
+    "legacy_entry": {
+      "model_id": "deepseek-plan-deepseek-v4-pro",
+      "canonical_provider": "deepseek-plan",
+      "primary_alias": "deepseek-v4-pro",
+      "status": "legacy — superseded by active opencode-go entry"
+    }
+  },
+  "node_scope": {
+    "21bao": {
+      "node_type": "Windows local-exec/control host",
+      "model_id": "opencode-go-deepseek-v4-pro",
+      "runtime_provider": "opencode-go",
+      "declared": true,
+      "synced": true,
+      "wrapper_valid": true,
+      "runtime_visible": true,
+      "env_loaded": true,
+      "model_call_verified": "unknown",
+      "operator_approved": "unknown",
+      "runtime_visible_evidence_pr": 336,
+      "nmc_normalization_pr": 337,
+      "note": "Local Windows opencode.exe v1.17.8. No wrapper script (vibedev-opencode.bat missing, see P16). Env vars loaded via Windows user env."
+    },
+    "5bao": {
+      "node_type": "Remote SSH Debian worker (192.168.5.6:22222)",
+      "model_id": "opencode-go-deepseek-v4-pro",
+      "runtime_provider": "opencode-go",
+      "declared": true,
+      "synced": true,
+      "wrapper_valid": true,
+      "runtime_visible": true,
+      "env_loaded": true,
+      "model_call_verified": "unknown",
+      "operator_approved": "unknown",
+      "runtime_visible_evidence_pr": 332,
+      "nmc_normalization_pr": 334,
+      "note": "Remote Debian worker. Uses wrapper + env file for credential loading. Known credential source: 6-provider set verified. opencode installed but version not verified as part of this preflight."
+    },
+    "9bao": {
+      "node_type": "Remote SSH Debian worker (192.168.9.6:22222)",
+      "model_id": "opencode-go-deepseek-v4-pro",
+      "runtime_provider": "opencode-go",
+      "declared": true,
+      "synced": true,
+      "wrapper_valid": true,
+      "runtime_visible": true,
+      "env_loaded": true,
+      "model_call_verified": "unknown",
+      "operator_approved": "unknown",
+      "runtime_visible_evidence_pr": 332,
+      "nmc_normalization_pr": 334,
+      "note": "Remote Debian worker. Same SSH key as 5bao. Known credential gaps (missing volcengine/minimax) may impact broader model verification but D4 uses opencode-go provider which was present in both nodes."
+    }
+  },
+  "model_call_verified_current_status": {
+    "promoted": false,
+    "state_per_node": {
+      "21bao": "unknown",
+      "5bao": "unknown",
+      "9bao": "unknown"
+    },
+    "note": "model_call_verified=unknown for all 3 nodes. G-L4 is the first phase to address model_call_verified. This requires explicit operator authorization for live model calls."
+  },
+  "operator_approved_current_status": {
+    "promoted": false,
+    "state_per_node": {
+      "21bao": "unknown",
+      "5bao": "unknown",
+      "9bao": "unknown"
+    },
+    "note": "operator_approved=unknown for all 3 nodes. Must not be automatically promoted alongside model_call_verified. Requires separate per-model operator decision."
+  },
+  "g_l4_execution_readiness": {
+    "preflight": "drafted",
+    "execution_authorized": false,
+    "model_calls_performed": false,
+    "credential_provisioning_performed": false,
+    "node_sync_performed": false,
+    "runtime_config_modified": false,
+    "model_pool_modified": false,
+    "nmc_modified": false
+  },
+  "model_call_verification_plan": {
+    "proposed_execution_order": [
+      {
+        "phase": "canary",
+        "node": "21bao",
+        "rationale": "Minimum blast radius. 21bao is the control host — fastest turnaround, no SSH dependency. Model call succeeds/fails here first.",
+        "model_id": "opencode-go-deepseek-v4-pro",
+        "invocation_form": "opencode run -m opencode-go/deepseek-v4-pro",
+        "per_node_authorization_required": "G-L4-D4-MODEL-CALL-VERIFY-CANARY-21BAO",
+        "expected_output_pattern": "EXACT_MARKER or deterministic string",
+        "fallback_strategy": "NO_FALLBACK — single node failure must NOT auto-fallback to another model or node"
+      },
+      {
+        "phase": "expand",
+        "node": "5bao",
+        "rationale": "Remote Debian worker with proven credential set (6-provider documented). SSH required. Lower risk than 9bao.",
+        "model_id": "opencode-go-deepseek-v4-pro",
+        "invocation_form": "opencode run -m opencode-go/deepseek-v4-pro",
+        "per_node_authorization_required": "G-L4-D4-MODEL-CALL-VERIFY-5BAO",
+        "fallback_strategy": "NO_FALLBACK — single node failure must NOT auto-fallback"
+      },
+      {
+        "phase": "expand",
+        "node": "9bao",
+        "rationale": "Remote Debian worker. Execute last after 21bao and 5bao are verified. Known credential gaps (volcengine/minimax) but D4 uses opencode-go which is present.",
+        "model_id": "opencode-go-deepseek-v4-pro",
+        "invocation_form": "opencode run -m opencode-go/deepseek-v4-pro",
+        "per_node_authorization_required": "G-L4-D4-MODEL-CALL-VERIFY-9BAO",
+        "fallback_strategy": "NO_FALLBACK — single node failure must NOT auto-fallback"
+      }
+    ],
+    "failure_handling": {
+      "single_node_failure": "REPORT_AND_STOP. Do NOT fallback to alternative model. Do NOT automatically retry with different key. Do NOT automatically promote model_call_verified on other nodes.",
+      "credential_missing": "Report env var name presence/absence (not value). Do NOT provision credential. Operator authorizes credential fix separately.",
+      "timeout_or_network": "Retry exactly once after 30s cooldown. If still fails, REPORT and STOP.",
+      "post_failure_operations": "Model_call_verified remains unknown for that node. No automatic NMC write-back. No automatic operator_approved promotion."
+    },
+    "evidence_receipt_schema": {
+      "per_node_receipt": {
+        "schema_version": "1.0.0",
+        "gate_id": "G-L4-D4-MODEL-CALL-VERIFIED-<NODE>",
+        "node": "<node_name>",
+        "model_id": "opencode-go-deepseek-v4-pro",
+        "invocation_anchor": "<merge_commit_or_head>",
+        "call_timestamp": "<ISO8601>",
+        "model_call_exit_code": "<int>",
+        "model_call_stderr_truncated": "<present/absent>",
+        "expected_marker_detected": "<bool>",
+        "fallback_attempted": "<bool>",
+        "credential_enum": "<present/missing/not_checked>",
+        "model_call_verified_verdict": "<true/false/unknown>",
+        "note": "Model_call_verified=true only if exit_code=0 AND expected_marker_detected=true AND fallback_attempted=false. Any deviation → model_call_verified=false for this node."
+      }
+    }
+  },
+  "operator_authorization_checklist": {
+    "required_for_each_node": [
+      "Explicit operator authorization ID (e.g. OPERATOR-YYYYMMDD-G-L4-D4-MODEL-CALL-VERIFY-<NODE>-<NNN>)",
+      "Node-specific work order: which node, which model, which invocation form",
+      "Credential policy: check env var presence, do NOT read value, do NOT provision",
+      "Failure policy: STOP on any failure, do NOT auto-fallback, do NOT auto-promote",
+      "Write-back policy: model_call_verified set only in bounded PR after operator reviews receipts",
+      "Boundary guard: do NOT transition to G-L4 readiness without separate operator authorization"
+    ],
+    "global_authorizations_not_granted": [
+      "G-L4 execution",
+      "G-L4 model_call_verified promotion across all nodes",
+      "operator_approved promotion",
+      "G-READINESS entry",
+      "G-GRAY entry",
+      "G-D-A / G-D-B / PR-7",
+      "Baseline03 / Stage8 entry"
+    ]
+  },
+  "blockers_and_operator_decisions_required": [
+    {
+      "id": "BLOCKER-01",
+      "description": "21bao lacks vibedev-opencode wrapper (P16). Env vars are loaded via Windows user env but no wrapper script exists. Model call verification on 21bao needs to confirm env loading method works correctly for opencode run.",
+      "status": "pre-existing documented issue",
+      "operator_decision_needed": "Accept env-via-Windows-user-env as working? Or require wrapper creation first?"
+    },
+    {
+      "id": "BLOCKER-02",
+      "description": "9bao known credential gaps (missing volcengine/minimax providers). D4 uses opencode-go provider which was present on both 5bao and 9bao as of I16, but credential env for opencode-go on 9bao has not been re-verified post any env changes.",
+      "status": "pre-existing known gap",
+      "operator_decision_needed": "Pre-verify OPENCODE_GO_API_KEY presence on 9bao before model call? Or attempt model call and report failure?"
+    },
+    {
+      "id": "DECISION-01",
+      "description": "Model call verification order: 21bao (canary) → 5bao → 9bao is the recommended minimal blast radius. Confirm or suggest alternative ordering.",
+      "status": "draft proposal",
+      "operator_decision_needed": "Accept the proposed order (21bao → 5bao → 9bao)? Or start with a remote node?"
+    },
+    {
+      "id": "DECISION-02",
+      "description": "Per-node vs batched authorization. Each node model_call_verified needs its own operator approval. Should each be a separate PR/work order, or can they be batched into a single multi-node PR after all pass?",
+      "status": "draft proposal",
+      "operator_decision_needed": "Separate per-node approvals or batch into one authorization?"
+    },
+    {
+      "id": "DECISION-03",
+      "description": "NMC write-back strategy. After model_call_verified on a node, should model_call_verified be promoted immediately in NMC, or accumulated in a batch PR?",
+      "status": "draft proposal",
+      "operator_decision_needed": "Immediate per-node NMC write-back? Or batch all 3 nodes into one post-verification NMC update PR?"
+    }
+  ],
+  "forbidden_claims_NOT_made": [
+    "G-L4 ready",
+    "readiness ready",
+    "model_call_verified ready",
+    "operator_approved ready",
+    "gray ready",
+    "Baseline03 ready",
+    "Stage8 ready",
+    "Global G_L3R_BLOCKED closed",
+    "D4 model_call_verified promoted to any node",
+    "G-L4 execution in progress or completed",
+    "operator_approved promoted"
+  ],
+  "production_code_modification_audit": {
+    "scripts_vibe_model_routing_policy_py": false,
+    "scripts_model_pool_yaml": false,
+    "scripts_node_model_capability_yaml": false,
+    "scripts_worker_attest_layer3_reconciliation_py": false,
+    "runtime_config_env_credentials": false,
+    "model_calls_performed": false,
+    "credential_provisioning_performed": false,
+    "node_sync_performed": false,
+    "ssh_live_collection_performed": false
+  }
+}
