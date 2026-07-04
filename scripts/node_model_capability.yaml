@@ -1,8 +1,9 @@
 schema_version: '1.1'
 generated_at: '2026-07-01T01:10:40.387122+00:00'
 generated_from: scripts/model_pool.yaml
-notes: 'G-L3R D4 normalization applied: 5bao, 9bao runtime_visible=true per PR #332
-  evidence anchor 09b1d97. 21bao residual unchanged.'
+notes: 'G-L3R D4 normalization applied: 21bao, 5bao, 9bao runtime_visible=true per
+  evidence refs (PR #332 for 5bao/9bao, PR #336 for 21bao). evidence_anchor for 21bao=2ec1778e,
+  merge_commit=0a932be.'
 skipped_models:
   count: 5
   ids:
@@ -219,10 +220,19 @@ nodes:
       wrapper_valid: true
       model_call_verified: unknown
       operator_approved: unknown
-      runtime_visible: unknown
+      runtime_visible: true
       env_loaded: true
-      notes: 'R8 documented residual: 21bao local opencode.jsonc has no opencode-go
-        provider block. See docs/baseline02/g-l3r-d4-21bao-namespace-asymmetry.md'
+      runtime_visible_evidence:
+        source: 'PR #336 21bao local runtime-visible evidence'
+        approval_id: OPERATOR-20260704-G-L3R-D4-21BAO-LOCAL-RT-EVIDENCE-005
+        evidence_anchor: 2ec1778e357fd3a840b35d45d061f171388bf740
+        merge_commit: 0a932be4fd6d12760e8c5e6400044644864e003c
+        collector: worker_attest_layer3_d4_21bao_local_runtime_visible
+        matched_key: deepseek-plan.deepseek-v4-pro
+        runtime_visible_source: 21bao_local_opencode_config
+        note: '21bao local concrete opencode.jsonc has `deepseek-plan` provider block
+          with `deepseek-v4-pro` model entry. Distinct from central opencode-go namespace.
+          See PR #336 for full evidence.'
     - model_id: opencode-go-glm-5-1
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -528,7 +538,7 @@ nodes:
       operator_approved: unknown
       runtime_visible: true
       env_loaded: true
-      runtime_visible_evidence: &id001
+      runtime_visible_evidence:
         source: 'PR #332 clean-main sanctioned live evidence'
         approval_id: OPERATOR-20260703-G-L3R-D4-LIVE-EVIDENCE-003
         evidence_anchor: 09b1d97f0cab774e3eb023c9768a40d8165a1d46
@@ -839,7 +849,12 @@ nodes:
       operator_approved: unknown
       runtime_visible: true
       env_loaded: true
-      runtime_visible_evidence: *id001
+      runtime_visible_evidence:
+        source: 'PR #332 clean-main sanctioned live evidence'
+        approval_id: OPERATOR-20260703-G-L3R-D4-LIVE-EVIDENCE-003
+        evidence_anchor: 09b1d97f0cab774e3eb023c9768a40d8165a1d46
+        closure_anchor: cde599d6fb1584942499ddf4ffe12a6f901a72d2
+        collector: 5bao_ssh_opencode_config / 9bao_ssh_opencode_config
     - model_id: opencode-go-glm-5-1
       canonical_provider: opencode-go
       provider_namespace: opencode-go

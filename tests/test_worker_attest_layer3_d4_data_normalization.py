@@ -142,11 +142,16 @@ class TestPreflightPostNormalization:
 
     def test_d4_verdict_consistent_with_state(self):
         """Verdict should reflect actual repo state.
-        5bao/9bao have runtime_visible=True after evidence-based normalization.
-        21bao remains residual. Correct verdict is KEEP_BLOCKED.
+
+        All 3 nodes (21bao/5bao/9bao) runtime_visible=True after
+        evidence-based normalization (PR #332 for 5bao/9bao, PR #336
+        for 21bao). Remaining gap is at the model_call_verified /
+        readiness layer — not at the runtime_visible layer.
         """
         r = build_d4_preflight()
         v = r["final_verdict"]
+        # Verdict may be DATA_ONLY_CANDIDATE (because all 3 visible)
+        # or KEEP_BLOCKED (because higher layers still unresolved).
         assert v in (
             "G_L3R_D4_PREFLIGHT_KEEP_BLOCKED",
             "G_L3R_D4_PREFLIGHT_DATA_ONLY_CANDIDATE",
@@ -201,9 +206,12 @@ class TestAggregateAfterNormalization:
 
     def test_no_runtime_field_promotion_in_yaml(self):
         """Verify NMC yaml reflects evidence-based D4 normalization.
-        5bao/9bao runtime_visible=True (evidence-based via PR #332).
-        21bao runtime_visible != True (must remain unknown/residual).
-        model_call_verified and operator_approved must NOT be promoted for any node.
+
+        All 3 nodes (21bao/5bao/9bao) runtime_visible=True after
+        evidence-based normalization (PR #332 for 5bao/9bao,
+        PR #336 for 21bao).
+        model_call_verified and operator_approved must NOT be promoted
+        for any node.
         """
         with open(NMC_PATH, "r") as f:
             nmc = yaml.safe_load(f)
@@ -211,19 +219,30 @@ class TestAggregateAfterNormalization:
             matrix = nmc["nodes"][n]["matrix"]
             for entry in matrix:
                 if "deepseek-v4-pro" in entry.get("model_id", ""):
-                    if n in ("5bao", "9bao"):
-                        # 5bao/9bao: runtime_visible=True (evidence-based)
-                        assert entry.get("runtime_visible") is True, \
-                            "d4 runtime_visible must be True for %s" % n
-                    else:
-                        # 21bao: runtime_visible must remain non-True (unknown/residual)
-                        assert entry.get("runtime_visible") is not True, \
-                            "d4 runtime_visible must not be True for %s" % n
+                    # All 3 nodes: runtime_visible=True (evidence-based)
+                    assert entry.get("runtime_visible") is True, \
+                        "d4 runtime_visible must be True for %s" % n
                     # model_call_verified and operator_approved never promoted
                     assert entry.get("model_call_verified") != True, \
                         "d4 model_call_verified promoted in %s" % n
                     assert entry.get("operator_approved") != True, \
                         "d4 operator_approved promoted in %s" % n
+
+    def test_21bao_runtime_visible_evidence_refs_pr336(self):
+        """21bao D4 entry must carry PR #336 evidence reference."""
+        with open(NMC_PATH, "r") as f:
+            nmc = yaml.safe_load(f)
+        for entry in nmc["nodes"]["21bao"]["matrix"]:
+            if entry.get("model_id") == "opencode-go-deepseek-v4-pro":
+                ev = entry.get("runtime_visible_evidence")
+                assert isinstance(ev, dict), \
+                    "21bao runtime_visible_evidence must be a dict"
+                # PR #336 references
+                assert "PR #336" in str(ev.get("source", ""))
+                assert "2ec1778e" in str(ev.get("evidence_anchor", ""))
+                assert "0a932be" in str(ev.get("merge_commit", ""))
+                assert ev.get("runtime_visible_source") == "21bao_local_opencode_config"
+                break
 
 
 class TestReconciliationAfterNormalization:
@@ -277,14 +296,13 @@ class TestNoForbiddenOps:
         for n in ["21bao", "5bao", "9bao"]:
             for entry in nmc["nodes"][n]["matrix"]:
                 if "deepseek-v4-pro" in entry.get("model_id", ""):
-                    if n in ("5bao", "9bao"):
-                        # 5bao/9bao runtime_visible=True is intentional
-                        assert entry.get("runtime_visible") is True, \
-                            "d4 runtime_visible must be True in NMC %s" % n
-                    else:
-                        # 21bao must remain non-True
-                        assert entry.get("runtime_visible") is not True, \
-                            "d4 runtime_visible must not be True in NMC %s" % n
+                    # All 3 nodes must be runtime_visible=True
+                    # (evidence-based normalization: PR #332 5bao/9bao,
+                    #  PR #336 21bao)
+                    assert entry.get("runtime_visible") is True, \
+                        "d4 runtime_visible must be True in NMC %s" % n
+                    # model_call_verified and operator_approved must NEVER
+                    # be promoted (3-of-3 forbidden)
                     assert entry.get("model_call_verified") != True
                     assert entry.get("operator_approved") != True
 

@@ -2,10 +2,14 @@
   "schema_version": "1.0.0",
   "gate_id": "G-L3R-D4-21BAO-RESIDUAL-GATE",
   "created_at": "2026-07-03T23:00:00Z",
-  "anchor": "9681cca87abff7d89d73ade8ee165f3a7b8e6fbf",
-  "operator_decision_id": "OPERATOR-20260703-G-L3R-D4-RESIDUAL-GATE-001",
+  "updated_at": "2026-07-04T08:30:00Z",
+  "anchor": "0a932be4fd6d12760e8c5e6400044644864e003c",
+  "merge_commit": "0a932be4fd6d12760e8c5e6400044644864e003c",
+  "operator_decision_id": "OPERATOR-20260704-G-L3R-D4-21BAO-NMC-NORMALIZATION-006",
   "predecessor_plans": [
-    "PR #333 — g-l3r-d4-post-evidence-normalization-plan.json"
+    "PR #333 — g-l3r-d4-post-evidence-normalization-plan.json",
+    "PR #335 — 21bao residual gate (initial narrowing)",
+    "PR #336 — 21bao local runtime-visible evidence"
   ],
   "preconditions_met": [
     {
@@ -19,18 +23,35 @@
       "reference": "PR #324, docs/baseline02/g-l3r-d4-21bao-namespace-asymmetry.md"
     },
     {
-      "precondition": "Explicit operator decision issued to narrow the blocker",
+      "precondition": "Operator narrowing decision (initial 21bao residual gate)",
       "status": "completed",
-      "reference": "OPERATOR-20260703-G-L3R-D4-RESIDUAL-GATE-001"
+      "reference": "OPERATOR-20260703-G-L3R-D4-RESIDUAL-GATE-001 (PR #335)"
+    },
+    {
+      "precondition": "21bao local runtime-visible evidence collected and canonicalized",
+      "status": "completed",
+      "reference": "PR #336, anchor 0a932be4fd6d12760e8c5e6400044644864e003c"
+    },
+    {
+      "precondition": "Operator decision to normalize PR #336 evidence into NMC for 21bao",
+      "status": "completed",
+      "reference": "OPERATOR-20260704-G-L3R-D4-21BAO-NMC-NORMALIZATION-006"
     }
   ],
   "evidence_state": {
     "21bao": {
-      "runtime_visible": "unknown",
-      "runtime_visible_source": "21bao_local_nmc",
-      "classification": "R8_documented_residual",
-      "receipt_ref": ".hermes/evidence/g-l3r-d4-clean-main-v1/21bao-receipt.json",
-      "asymmetry_doc": "docs/baseline02/g-l3r-d4-21bao-namespace-asymmetry.md"
+      "runtime_visible": true,
+      "runtime_visible_source": "21bao_local_opencode_config",
+      "classification": "PR336_normalized",
+      "evidence_pr": 336,
+      "evidence_anchor": "2ec1778e357fd3a840b35d45d061f171388bf740",
+      "merge_commit": "0a932be4fd6d12760e8c5e6400044644864e003c",
+      "approval_id": "OPERATOR-20260704-G-L3R-D4-21BAO-LOCAL-RT-EVIDENCE-005",
+      "nmc_normalization_pr": 338,
+      "matched_key": "deepseek-plan.deepseek-v4-pro",
+      "receipt_ref": ".hermes/evidence/g-l3r-d4-21bao-local-runtime-visible-v1/21bao-receipt.json",
+      "asymmetry_doc": "docs/baseline02/g-l3r-d4-21bao-namespace-asymmetry.md",
+      "note": "21bao concrete local-config key `deepseek-plan.deepseek-v4-pro` confirmed in opencode.jsonc. Distinct from central opencode-go namespace; evidence-backed via PR #336."
     },
     "5bao": {
       "runtime_visible": true,
@@ -56,17 +77,33 @@
     }
   },
   "verdict": {
-    "gate_verdict": "G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY",
+    "gate_verdict": "G_L3R_D4_RUNTIME_VISIBLE_3OF3_NORMALIZED",
+    "legacy_gate_verdict": "G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY",
     "closes_global_blocker": false,
-    "closes_21bao_blocker": false,
+    "closes_runtime_visible_layer": true,
     "two_of_three_confirmed": true,
-    "three_of_three_confirmed": false,
+    "three_of_three_confirmed": true,
+    "three_of_three_runtime_visible": true,
+    "three_of_three_model_call_verified": false,
+    "three_of_three_operator_approved": false,
+    "three_of_three_env_loaded": false,
     "is_g_l4_ready": false,
     "is_readiness_ready": false,
     "is_model_call_verified_ready": false,
     "is_operator_approved_promotion": false,
     "is_gray_acceptance": false,
-    "is_baseline03_ready": false
+    "is_baseline03_ready": false,
+    "narrowed_to_layers": [
+      "model_call_verified",
+      "operator_approved",
+      "G-L4 preflight",
+      "G-READINESS",
+      "G-D-A",
+      "G-D-B",
+      "PR-7",
+      "Baseline03",
+      "Stage8"
+    ]
   },
   "scope_constraints": [
     "not-G_L3R_BLOCKED-resolved",
@@ -74,7 +111,7 @@
     "not-readiness-ready",
     "not-model_call_verified-ready",
     "not-operator_approved-promotion",
-    "not-NMC-write-back",
+    "not-NMC-write-back-beyond-runtime_visible",
     "not-model_pool-write-back",
     "not-G-READINESS",
     "not-G-GRAY",
@@ -92,5 +129,6 @@
     "deu_assignment_attempted": false,
     "write_back_attempted": false,
     "ssh_live_collection_attempted": false
-  }
+  },
+  "scope_note": "This gate upgrade records that all 3 nodes (21bao/5bao/9bao) now have runtime_visible=True at the G-L3R D4 layer. It does NOT close the global G_L3R_BLOCKED, which remains open at the higher layers (model_call_verified, operator_approved, G-L4 readiness, G-D-A/B, G-GRAY, PR-7, Baseline03, Stage8). This is data-only normalization; no model calls, no smoke, no credential provisioning, no node sync, no readiness assertion, no runtime field promotion beyond runtime_visible for the specific D4 entry."
 }
