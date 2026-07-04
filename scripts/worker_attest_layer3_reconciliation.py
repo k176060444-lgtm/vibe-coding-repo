@@ -172,14 +172,23 @@ def build_reconciliation_report() -> dict:
             "candidate/runtime data gap, not a canary infrastructure failure." % agg.get("final_verdict")
         )
 
-    # Check if deepseek-v4-pro gap is present
+    # Check if deepseek-v4-pro gap was present historically
+    # (PR #337 normalizes 21bao runtime_visible via PR #336 evidence:
+    #  all 3 nodes now runtime_visible=True at G-L3R layer).
+    # The G-L3R D4 runtime_visible blocker is RESOLVED.
+    # Higher-layer considerations (model_call_verified, operator_approved,
+    # G-L4 readiness) are NOT G-L3R blocker items — they belong to
+    # G-L4 scope and require separate operator authorization.
     deu_gap = _check_v4_pro_gap(canary_status)
     if deu_gap:
         blockers.append(
-            "deepseek-v4-pro (DeepSeek V4 Pro): 5bao/9bao runtime_visible=true "
-            "(PR #332 evidence, PR #334 NMC normalization); 21bao residual "
-            "(R8 namespace asymmetry, G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY). "
-            "Global G_L3R_BLOCKED narrowed to 21bao residual — does not close globally."
+            "deepseek-v4-pro (DeepSeek V4 Pro): All 3 nodes (21bao/5bao/9bao) "
+            "runtime_visible=true (5bao/9bao via PR #332 evidence, "
+            "PR #334 NMC normalization; 21bao via PR #336 local evidence, "
+            "PR #337 NMC normalization). G-L3R D4 runtime_visible blocker "
+            "RESOLVED (3-of-3). Model_call_verified, operator_approved, "
+            "and G-L4 readiness are OUTSIDE G-L3R scope — they require "
+            "separate operator authorization."
         )
 
     report["blocker_summary"] = blockers
@@ -190,10 +199,13 @@ def build_reconciliation_report() -> dict:
     # ── 6. Next recommendation ──────────────────────────────────────────
     if blockers:
         report["next_recommendation"] = (
-            "5bao/9bao D4 runtime_visible resolved (PR #332 evidence, PR #334 NMC). "
-            "21bao residual remains (R8 asymmetry). Global G_L3R_BLOCKED narrowed "
-            "to 21bao residual only. Operator decision required for 21bao resolution. "
-            "G-L4 preflight not yet authorized — separate operator decision needed."
+            "All 3 nodes (21bao/5bao/9bao) D4 runtime_visible resolved "
+            "(5bao/9bao via PR #332 evidence + PR #334 NMC; 21bao via "
+            "PR #336 local evidence + PR #337 NMC normalization). "
+            "G-L3R D4 runtime_visible blocker is RESOLVED (3-of-3). "
+            "Model_call_verified, operator_approved, and G-L4 readiness "
+            "require separate operator authorization (outside G-L3R scope). "
+            "G-L4 preflight not yet authorized."
         )
     else:
         report["next_recommendation"] = (
@@ -307,12 +319,14 @@ def _build_unblock_criteria(agg: dict | None, blockers: list[str]) -> list[str]:
 
     if any("deepseek-v4-pro" in b for b in blockers):
         criteria.extend([
-            "5bao/9bao runtime_visible resolved via evidence (PR #332) and "
-            "NMC normalization (PR #334). No further action for these nodes.",
-            "21bao residual asymmetry (R8) — operator decision required: "
-            "keep residual or configure 21bao opencode.jsonc provider block.",
-            "Global G_L3R_BLOCKED narrowed to 21bao residual only — "
-            "does not close globally until 21bao resolved or accepted.",
+            "All 3 nodes (21bao/5bao/9bao) D4 runtime_visible resolved via "
+            "evidence (PR #332 for 5bao/9bao + PR #334 NMC; PR #336 for "
+            "21bao + PR #337 NMC normalization). No further runtime_visible "
+            "action required for D4. G-L3R D4 runtime_visible blocker is "
+            "RESOLVED.",
+            "Model_call_verified, operator_approved, and G-L4 readiness "
+            "are OUTSIDE G-L3R scope. Separate operator authorization "
+            "required for those stages.",
         ])
 
     if not criteria:

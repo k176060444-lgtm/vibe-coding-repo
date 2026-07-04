@@ -252,25 +252,46 @@ class TestDocConsistency:
 
 
 class TestNoWriteBack:
-    def test_nmc_not_modified(self):
-        """21bao NMC runtime_visible must remain 'unknown'."""
+    def test_nmc_may_be_modified_by_followup(self):
+        """PR #336 did NOT write back. PR #337 (this normalization) does.
+
+        This test captures the in-PR #336 invariant: at the time PR #336
+        was merged, the 21bao NMC entry had runtime_visible=unknown.
+        That invariant is now superseded by PR #337.
+
+        After this PR:
+        - 21bao D4 NMC entry has runtime_visible=True with PR #336 evidence
+        - PR #336 receipt content unchanged (canonical, immutable)
+        - model_pool.yaml D4 entry unchanged (no smoke_results, no 21bao)
+        """
         import yaml
         with open(REPO / "scripts" / "node_model_capability.yaml", "r") as f:
             nmc = yaml.safe_load(f)
         matrix = nmc.get("nodes", {}).get("21bao", {}).get("matrix", [])
         for entry in matrix:
             if entry.get("model_id") == "opencode-go-deepseek-v4-pro":
-                assert entry.get("runtime_visible") in ("unknown", None, False), \
-                    "21bao NMC runtime_visible must remain 'unknown' (no write-back)"
-                assert entry.get("model_call_verified") in ("unknown", None, False), \
-                    "21bao model_call_verified must not be promoted"
-                assert entry.get("operator_approved") in ("unknown", None, False), \
-                    "21bao operator_approved must not be promoted"
+                # Post-PR #337: 21bao D4 is now True backed by PR #336 evidence
+                assert entry.get("runtime_visible") is True, \
+                    "21bao D4 runtime_visible must be True (PR #337 normalization)"
+                ev = entry.get("runtime_visible_evidence")
+                assert isinstance(ev, dict)
+                assert "PR #336" in str(ev.get("source", ""))
+                # model_call_verified / operator_approved still not promoted
+                assert entry.get("model_call_verified") in (
+                    "unknown", None, False,
+                ), "21bao model_call_verified must not be promoted"
+                assert entry.get("operator_approved") in (
+                    "unknown", None, False,
+                ), "21bao operator_approved must not be promoted"
                 return
         raise AssertionError("21bao D4 entry not found")
 
     def test_model_pool_d4_entry_unchanged(self):
-        """model_pool.yaml D4 entry must be unchanged."""
+        """model_pool.yaml D4 entry must be unchanged.
+
+        This invariant is preserved across PR #336 AND PR #337: neither
+        PR writes to model_pool.yaml.
+        """
         import yaml
         with open(REPO / "scripts" / "model_pool.yaml", "r") as f:
             pool = yaml.safe_load(f)

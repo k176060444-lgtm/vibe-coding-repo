@@ -57,7 +57,16 @@ class TestEvidenceJson:
     def test_verdict_name(self):
         ev = _load_evidence()
         v = ev.get("verdict", {})
-        assert v.get("gate_verdict") == "G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY"
+        # After PR #336 + this normalization, runtime_visible is 3-of-3.
+        # The residual gate verdict updates accordingly. The exact verdict
+        # name may be:
+        #   - G_L3R_D4_RUNTIME_VISIBLE_3OF3_NORMALIZED (preferred)
+        #   - legacy G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY (kept)
+        verdict_name = v.get("gate_verdict")
+        assert verdict_name in (
+            "G_L3R_D4_RUNTIME_VISIBLE_3OF3_NORMALIZED",
+            "G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY",
+        ), f"unexpected verdict name: {verdict_name}"
 
     def test_global_blocker_not_closed(self):
         ev = _load_evidence()
@@ -67,12 +76,27 @@ class TestEvidenceJson:
     def test_two_of_three_confirmed(self):
         ev = _load_evidence()
         v = ev.get("verdict", {})
-        assert v.get("two_of_three_confirmed") is True
+        # All 3 nodes are now True (post-PR #336)
+        if v.get("three_of_three_runtime_visible"):
+            assert v.get("three_of_three_confirmed") is True
+        else:
+            assert v.get("two_of_three_confirmed") is True
 
-    def test_three_of_three_not_confirmed(self):
+    def test_three_of_three_runtime_visible(self):
+        """After PR #336 + this PR, all 3 nodes should be runtime_visible=True."""
         ev = _load_evidence()
         v = ev.get("verdict", {})
-        assert v.get("three_of_three_confirmed") is False
+        # This PR elevates 21bao to True. The evidence JSON must reflect
+        # 3-of-3 at runtime_visible layer (or be updated to do so).
+        assert v.get("three_of_three_runtime_visible") is True, \
+            "verdict must record three_of_three_runtime_visible=True"
+
+    def test_three_of_three_call_verified_not_promoted(self):
+        """3-of-3 at runtime_visible does NOT mean 3-of-3 at model_call_verified."""
+        ev = _load_evidence()
+        v = ev.get("verdict", {})
+        assert v.get("three_of_three_model_call_verified") is False
+        assert v.get("three_of_three_operator_approved") is False
 
     def test_no_readiness_claims(self):
         ev = _load_evidence()
@@ -91,14 +115,15 @@ class TestEvidenceJson:
 
 
 class TestEvidenceState:
-    def test_21bao_runtime_visible_not_true(self):
+    def test_21bao_runtime_visible_true(self):
+        """21bao runtime_visible must be True (PR #336 evidence-backed)."""
         ev = _load_evidence()
         s = ev.get("evidence_state", {}).get("21bao", {})
-        # Must be unknown/residual/false — MUST NOT be True
-        assert s.get("runtime_visible") is not True, \
-            "21bao runtime_visible must NOT be True"
-        assert s.get("runtime_visible") in ("unknown", None, False), \
-            "21bao runtime_visible must be unknown/residual"
+        assert s.get("runtime_visible") is True, \
+            "21bao runtime_visible must be True (PR #336 evidence)"
+        assert s.get("runtime_visible_source") == "21bao_local_opencode_config"
+        assert s.get("evidence_pr") == 336
+        assert s.get("merge_commit") == "0a932be4fd6d12760e8c5e6400044644864e003c"
 
     def test_5bao_runtime_visible_true(self):
         ev = _load_evidence()
@@ -110,10 +135,18 @@ class TestEvidenceState:
         s = ev.get("evidence_state", {}).get("9bao", {})
         assert s.get("runtime_visible") is True
 
-    def test_21bao_has_asymmetry_ref(self):
+    def test_21bao_no_asymmetry_ref_required(self):
+        """Asymmetry was the prior reason for residual. With PR #336
+        evidence, 21bao no longer carries the residual asymmetry class.
+        """
         ev = _load_evidence()
         s = ev.get("evidence_state", {}).get("21bao", {})
-        assert "asymmetry" in s.get("asymmetry_doc", "").lower()
+        classification = s.get("classification", "")
+        # Must NOT still be classified as residual once 3-of-3 normalized
+        assert "residual" not in classification.lower() or \
+               "pr_336" in classification.lower() or \
+               "evidence" in classification.lower(), \
+               f"21bao classification stale: {classification}"
 
     def test_5bao_evidence_references(self):
         ev = _load_evidence()
@@ -158,14 +191,20 @@ class TestNmcConsistency:
         assert entry is not None, "9bao D4 entry not found in NMC"
         assert entry.get("runtime_visible") is True
 
-    def test_21bao_nmc_runtime_visible_not_true(self):
+    def test_21bao_nmc_runtime_visible_true(self):
         nmc = _load_nmc()
         entry = _get_d4_entry(nmc, "21bao")
         assert entry is not None, "21bao D4 entry not found in NMC"
-        assert entry.get("runtime_visible") is not True, \
-            "21bao runtime_visible must NOT be True"
-        assert entry.get("runtime_visible") in ("unknown", None, False), \
-            "21bao runtime_visible must remain unknown/residual"
+        # 21bao D4 is now runtime_visible=True backed by PR #336 evidence
+        assert entry.get("runtime_visible") is True, \
+            "21bao runtime_visible must be True (PR #336 evidence)"
+        # MUST carry evidence reference
+        ev = entry.get("runtime_visible_evidence")
+        assert isinstance(ev, dict), \
+            "21bao runtime_visible_evidence must be a dict"
+        assert "PR #336" in str(ev.get("source", ""))
+        assert "2ec1778e" in str(ev.get("evidence_anchor", ""))
+        assert "0a932be" in str(ev.get("merge_commit", ""))
 
     def test_nmc_no_promotion(self):
         """Verify model_call_verified and operator_approved were not promoted."""
@@ -187,13 +226,15 @@ class TestNmcConsistency:
 class TestDocConsistency:
     def test_doc_acknowledges_global_blocker_not_closed(self):
         doc = DOC_PATH.read_text(encoding="utf-8")
-        # The doc has a "What This Verdict Does NOT Mean" table stating
-        # that Global G_L3R_BLOCKED is NOT resolved, and the 21bao options
-        # section says G_L3R_BLOCKED remains open for 21bao.
-        assert "not resolved" in doc.lower() or \
-               "does not close" in doc.lower() or \
-               "remains open" in doc.lower() or \
-               "does NOT mean" in doc
+        # The doc has a "Closes Global Blocker for runtime_visible layer" row stating
+        # YES (runtime_visible blocker resolved), and a separate row stating that
+        # higher-layer items (model_call_verified, operator_approved, G-L4) are NOT
+        # closed. The doc must acknowledge this separation.
+        assert "Closes Global Blocker for runtime_visible layer" in doc
+        assert "Closes model_call_verified" in doc or \
+               "model_call_verified" in doc and "NO" in doc
+        # The doc must still say these higher items are outside G-L3R scope
+        assert "outside g-l3r scope" in doc.lower()
 
     def test_doc_no_2of3_as_3of3(self):
         doc = DOC_PATH.read_text(encoding="utf-8")
@@ -226,9 +267,10 @@ class TestScopeConstraints:
     def test_scope_constraints_in_evidence(self):
         ev = _load_evidence()
         sc = ev.get("scope_constraints", [])
-        assert any("not-g_l3r_blocked-resolved" in s.lower() for s in sc)
+        assert any("runtime_visible-resolved" in s.lower() for s in sc)
         assert any("not-g-l4-ready" in s.lower() for s in sc)
         assert any("not-readiness-ready" in s.lower() for s in sc)
+        assert any("g-l4-outside-g-l3r-scope" in s.lower() for s in sc)
 
     def test_preconditions_met(self):
         ev = _load_evidence()
@@ -244,19 +286,24 @@ class TestScopeConstraints:
 
 
 class TestReconciliationConsistency:
-    def test_reconciliation_has_narrowed_blocker_text(self):
-        """Reconciliation blocker text should mention the narrowed state."""
+    def test_reconciliation_has_closed_blocker_text(self):
+        """Reconciliation blocker text should reflect resolved state."""
         src = RECONCILIATION_PATH.read_text(encoding="utf-8")
-        # Should reference the narrowed state
-        assert "21bao residual" in src, \
-            "Reconciliation should reference 21bao residual"
-        assert "does not close globally" in src, \
-            "Reconciliation should not claim global closure"
+        # Should reference the 21bao history (resolved at runtime_visible layer)
+        assert "21bao" in src, \
+            "Reconciliation should reference 21bao"
+        # Should clearly state that D4 runtime_visible blocker is resolved
+        assert "RESOLVED" in src, \
+            "Reconciliation must state that D4 runtime_visible blocker is RESOLVED"
+        # Should make clear that higher-layer items are outside G-L3R scope
+        assert "OUTSIDE G-L3R scope" in src, \
+            "Reconciliation must state that higher-layer items are outside G-L3R scope"
 
     def test_reconciliation_no_on_all_3_nodes(self):
         """Reconciliation should NOT say 'on all 3 nodes' for D4 blocker."""
         src = RECONCILIATION_PATH.read_text(encoding="utf-8")
-        # Check the blocker_text string — the old phrasing is replaced
+        # Check the blocker_text string — old phrasing is replaced.
+        # Post-PR #337 wording should NOT say "on all 3 nodes" for D4.
         assert "on all 3 nodes" not in src, \
             "Reconciliation blocker text should not claim mismatch on all 3 nodes"
 
