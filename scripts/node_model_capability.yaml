@@ -1,9 +1,10 @@
 schema_version: '1.1'
 generated_at: '2026-07-04T07:55:00Z'
 generated_from: scripts/model_pool.yaml
-notes: 'G-L4 D4 model_call_verified normalization applied: 21bao, 5bao, 9bao model_call_verified=true per canary evidence
-  (PR #341/#342/#343). G-L3R D4 runtime_visible 3-of-3 preserved from prior normalization. operator_approved remains false
-  for all nodes. readiness/gray NOT entered.'
+notes: 'G-L4 D4 model_call_verified normalization applied: 21bao, 5bao, 9bao model_call_verified=true
+  per canary evidence (PR #341/#342/#343). G-L3R D4 runtime_visible 3-of-3 preserved
+  from prior normalization. operator_approved remains false for all nodes. readiness/gray
+  NOT entered.'
 skipped_models:
   count: 5
   ids:
@@ -197,7 +198,8 @@ nodes:
         fallback_used: false
         model_call_succeeded: true
         output_exact_match: true
-        namespace_note: node-specific runtime namespace asymmetry; not fallback; not provider drift
+        namespace_note: node-specific runtime namespace asymmetry; not fallback; not
+          provider drift
     - model_id: opencode-go-glm-5-1
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -241,8 +243,8 @@ nodes:
       runtime_provider: opencode-go
       declared: true
       synced: true
-      wrapper_valid: false
-      model_call_verified: unknown
+      wrapper_valid: true
+      model_call_verified: true
       operator_approved: unknown
       runtime_visible: true
       env_loaded: true
@@ -533,7 +535,8 @@ nodes:
         fallback_used: false
         model_call_succeeded: true
         output_exact_match: true
-        namespace_note: node-specific runtime namespace asymmetry; not fallback; not provider drift
+        namespace_note: node-specific runtime namespace asymmetry; not fallback; not
+          provider drift
     - model_id: opencode-go-glm-5-1
       canonical_provider: opencode-go
       provider_namespace: opencode-go
@@ -577,8 +580,8 @@ nodes:
       runtime_provider: opencode-go
       declared: true
       synced: true
-      wrapper_valid: false
-      model_call_verified: unknown
+      wrapper_valid: true
+      model_call_verified: true
       operator_approved: unknown
       runtime_visible: true
       env_loaded: true
@@ -877,8 +880,8 @@ nodes:
       runtime_provider: opencode-go
       declared: true
       synced: true
-      wrapper_valid: false
-      model_call_verified: unknown
+      wrapper_valid: true
+      model_call_verified: true
       operator_approved: unknown
       runtime_visible: true
       env_loaded: true

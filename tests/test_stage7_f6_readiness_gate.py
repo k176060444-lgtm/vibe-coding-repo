@@ -205,14 +205,14 @@ class TestF6T07WildcardBlocked:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# f6-t08: Real matrix: eligible=3/75, blocked=72/75
+# f6-t08: Real matrix: eligible=6/70, blocked=64/70
 # ══════════════════════════════════════════════════════════════════════════
 
 class TestF6T08RealMatrixCoverage:
     def test_all_entries_checked(self, real_nmc):
-        """Verify that from the real matrix exactly 3 entries are eligible."""
+        """Verify that from the real matrix exactly 6 entries are eligible."""
         entries = gate.get_all_entries(real_nmc)
-        assert len(entries) == 75
+        assert len(entries) == 70
 
         eligible_count = 0
         eligible_entries = []
@@ -225,8 +225,8 @@ class TestF6T08RealMatrixCoverage:
             else:
                 blocked_entries.append(f"{nn}/{mid}")
 
-        assert eligible_count == 3, f"Expected 3 eligible, got {eligible_count}: {eligible_entries}"
-        assert len(blocked_entries) == 72
+        assert eligible_count == 6, f"Expected 6 eligible, got {eligible_count}: {eligible_entries}"
+        assert len(blocked_entries) == 64
 
         # Verify the 3 eligible are the mimo-v2-5 across all nodes
         for node in ("21bao", "5bao", "9bao"):
@@ -264,7 +264,7 @@ class TestF6T09BatchGateEligible:
                 operator="TestOp",
                 approval_phrase=(
                     "批准 entry 21bao/opencode-go-mimo-v2-5, "
-                    "21bao/opencode-go-deepseek-v4-flash"
+                    "21bao/anthropic-claude-sonnet-4"
                 ),
             )
         assert result["verdict"] == "BLOCKED"
@@ -547,7 +547,7 @@ class TestF6T18NoExternalAccess:
 class TestGetAllEntries:
     def test_get_all_entries_returns_75(self, real_nmc):
         entries = gate.get_all_entries(real_nmc)
-        assert len(entries) == 75
+        assert len(entries) == 70
         # Each entry is a (node, model_id, dict) tuple
         for nn, mid, entry in entries:
             assert isinstance(nn, str)
