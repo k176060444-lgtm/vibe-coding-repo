@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0.0",
+  "anchor": "2ec1778e357fd3a840b35d45d061f171388bf740",
+  "node": "21bao",
+  "source_node": "worker_attest_layer3_d4_21bao_local_runtime_visible",
+  "target_model": "deepseek-v4-pro",
+  "canonical_model_id": "opencode-go-deepseek-v4-pro",
+  "central_provider_namespace": "opencode-go",
+  "local_provider_namespace": "deepseek-plan",
+  "aliases_checked": [
+    "opencode-ds4pro",
+    "opencode-deepseek-v4-pro",
+    "ds4pro",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash"
+  ],
+  "runtime_visible_observed": true,
+  "runtime_visible_source": "21bao_local_opencode_config",
+  "config_visible_observed": true,
+  "wrapper_visible_observed": false,
+  "env_loaded_observed_enum": "not_checked",
+  "credential_status_observed_enum": "not_checked",
+  "endpoint_ref_observed_enum": "not_checked",
+  "not_visible_reason": null,
+  "visibility_details": {
+    "config_path": "C:\\Users\\KK\\.config\\opencode\\opencode.jsonc",
+    "config_present": true,
+    "concrete_keys_checked": [
+      "deepseek-plan.deepseek-v4-pro",
+      "deepseek-plan.ds-v4-pro",
+      "deepseek-plan.deepseek-pro"
+    ],
+    "aliases_checked": [
+      "opencode-ds4pro",
+      "opencode-deepseek-v4-pro",
+      "ds4pro",
+      "deepseek-v4-pro",
+      "deepseek-v4-flash"
+    ],
+    "matched_key": "deepseek-plan.deepseek-v4-pro",
+    "matched_alias": null,
+    "provider_block_found": "deepseek-plan"
+  },
+  "redaction_status": {
+    "redacted": false,
+    "redacted_count": 0
+  },
+  "leak_scan": {
+    "passed": true,
+    "matches_found": 0
+  },
+  "forbidden_operation_flags": {
+    "model_invocation_attempted": false,
+    "credential_provisioning_attempted": false,
+    "node_sync_attempted": false,
+    "runtime_field_promotion_attempted": false,
+    "deu_assignment_attempted": false,
+    "write_back_attempted": false,
+    "subprocess_invocation_attempted": false,
+    "network_invocation_attempted": false
+  },
+  "scope_note": "G-L3R D4 21bao local runtime-visible evidence collector. Read-only. Reads ONLY local ~/.config/opencode/opencode.jsonc (non-secret structure). Does NOT modify any file, perform SSH, make subprocess calls, or invoke any model. Does NOT promote model_call_verified/operator_approved. Distinct from 21bao_local_nmc receipt — uses local concrete config.",
+  "not_authorized_scope": [
+    "G-L4 live inference / model_call_verified promotion",
+    "G-READINESS (readiness ready assertion)",
+    "Formal G-D-A (DEU assignment)",
+    "Formal G-D-B (DEU enablement decision)",
+    "G-GRAY / GRAY_ACCEPTANCE",
+    "PR-7 (model_pool.yaml schema v1.3+)",
+    "Baseline03 (stage 8 hardening)",
+    "Stage8 (production readiness)",
+    "Data write-back to model_pool.yaml",
+    "Data write-back to node_model_capability.yaml",
+    "Runtime field promotion (model_call_verified/operator_approved)",
+    "Credential provisioning",
+    "Real model call / live inference",
+    "Subprocess invocation of model wrapper",
+    "Network/HTTP calls"
+  ],
+  "model_call_verified_observed": false,
+  "model_call_verified_source": "not_attempted",
+  "operator_approved_observed": false,
+  "operator_approved_source": "not_attempted",
+  "collection_status": "completed",
+  "generated_at": "2026-07-03T23:30:29.586210+00:00"
+}
