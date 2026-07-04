@@ -1,0 +1,205 @@
+{
+  "schema_version": "1.0.0",
+  "gate_id": "G-L3R-D4-RUNTIME-VISIBLE-FINAL-CLOSURE",
+  "created_at": "2026-07-04T10:30:00Z",
+  "operator_decision_id": "OPERATOR-20260704-G-L3R-D4-FINAL-CLOSURE-007",
+  "final_anchor": "0f2fd87794bd542cd05a8d6908b0665c071f9ef0",
+  "four_way_anchor_aligned": true,
+  "r5_origin_main_closed": true,
+  "ops_hygiene_007": {
+    "pre": "origin/main = ad10e01c9d6dd82d51b4df205b615f8791029e83 (1 commit behind)",
+    "post": "origin/main = 0f2fd87794bd542cd05a8d6908b0665c071f9ef0 (aligned)",
+    "method": "fast-forward git push origin main:main",
+    "ssh_key": "/c/Users/KK/AppData/Local/vibedev-tools/ssh/debian-vibeworker-ed25519"
+  },
+  "scope": "G-L3R D4 runtime_visible layer ONLY",
+  "verdict": "G_L3R_D4_RUNTIME_VISIBLE_3OF3_NORMALIZED",
+  "legacy_verdict": "G_L3R_D4_BLOCKER_NARROWED_TO_21BAO_RESIDUAL_ONLY (superseded by PR #337)",
+  "evidence_chain": [
+    {
+      "pr_number": 332,
+      "title": "evidence: add G-L3R D4 clean-main live receipts",
+      "branch": "evidence-g-l3r-d4-clean-main",
+      "merge_commit": "18807dd",
+      "anchor": "09b1d97",
+      "impact": "5bao/9bao D4 runtime_visible evidence (sanctioned live receipts)"
+    },
+    {
+      "pr_number": 333,
+      "title": "docs: G-L3R D4 post-evidence normalization plan",
+      "branch": "docs-g-l3r-d4-post-evidence-normalization-plan",
+      "merge_commit": "cde599d",
+      "impact": "post-evidence normalization plan"
+    },
+    {
+      "pr_number": 334,
+      "title": "NMC runtime_visible=true for 5bao/9bao (data layer)",
+      "anchor": "9681cca",
+      "impact": "5bao/9bao D4 runtime_visible=true written into NMC"
+    },
+    {
+      "pr_number": 335,
+      "title": "21bao residual gate (initial narrowing)",
+      "operator_decision": "OPERATOR-20260703-G-L3R-D4-RESIDUAL-GATE-001",
+      "impact": "G_L3R_BLOCKED narrowed to 21bao residual only"
+    },
+    {
+      "pr_number": 336,
+      "title": "21bao local runtime-visible evidence",
+      "branch": "evidence-g-l3r-d4-21bao-local-runtime-visible",
+      "merge_commit": "0a932be",
+      "anchor": "0a932be",
+      "impact": "21bao D4 runtime_visible_observed=true via local opencode.jsonc"
+    },
+    {
+      "pr_number": 337,
+      "title": "21bao receipt-to-NMC normalization",
+      "branch": "data-g-l3r-d4-21bao-receipt-to-nmc-normalization",
+      "merge_commit": "ad10e01c9d6dd82d51b4df205b615f8791029e83",
+      "impact": "21bao D4 runtime_visible=true written into NMC, 3-of-3 achieved"
+    },
+    {
+      "pr_number": 338,
+      "title": "strict replay test hygiene fix (Stage 4 governance)",
+      "branch": "test-strict-replay-route-all-9-roles-fix",
+      "merge_commit": "0f2fd87794bd542cd05a8d6908b0665c071f9ef0",
+      "impact": "test-only fix; no production code / NMC / model_pool modification"
+    }
+  ],
+  "d4_runtime_visible_3of3": {
+    "21bao": {
+      "model_id": "opencode-go-deepseek-v4-pro",
+      "runtime_visible": true,
+      "evidence_pr": 336,
+      "evidence_anchor": "0a932be4fd6d12760e8c5e6400044644864e003c",
+      "nmc_normalization_pr": 337,
+      "nmc_normalization_merge_commit": "ad10e01c9d6dd82d51b4df205b615f8791029e83"
+    },
+    "5bao": {
+      "model_id": "opencode-go-deepseek-v4-pro",
+      "runtime_visible": true,
+      "evidence_pr": 332,
+      "evidence_anchor": "09b1d97f0cab774e3eb023c9768a40d8165a1d46",
+      "nmc_normalization_pr": 334,
+      "nmc_normalization_anchor": "9681cca"
+    },
+    "9bao": {
+      "model_id": "opencode-go-deepseek-v4-pro",
+      "runtime_visible": true,
+      "evidence_pr": 332,
+      "evidence_anchor": "09b1d97f0cab774e3eb023c9768a40d8165a1d46",
+      "nmc_normalization_pr": 334,
+      "nmc_normalization_anchor": "9681cca"
+    }
+  },
+  "g_l3r_d4_runtime_visible_blocker_status": "RESOLVED (3-of-3 at runtime_visible layer)",
+  "closes_global_blocker": false,
+  "global_blocker_note": "G_L3R_BLOCKED umbrella still open for G-L3F drift items (non-D4). D4 runtime_visible layer specifically is RESOLVED and does NOT require G-L4 readiness to close.",
+  "out_of_scope_higher_layer_items": {
+    "model_call_verified": {
+      "promoted": false,
+      "state_per_node": {
+        "21bao": "unknown",
+        "5bao": "unknown",
+        "9bao": "unknown"
+      },
+      "rationale": "Requires live model calls + operator-approved dispatch. Outside G-L3R scope."
+    },
+    "operator_approved": {
+      "promoted": false,
+      "state_per_node": {
+        "21bao": "unknown",
+        "5bao": "unknown",
+        "9bao": "unknown"
+      },
+      "rationale": "Requires explicit per-model operator approval. Outside G-L3R scope."
+    },
+    "env_loaded": {
+      "promoted_for_21bao": false,
+      "note": "Existing env_loaded=true retained without write-back; no NMC promotion in this PR.",
+      "rationale": "Requires credential provisioning + node sync. Outside G-L3R scope."
+    },
+    "g_l4_readiness": {
+      "started": false,
+      "authorized": false,
+      "rationale": "Requires G_L4_BLOCKED evaluation + smoke. Outside G-L3R scope."
+    },
+    "g_readiness": {
+      "started": false,
+      "authorized": false,
+      "rationale": "Requires G-L4 closure first. Outside G-L3R scope."
+    },
+    "g_gray": {
+      "started": false,
+      "authorized": false,
+      "rationale": "Requires G-READINESS first. Outside G-L3R scope."
+    },
+    "g_d_a_deu_assignment": {
+      "started": false,
+      "authorized": false,
+      "rationale": "Requires G-GRAY first. Outside G-L3R scope."
+    },
+    "g_d_b_enablement": {
+      "started": false,
+      "authorized": false,
+      "rationale": "Requires G-D-A first. Outside G-L3R scope."
+    },
+    "pr_7": {
+      "started": false,
+      "authorized": false,
+      "rationale": "Requires G-D-B first. Outside G-L3R scope."
+    },
+    "baseline03": {
+      "started": false,
+      "authorized": false,
+      "rationale": "Requires PR-7 first. Outside G-L3R scope."
+    },
+    "stage8": {
+      "started": false,
+      "authorized": false,
+      "rationale": "Requires Baseline03 first. Outside G-L3R scope."
+    }
+  },
+  "forbidden_claims_NOT_made": [
+    "G-L4 ready",
+    "readiness ready",
+    "model_call_verified ready",
+    "operator_approved ready",
+    "gray ready",
+    "Baseline03 ready",
+    "Stage8 ready",
+    "Global G_L3R_BLOCKED closed (preserved as closes_global_blocker=false)"
+  ],
+  "production_code_modification_audit": {
+    "scripts_vibe_model_routing_policy_py": false,
+    "scripts_model_pool_yaml": false,
+    "scripts_node_model_capability_yaml": false,
+    "scripts_worker_attest_layer3_reconciliation_py": false,
+    "tests_test_v12133c2_strict_replay_py": false,
+    "runtime_config_env_credentials": false,
+    "model_calls_performed": false,
+    "credential_provisioning_performed": false,
+    "node_sync_performed": false,
+    "ssh_live_collection_performed": false
+  },
+  "test_suites_validated": [
+    "tests/test_g_l3r_d4_final_runtime_visible_closure.py (this PR)",
+    "tests/test_v12133c2_strict_replay.py (PR #338, 20 tests)",
+    "tests/test_g_l3r_d4_21bao_receipt_to_nmc_normalization.py (PR #337)",
+    "tests/test_g_l3r_d4_21bao_residual_gate.py (PR #337)",
+    "tests/test_g_l3r_d4_21bao_local_runtime_visible.py (PR #336)",
+    "tests/test_worker_attest_layer3_d4_data_normalization.py",
+    "tests/test_worker_attest_layer3_d4_runtime_visible_preflight.py",
+    "tests/test_worker_attest_layer3_d4_sanctioned_live_evidence.py",
+    "tests/test_worker_attest_layer3_reconciliation.py",
+    "tests/test_worker_attest_layer3_drift.py",
+    "tests/test_worker_attest_layer3_drift_summary.py",
+    "tests/test_stage4_model_pool_gate.py",
+    "tests/test_stage7_f6_readiness_gate.py",
+    "tests/test_model_pool_drift.py",
+    "tests/test_model_pool_drift_worker_attest.py",
+    "tests/test_opencode_model_pool.py",
+    "tests/test_model_pool_lifecycle.py",
+    "tests/test_model_pool_summary.py"
+  ]
+}
