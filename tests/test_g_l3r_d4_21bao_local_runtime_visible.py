@@ -276,10 +276,8 @@ class TestNoWriteBack:
                 ev = entry.get("runtime_visible_evidence")
                 assert isinstance(ev, dict)
                 assert "PR #336" in str(ev.get("source", ""))
-                # model_call_verified / operator_approved still not promoted
-                assert entry.get("model_call_verified") in (
-                    "unknown", None, False,
-                ), "21bao model_call_verified must not be promoted"
+                # model_call_verified promoted by G-L4 D4 normalization (current PR)
+                # operator_approved still not promoted
                 assert entry.get("operator_approved") in (
                     "unknown", None, False,
                 ), "21bao operator_approved must not be promoted"

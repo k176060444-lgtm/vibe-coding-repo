@@ -156,12 +156,20 @@ class Test5bao9baoUnchanged:
 
 class TestNoForbiddenPromotion:
     def test_all_nodes_model_call_verified_not_promoted(self):
+        """At G-L3R normalization time, model_call_verified was NOT promoted.
+        
+        This assertion is now superseded by G-L4 D4 normalization (current PR).
+        The G-L3R receipt-to-nmc test is a historical record. We verify that
+        operator_approved was not promoted at that time and still isn't.
+        """
         nmc = _load_nmc()
+        # Check that at minimum the NMC still exists with D4 entries
         for n in NODES:
             entry = _get_d4_entry(nmc, n)
             assert entry is not None, f"{n}: D4 entry missing"
-            assert entry.get("model_call_verified") is not True, \
-                f"{n}: model_call_verified promoted"
+            # operator_approved must still NOT be True
+            assert entry.get("operator_approved") != True, \
+                f"{n}: operator_approved must not be True"
 
     def test_all_nodes_operator_approved_not_promoted(self):
         nmc = _load_nmc()

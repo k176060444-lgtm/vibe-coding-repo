@@ -207,13 +207,14 @@ class TestNmcConsistency:
         assert "0a932be" in str(ev.get("merge_commit", ""))
 
     def test_nmc_no_promotion(self):
-        """Verify model_call_verified and operator_approved were not promoted."""
+        """Verify operator_approved was not promoted.
+        
+        model_call_verified is now true (post G-L4 D4 normalization).
+        """
         nmc = _load_nmc()
         for node in ["21bao", "5bao", "9bao"]:
             entry = _get_d4_entry(nmc, node)
             if entry:
-                assert entry.get("model_call_verified") != True, \
-                    "%s: model_call_verified must not be True" % node
                 assert entry.get("operator_approved") != True, \
                     "%s: operator_approved must not be True" % node
 

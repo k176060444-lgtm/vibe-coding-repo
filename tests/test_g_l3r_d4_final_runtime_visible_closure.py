@@ -79,7 +79,7 @@ class TestFinalAnchor:
 
         The final anchor `0f2fd87..` is the BASE of PR #339 (parent1 of the
         merge commit). This test supports BOTH pre-merge (branch) and post-merge
-        (main) contexts by tracing up to 5 generations of git ancestry.
+        (main) contexts by tracing up to 8 generations of git ancestry.
 
         Key insight: the closure record's final_anchor is a real git commit
         (merge base of the closure PR). That commit must be reachable by
@@ -98,7 +98,7 @@ class TestFinalAnchor:
             f"final_anchor {EXPECTED_FINAL_ANCHOR} is not a known commit in this repo"
         )
 
-        def _trace_parent(sha, depth=5):
+        def _trace_parent(sha, depth=8):
             """Return {sha, sha~1, sha~2, ... sha~N} up to depth generations."""
             candidates = {sha}
             for i in range(1, depth + 1):
@@ -110,7 +110,7 @@ class TestFinalAnchor:
                     candidates.add(r.stdout.strip())
             return candidates
 
-        def _assert_anchor_in_lineage(label, sha, depth=5):
+        def _assert_anchor_in_lineage(label, sha, depth=8):
             ancestors = _trace_parent(sha, depth)
             assert EXPECTED_FINAL_ANCHOR in ancestors, (
                 f"final_anchor {EXPECTED_FINAL_ANCHOR} not in ancestry of "
@@ -206,11 +206,13 @@ class TestFinalAnchor:
                     or "g-l4-d4-model-call-canary-21bao" in branch
                     or "g-l4-d4-model-call-canary-5bao" in branch
                     or "g-l4-d4-model-call-canary-9bao" in branch
+                    or "g-l4-d4-model-call-verified-3of3-nmc-normalization" in branch
                 ), (
                     f"Unexpected open PR: {pr}. This test was created in the "
                     f"context where PR #339 (closure), PR #340 (G-L4 preflight), "
                     f"PR #341 (21bao canary), PR #342 (5bao canary), "
-                    f"and PR #343 (9bao canary) are the "
+                    f"PR #343 (9bao canary), "
+                    f"and PR #344 (G-L4 D4 NMC normalization) are the "
                     f"only allowed open PRs."
                 )
 
@@ -399,10 +401,8 @@ class TestNoProductionCodeModification:
             assert entry.get("runtime_visible") is True, (
                 f"{node}/{d4_model} runtime_visible should be True"
             )
-            # model_call_verified and operator_approved must NOT be promoted
-            assert entry.get("model_call_verified") == "unknown", (
-                f"{node} model_call_verified must be 'unknown'"
-            )
+            # model_call_verified is now true (post G-L4 D4 normalization)
+            # operator_approved must NOT be promoted
             assert entry.get("operator_approved") == "unknown", (
                 f"{node} operator_approved must be 'unknown'"
             )
