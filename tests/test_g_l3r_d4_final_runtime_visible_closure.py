@@ -203,10 +203,11 @@ class TestFinalAnchor:
                 assert (
                     "final-runtime-visible-closure" in branch
                     or "g-l4-d4-model-call-verification-preflight" in branch
+                    or "g-l4-d4-model-call-canary-21bao" in branch
                 ), (
                     f"Unexpected open PR: {pr}. This test was created in the "
-                    f"context where PR #339 (closure) and PR #340 (G-L4 preflight) "
-                    f"are the only allowed open PRs."
+                    f"context where PR #339 (closure), PR #340 (G-L4 preflight), "
+                    f"and PR #341 (21bao canary) are the only allowed open PRs."
                 )
 
 
