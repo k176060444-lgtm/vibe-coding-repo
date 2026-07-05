@@ -54,8 +54,9 @@ ENTRY_PATTERN = re.compile(r"^([\w][\w.-]*)/([\w][\w.-]*)$")
 # Helpers
 # ============================================================
 
-def load_nmc(path: str = NMC_PATH) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
+def load_nmc(path: str | None = None) -> dict:
+    p = NMC_PATH if path is None else path
+    with open(p, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -321,11 +322,160 @@ def dry_run(receipt: dict) -> dict:
 
 def _git_head_sha() -> str:
     import subprocess
+    import os
+    # Derive repo root from this script's location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(script_dir, ".."))
     r = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         capture_output=True, text=True, timeout=10,
+        cwd=repo_root,
     )
     return r.stdout.strip()
+
+
+# ============================================================
+# Apply Receipt (write path)
+# ============================================================
+
+def save_nmc(nmc: dict, path: str | None = None) -> None:
+    """Write NMC to disk atomically with backup and verification.
+
+    Pattern: serialize → backup → write → verify → cleanup backup.
+    On ANY failure, rollback from backup.
+    """
+    p = NMC_PATH if path is None else path
+    import os
+    import shutil
+    bak = p + ".bak"
+    try:
+        # 1. Serialize first
+        serialized = yaml.dump(
+            nmc,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+        # 2. Backup existing if present
+        if os.path.exists(p):
+            shutil.copy2(p, bak)
+        # 3. Write
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(serialized)
+        # 4. Verify: reload and compare
+        with open(p, "r", encoding="utf-8") as f:
+            loaded = yaml.safe_load(f)
+        if loaded != nmc:
+            raise RuntimeError(
+                "NMC verification failed: written content differs from expected"
+            )
+        # 5. Cleanup backup on success
+        if os.path.exists(bak):
+            os.remove(bak)
+    except Exception:
+        # Rollback on any error: restore from backup
+        if os.path.exists(bak):
+            shutil.copy2(bak, p)
+            os.remove(bak)
+        raise
+
+
+def apply_receipt(receipt: dict) -> dict:
+    """Validate and apply a receipt to NMC.
+
+    First runs full dry-run validation (same fail-closed gates as
+    dry_run).  Only writes to NMC if dry_run passes.
+
+    Returns a result dict with write outcome.  Never writes if
+    validation fails.
+    """
+    # Step 1: Full dry-run validation (reuses all fail-closed gates)
+    dr = dry_run(receipt)
+    if dr["verdict"] != "DRY_RUN_PASS":
+        return {
+            "verdict": "APPLY_FAIL",
+            "receipt_id": receipt.get("receipt_id", ""),
+            "dry_run_verdict": dr["verdict"],
+            "errors": dr.get("errors", []),
+            "entries_ineligible": dr.get("entries_ineligible", []),
+            "entries_approved": [],
+            "entries_skipped_already_true": [],
+            "entries_reaffirmed_unknown": [],
+            "written": False,
+        }
+
+    # Step 2: Load NMC for modification
+    nmc = load_nmc()
+
+    # Step 3: Apply approved_entries to NMC in-memory
+    entries_approved = []
+    entries_skipped = []
+
+    for ae_entry in receipt.get("approved_entries", []):
+        if isinstance(ae_entry, dict):
+            node = ae_entry.get("node", "")
+            model_id = ae_entry.get("model_id", "")
+        elif isinstance(ae_entry, str):
+            parts = ae_entry.split("/", 1)
+            if len(parts) != 2:
+                continue
+            node, model_id = parts
+        else:
+            continue
+
+        nd = nmc.get("nodes", {}).get(node)
+        if not nd:
+            continue
+        for e in nd.get("matrix", []):
+            if e.get("model_id") == model_id:
+                current = e.get("operator_approved")
+                if current is True:
+                    entries_skipped.append({
+                        "node": node,
+                        "model_id": model_id,
+                        "reason": "already true",
+                    })
+                elif current == "unknown":
+                    e["operator_approved"] = True
+                    entries_approved.append({
+                        "node": node,
+                        "model_id": model_id,
+                        "from": "unknown",
+                        "to": True,
+                    })
+                break
+
+    # Step 4: Re-affirm non_scope entries stay unknown (no-op in NMC)
+    entries_reaffirmed = [
+        {"node": ns["node"], "model_id": ns["model_id"], "stays": "unknown"}
+        for ns in dr.get("entries_to_reaffirm_unknown", [])
+    ]
+
+    # Step 5: Write atomically
+    try:
+        save_nmc(nmc)
+    except Exception as e:
+        return {
+            "verdict": "APPLY_FAIL",
+            "receipt_id": receipt.get("receipt_id", ""),
+            "dry_run_verdict": dr["verdict"],
+            "entries_approved": [],
+            "entries_skipped_already_true": [],
+            "entries_reaffirmed_unknown": [],
+            "errors": [f"NMC write failed: {e}"],
+            "written": False,
+        }
+
+    return {
+        "verdict": "APPLY_PASS",
+        "receipt_id": receipt.get("receipt_id", ""),
+        "dry_run_verdict": dr["verdict"],
+        "entries_approved": entries_approved,
+        "entries_skipped_already_true": entries_skipped,
+        "entries_reaffirmed_unknown": entries_reaffirmed,
+        "written": True,
+        "errors": [],
+    }
 
 
 # ============================================================
@@ -389,10 +539,13 @@ def self_check():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Validate and preview operator approval receipts "
-                    "(dry-run only; NMC NOT modified)"
+        description="Validate and apply operator approval receipts "
+                    "(default: dry-run only; pass --apply to write)"
     )
     parser.add_argument("--receipt", "-r", help="Path to receipt YAML")
+    parser.add_argument("--apply", action="store_true",
+                        help="Apply receipt changes to NMC (destructive; "
+                             "requires operator authorization)")
     parser.add_argument("--self-check", action="store_true",
                         help="Run built-in self-check tests")
     parser.add_argument("--json", action="store_true",
@@ -406,7 +559,10 @@ def main():
     if args.receipt:
         with open(args.receipt, "r", encoding="utf-8") as f:
             receipt = yaml.safe_load(f)
-        result = dry_run(receipt)
+        if args.apply:
+            result = apply_receipt(receipt)
+        else:
+            result = dry_run(receipt)
     else:
         # Minimal self-test
         result = {"verdict": "NO_INPUT", "detail": "pass --receipt or --self-check"}
@@ -431,7 +587,8 @@ def main():
         if result.get("details"):
             print(f"Detail: {result['detail']}")
 
-    sys.exit(0 if result.get("verdict", "").startswith("DRY_RUN_PASS") else 1)
+    ok_prefixes = ("DRY_RUN_PASS", "APPLY_PASS")
+    sys.exit(0 if result.get("verdict", "").startswith(ok_prefixes) else 1)
 
 
 if __name__ == "__main__":
