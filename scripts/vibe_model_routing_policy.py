@@ -102,6 +102,64 @@ MODELS = {
     },
 }
 
+# ── ARCH-002: Worker Health Freshness Gate ──
+# Minimum freshness window before re-probing workers. Workers with
+# last_health_check older than this or empty/UNKNOWN must be re-probed
+# before route-all may select them. Fail-closed: if refresh fails,
+# workers remain UNKNOWN and route-all returns NO_AVAILABLE_NODE.
+HEALTH_FRESHNESS_SEC = 300
+
+
+def _fresh_probe_all(reg, max_age_sec: int = HEALTH_FRESHNESS_SEC) -> dict:
+    """Re-probe any worker whose last_health_check is empty, UNKNOWN, or stale.
+
+    ARCH-002: route-all must consult fresh health before node assignment.
+    This helper probes only workers that need it; freshly-checked workers
+    are skipped to avoid redundant SSH. Returns a gate summary.
+
+    On any probe failure the worker retains UNKNOWN (no silent ONLINE).
+    Read-only side-effect: sets registry.health_status via set_health().
+    """
+    from datetime import datetime, timezone
+    summary = {
+        "checked": [],
+        "skipped_fresh": [],
+        "freshness_max_age_sec": max_age_sec,
+        "errors": [],
+    }
+    now = datetime.now(timezone.utc)
+    for wid, w in list(reg.workers.items()):
+        last = getattr(w, "last_health_check", "") or ""
+        # Parse ISO; empty/UNKNOWN → needs probe
+        is_fresh = False
+        if last and last != "UNKNOWN":
+            try:
+                last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+                age = (now - last_dt).total_seconds()
+                if 0 <= age <= max_age_sec:
+                    is_fresh = True
+            except (ValueError, AttributeError):
+                pass
+        if is_fresh:
+            summary["skipped_fresh"].append(wid)
+        else:
+            summary["checked"].append(wid)
+    # Single probe_all call only if any worker needs probing
+    if summary["checked"]:
+        try:
+            probe_results = reg.probe_all(timeout=5)
+            for wid in summary["checked"]:
+                pres = probe_results.get(wid, {})
+                summary["errors"].append({
+                    "worker_id": wid,
+                    "error": pres.get("error", ""),
+                    "status": pres.get("status", "UNKNOWN"),
+                })
+        except Exception as e:
+            summary["probe_all_error"] = str(e)[:200]
+    return summary
+
+
 # ── Operator Checkpoint Gate (DSP-002) ──
 
 
@@ -363,6 +421,11 @@ def _resolve_node_for_role(role, registry):
     """Resolve which node should host a role, based on registry capabilities.
 
     Returns (node_id, attribution_dict) or (None, error_dict).
+
+    ARCH-002: Only workers with explicit ONLINE health may be returned.
+    Workers with health_status in {UNKNOWN, OFFLINE, ""} are excluded;
+    UNKNOWN/empty causes HEALTH_UNKNOWN_BLOCKED error so caller can
+    refresh probe or obtain operator confirmation.
     """
     if not registry or "_load_error" in registry:
         return None, {
@@ -386,6 +449,7 @@ def _resolve_node_for_role(role, registry):
 
     preferred = ROLE_NODE_PREFERENCE.get(role, [])
     candidates = []
+    unknown_blocked = []
     for nid in preferred:
         node = registry.get(nid)
         if not node:
@@ -394,11 +458,29 @@ def _resolve_node_for_role(role, registry):
             continue
         if node.get("maintenance_status") == "maintenance":
             continue
-        if node.get("health_status") == "OFFLINE":
+        hs = node.get("health_status", "")
+        # ARCH-002 fail-closed: only explicit ONLINE may be selected.
+        if hs == "OFFLINE" or hs == "" or hs == "UNKNOWN":
+            if hs != "OFFLINE":
+                unknown_blocked.append({
+                    "node_id": nid,
+                    "health_status": hs,
+                })
             continue
+        # hs == "ONLINE" — accept
         candidates.append((nid, node))
 
     if not candidates:
+        if unknown_blocked:
+            return None, {
+                "error": "HEALTH_UNKNOWN_BLOCKED",
+                "message": (f"role={role} preferred={preferred} blocked — "
+                            f"workers with unknown/empty health: "
+                            f"{[u['node_id'] for u in unknown_blocked]}"),
+                "operator_action_required": ("health-check required: run "
+                    "vibe_worker_registry.py --health-check to refresh"),
+                "blocked_nodes": unknown_blocked,
+            }
         return None, {
             "error": "NO_AVAILABLE_NODE",
             "message": f"no available node for role={role}; preferred={preferred}",
@@ -453,6 +535,31 @@ def route_all():
 
     results = {}
     registry = _load_worker_registry()
+
+    # ── ARCH-002: Worker Health Freshness Gate ────────────────
+    # Refresh any worker with missing/UNKNOWN/stale health before
+    # _resolve_node_for_role is consulted. _resolve_node_for_role
+    # then fail-closes on UNKNOWN/empty so stale registry never
+    # yields a false node assignment.
+    health_gate = {"refresh_skipped": True, "reason": "registry_unavailable"}
+    if registry and "_load_error" not in registry:
+        try:
+            from vibe_worker_registry import WorkerRegistry as _WR
+            _reg_instance = _WR()
+            health_gate = _fresh_probe_all(_reg_instance)
+            # Sync fresh probe results back into the registry dict so
+            # _resolve_node_for_role sees updated health_status.
+            for nid, w in _reg_instance.workers.items():
+                if nid in registry:
+                    registry[nid]["health_status"] = w.health_status
+                    registry[nid]["last_health_check"] = (
+                        getattr(w, "last_health_check", "") or ""
+                    )
+            health_gate["synced_back"] = True
+        except Exception as e:
+            health_gate = {"refresh_failed": True, "error": str(e)[:200]}
+    gate_results["arch_002_worker_health_freshness"] = health_gate
+    # ──────────────────────────────────────────────────────────
 
     for role in ROLES:
         rec = recommend(role)
