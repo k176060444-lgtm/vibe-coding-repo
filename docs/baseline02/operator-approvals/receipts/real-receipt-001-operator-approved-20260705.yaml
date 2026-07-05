@@ -8,7 +8,7 @@
 receipt_id: op-app-real-20260705-001
 issued_by: "operator"     # placeholder — to be replaced with human identity
 issued_at: "2026-07-05T07:00:00Z"
-base_sha: 9d1fa7f059c99aa46b328b00d7a2a083d5be3afd
+base_sha: c8853c204a4e82bd2b83223f79e702815acd6c50
 target_branch: main
 
 approved_entries:
