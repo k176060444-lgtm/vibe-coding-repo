@@ -246,24 +246,14 @@ class TestIdempotentNoWrite:
 # ══════════════════════════════════════════════════════════════════════
 
 class TestValidDryRun:
-    def test_draft_receipt_stale_fixture_fail_closed(self):
-        """The on-disk draft receipt is a DELIBERATE stale fixture.
+    def test_ancestor_base_sha_passes(self):
+        """On-disk draft base_sha (e06216d) is ancestor of HEAD → PASS.
 
-        The draft's base_sha is pinned to e06216d (pre-#350-merge base) and
-        is intentionally NOT updated as main advances.  This test verifies
-        the dry-run tool's fail-closed base_sha detection: a stale receipt
-        must produce DRY_RUN_FAIL with a "base_sha mismatch" error, never
-        DRY_RUN_PASS.
+        With the ancestor check, a receipt pinned to a pre-merge commit
+        is valid as long as the base_sha is an ancestor of the current HEAD.
+        This verifies the fix for the exact-match design flaw.
 
-        Rationale: keeping the draft receipt stale on disk provides a
-        permanent regression fixture that proves the base_sha check works
-        against real on-disk data (not just synthetic in-memory receipts).
-        The DRY_RUN_PASS path is verified separately via
-        test_draft_receipt_post_merge_path (temp base_sha rewrite).
-
-        Invariant: receipt["base_sha"] must NOT equal current HEAD on
-        main, otherwise the fixture has been incorrectly advanced and
-        this test no longer validates fail-closed behavior.
+        A non-ancestor SHA (all-zeros) must still produce DRY_RUN_FAIL.
         """
         assert DRAFT_RECEIPT.exists(), f"Draft not found: {DRAFT_RECEIPT}"
         with open(DRAFT_RECEIPT, "r", encoding="utf-8") as f:
@@ -273,26 +263,28 @@ class TestValidDryRun:
             capture_output=True, text=True,
             cwd=SCRIPTS_DIR.parent,
         ).stdout.strip()
-        # Invariant: on-disk draft is intentionally stale (base_sha != HEAD).
-        # If this fails, someone updated the draft receipt's base_sha in-tree
-        # and the stale-fixture invariant has been broken.
+        # Invariant: on-disk base_sha != HEAD (proves ancestor check is
+        # doing real work, not trivially comparing equality)
         assert receipt["base_sha"] != head_sha, (
             f"draft.base_sha={receipt['base_sha']} must differ from HEAD="
-            f"{head_sha} to remain a valid stale fixture.  If you are "
-            f"intentionally refreshing the draft, also update this test "
-            f"and the README."
+            f"{head_sha} to prove ancestor check is meaningful."
         )
-        # Fail-closed: stale receipt must produce DRY_RUN_FAIL with
-        # "base_sha mismatch" error.
+        # Ancestor check: must PASS
         r = app.dry_run(receipt)
-        assert r["verdict"] == "DRY_RUN_FAIL", (
-            f"stale fixture must produce DRY_RUN_FAIL, got {r['verdict']}; "
+        assert r["verdict"] == "DRY_RUN_PASS", (
+            f"ancestor base_sha must produce DRY_RUN_PASS, got {r['verdict']}; "
             f"errors={r.get('errors', [])}"
         )
-        assert any("base_sha mismatch" in e for e in r["errors"]), (
-            f"stale-base error must mention 'base_sha mismatch'; "
-            f"got errors={r.get('errors', [])}"
+        assert r["base_sha_ok"] is True
+        assert r.get("base_sha_mode") == "ancestor"
+        # Non-ancestor SHA: must FAIL
+        bad = copy.deepcopy(receipt)
+        bad["base_sha"] = "0" * 40
+        r2 = app.dry_run(bad)
+        assert r2["verdict"] == "DRY_RUN_FAIL", (
+            f"non-ancestor base_sha must fail, got {r2['verdict']}"
         )
+        assert any("base_sha mismatch" in e for e in r2["errors"])
 
     def test_draft_receipt_post_merge_path(self):
         """After main advances to draft.base_sha, dry-run must PASS.
