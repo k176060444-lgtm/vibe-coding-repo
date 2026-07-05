@@ -42,8 +42,9 @@ explicitly excluded). What remains unverified is whether **a real business
 task, dispatched to a real worker on a real node, actually works end-to-end**
 under operator supervision.
 
-The third gray acceptance is the **first controlled end-to-end real-task
-execution after the readiness pipeline was completed**. It is intentionally
+The third gray acceptance is the **initial controlled end-to-end real-task
+execution after the readiness pipeline was completed** (it is the third
+acceptance round overall, not the first gray). It is intentionally
 narrow — one node, one model, one task — so that if anything fails, the cause
 is localizable to a single variable.
 
