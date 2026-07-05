@@ -379,9 +379,15 @@ class TestSevenStateSchema:
                 "xiaomi-mimo-v2-5", "xiaomi-mimo-v2-5-pro",
             },
         }
-        # Per-entry operator_approved — NOT promoted (S7-6 was NOT executed).
-        # The mimo-v2-5 stale expectation from S7-6 is removed.
-        OPERATOR_APPROVED_ENTRIES = {}
+        # Per-entry operator_approved — promoted via G-L4 real operator
+        # approval receipt apply (post-merge of PR #354 ancestor gate).
+        # 6 entries: deepseek-v4-pro × 3 nodes + mimo-v2-5 × 3 nodes.
+        # qwen3-7-plus explicitly NOT in this set (stays unknown, non_scope).
+        OPERATOR_APPROVED_ENTRIES = {
+            "21bao": frozenset({"opencode-go-deepseek-v4-pro", "opencode-go-mimo-v2-5"}),
+            "5bao": frozenset({"opencode-go-deepseek-v4-pro", "opencode-go-mimo-v2-5"}),
+            "9bao": frozenset({"opencode-go-deepseek-v4-pro", "opencode-go-mimo-v2-5"}),
+        }
         for nn, nd in nmc["nodes"].items():
             for i, e in enumerate(nd["matrix"]):
                 mid = e.get("model_id", "")
