@@ -1,0 +1,52 @@
+# Real operator approval receipt — first batch
+# This is a real receipt intended for operator authorization.
+# After operator approval, run:
+#   python scripts/apply_operator_approval_receipt.py \
+#     --receipt docs/baseline02/operator-approvals/receipts/real-receipt-001-operator-approved-20260705.yaml \
+#     --apply
+
+receipt_id: op-app-real-20260705-001
+issued_by: "operator"     # placeholder — to be replaced with human identity
+issued_at: "2026-07-05T07:00:00Z"
+base_sha: 9d1fa7f059c99aa46b328b00d7a2a083d5be3afd
+target_branch: main
+
+approved_entries:
+  - node: 21bao
+    model_id: opencode-go-deepseek-v4-pro
+  - node: 5bao
+    model_id: opencode-go-deepseek-v4-pro
+  - node: 9bao
+    model_id: opencode-go-deepseek-v4-pro
+  - node: 21bao
+    model_id: opencode-go-mimo-v2-5
+  - node: 5bao
+    model_id: opencode-go-mimo-v2-5
+  - node: 9bao
+    model_id: opencode-go-mimo-v2-5
+
+non_scope:
+  - node: 21bao
+    model_id: opencode-go-qwen3-7-plus
+  - node: 5bao
+    model_id: opencode-go-qwen3-7-plus
+  - node: 9bao
+    model_id: opencode-go-qwen3-7-plus
+
+evidence_prs: [318, 341, 342, 343, 349, 350, 351]
+evidence_kind: ["model_call_canary", "runtime_visible", "wrapper_valid",
+                "env_loaded", "model_call_verified"]
+evidence_commits:
+  deepseek-v4-pro: [418a40d, b80a757, 5685a0d, c822e28, f30c55b]
+  mimo-v2-5: [418a40d, b80a757, 5685a0d, c822e28, f30c55b, 49dbaa6]
+
+revocable: true
+draft: false
+notes: >
+  First batch operator approval for the 6 eligible entries (6/6 REQUIRED_STATES True).
+  Covers deepseek-v4-pro ×3 nodes + mimo-v2-5 ×3 nodes.
+  qwen3-7-plus explicitly excluded from scope (non_scope).
+  Evidence chain: stage5 wrapper_valid promotions (418a40d/b80a757/5685a0d),
+  stage7 runtime_visible+env_loaded (c822e28), stage5 model_call_verified
+  Batch D-R2 (f30c55b), PR #349 mimo evidence restore, PR #350 dry-run tool,
+  PR #351 stale-fixture test fix.

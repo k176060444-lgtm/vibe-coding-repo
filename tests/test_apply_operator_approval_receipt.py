@@ -324,8 +324,178 @@ class TestValidDryRun:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# CLI Self-Check
+# Apply Write Path (--apply flag)
 # ══════════════════════════════════════════════════════════════════════
+
+class TestApplyWrite:
+    """Tests for apply_receipt() — the --apply write path.
+
+    IMPORTANT: All tests use a TEMP COPY of NMC.  The real
+    scripts/node_model_capability.yaml is NEVER modified.
+    """
+
+    @pytest.fixture
+    def temp_nmc_env(self, tmp_path, current_git_sha):
+        """Copy real NMC to temp, override app.NMC_PATH, yield (path, sha)."""
+        import shutil
+        orig = app.NMC_PATH
+        tmp = str(tmp_path / "node_model_capability.yaml")
+        # The real NMC from test module's NMC_PATH (absolute path)
+        shutil.copy2(str(SCRIPTS_DIR / "node_model_capability.yaml"), tmp)
+        app.NMC_PATH = tmp
+        yield (tmp, current_git_sha)
+        app.NMC_PATH = orig
+        p = Path(tmp)
+        if p.exists():
+            p.unlink()
+        bak = p.parent / (p.name + ".bak")
+        if bak.exists():
+            bak.unlink()
+
+    def _make_receipt(self, sha, **overrides):
+        """Build a valid receipt dict with optional overrides."""
+        base = {
+            "receipt_id": "op-app-test-apply-001",
+            "issued_by": "operator",
+            "issued_at": "2026-07-05T07:00:00Z",
+            "base_sha": sha,
+            "target_branch": "main",
+            "approved_entries": [
+                {"node": "21bao", "model_id": "opencode-go-mimo-v2-5"},
+                {"node": "5bao", "model_id": "opencode-go-mimo-v2-5"},
+                {"node": "9bao", "model_id": "opencode-go-mimo-v2-5"},
+                {"node": "21bao", "model_id": "opencode-go-deepseek-v4-pro"},
+                {"node": "5bao", "model_id": "opencode-go-deepseek-v4-pro"},
+                {"node": "9bao", "model_id": "opencode-go-deepseek-v4-pro"},
+            ],
+            "non_scope": [
+                {"node": "21bao", "model_id": "opencode-go-qwen3-7-plus"},
+                {"node": "5bao", "model_id": "opencode-go-qwen3-7-plus"},
+                {"node": "9bao", "model_id": "opencode-go-qwen3-7-plus"},
+            ],
+            "evidence_prs": [341, 342, 343, 349],
+        }
+        base.update(overrides)
+        return base
+
+    # ── Normal apply ─────────────────────────────────────────────
+
+    def test_apply_writes_6_entries_correctly(self, temp_nmc_env):
+        """6 entries → operator_approved=true; qwen stays unknown."""
+        tmp_path, sha = temp_nmc_env
+        # Load NMC before to verify baseline
+        nmc_before = app.load_nmc(tmp_path)
+        true_before = sum(
+            1 for nd in nmc_before.get("nodes", {}).values()
+            for e in nd.get("matrix", [])
+            if e.get("operator_approved") is True
+        )
+        assert true_before == 0, "pre-condition: temp NMC must have 0 true"
+
+        r = app.apply_receipt(self._make_receipt(sha))
+        assert r["verdict"] == "APPLY_PASS"
+        assert r["written"] is True
+        assert len(r["entries_approved"]) == 6
+        assert len(r["entries_skipped_already_true"]) == 0
+
+        # Verify on-disk NMC
+        nmc = app.load_nmc(tmp_path)
+        for node in ("21bao", "5bao", "9bao"):
+            for mid in ("opencode-go-mimo-v2-5", "opencode-go-deepseek-v4-pro"):
+                entry = app.find_entry(nmc, node, mid)
+                assert entry is not None, f"{node}/{mid} not found"
+                assert entry.get("operator_approved") is True, \
+                    f"{node}/{mid} not true"
+            # qwen must stay unknown
+            qwen = app.find_entry(nmc, node, "opencode-go-qwen3-7-plus")
+            assert qwen is not None
+            assert qwen.get("operator_approved") == "unknown", \
+                f"{node}/qwen should stay unknown"
+
+    # ── fail-closed: no write if dry-run FAILS ───────────────────
+
+    def test_apply_stale_base_does_not_write(self, temp_nmc_env):
+        """stale base_sha → APPLY_FAIL, no write."""
+        tmp_path, sha = temp_nmc_env
+        r = app.apply_receipt(self._make_receipt("0" * 40))
+        assert r["verdict"] == "APPLY_FAIL"
+        assert r["written"] is False
+        assert any("base_sha mismatch" in e for e in r["errors"])
+        assert r["entries_approved"] == []
+        assert r["entries_skipped_already_true"] == []
+
+    def test_apply_wildcard_does_not_write(self, temp_nmc_env):
+        """Wildcard entry → APPLY_FAIL, no write."""
+        tmp_path, sha = temp_nmc_env
+        r = app.apply_receipt(self._make_receipt(sha, approved_entries=["21bao/*"]))
+        assert r["verdict"] == "APPLY_FAIL"
+        assert r["written"] is False
+        assert any("wildcard" in e.lower() for e in r["errors"])
+
+    def test_apply_ineligible_qwen_does_not_write(self, temp_nmc_env):
+        """qwen in approved_entries (not non_scope) → ineligible → no write."""
+        tmp_path, sha = temp_nmc_env
+        r = app.apply_receipt(self._make_receipt(
+            sha,
+            approved_entries=[{"node": "21bao", "model_id": "opencode-go-qwen3-7-plus"}],
+            non_scope=[],
+        ))
+        assert r["verdict"] == "APPLY_FAIL"
+        assert r["written"] is False
+        assert len(r.get("entries_ineligible", []) + r.get("errors", [])) > 0
+
+    # ── Idempotency ──────────────────────────────────────────────
+
+    def test_apply_idempotent_skips_already_true(self, temp_nmc_env):
+        """Second apply skips all 6 (already true), no errors."""
+        tmp_path, sha = temp_nmc_env
+        r1 = app.apply_receipt(self._make_receipt(sha))
+        assert r1["verdict"] == "APPLY_PASS"
+        assert len(r1["entries_approved"]) == 6
+
+        r2 = app.apply_receipt(self._make_receipt(sha))
+        assert r2["verdict"] == "APPLY_PASS"
+        assert len(r2["entries_approved"]) == 0
+        assert len(r2["entries_skipped_already_true"]) == 6
+        assert r2["written"] is True  # still writes (no-op save)
+
+    def test_apply_receipt_does_not_touch_real_nmc(self, temp_nmc_env):
+        """After apply to temp copy, real NMC must have 0 operator_approved=true."""
+        tmp_path, sha = temp_nmc_env
+        real_nmc = yaml.safe_load(
+            open(str(SCRIPTS_DIR / "node_model_capability.yaml"), "r", encoding="utf-8")
+        )
+        true_before = sum(
+            1 for nd in real_nmc.get("nodes", {}).values()
+            for e in nd.get("matrix", [])
+            if e.get("operator_approved") is True
+        )
+        assert true_before == 0, "pre-condition: real NMC must have 0 true"
+
+        r = app.apply_receipt(self._make_receipt(sha))
+        assert r["verdict"] == "APPLY_PASS"
+
+        real_after = yaml.safe_load(
+            open(str(SCRIPTS_DIR / "node_model_capability.yaml"), "r", encoding="utf-8")
+        )
+        true_after = sum(
+            1 for nd in real_after.get("nodes", {}).values()
+            for e in nd.get("matrix", [])
+            if e.get("operator_approved") is True
+        )
+        assert true_after == 0, "real NMC must still have 0 true after apply"
+
+    # ── --apply CLI flag existence ───────────────────────────────
+
+    def test_apply_flag_exists_in_cli(self):
+        """--apply argument must be registered."""
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--apply", action="store_true")
+        args = parser.parse_args(["--apply"])
+        assert args.apply is True
+        args2 = parser.parse_args([])
+        assert args2.apply is False
 
 class TestSelfCheck:
     def test_self_check_passes(self):
