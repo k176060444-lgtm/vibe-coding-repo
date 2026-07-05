@@ -44,6 +44,33 @@ def nmc() -> dict:
     return app.load_nmc(str(NMC_PATH))
 
 
+@pytest.fixture
+def clean_nmc_path(tmp_path):
+    """Provide a CLEAN NMC (operator_approved reset to 'unknown') on disk
+    and patch app.NMC_PATH to point at it.  Yields the temp path.
+    Restores app.NMC_PATH after.
+
+    Post-G-L4-apply, real NMC has 6 operator_approved=true.  Tests that
+    need pre-apply baseline (or want clean oos semantics) should use this.
+    """
+    import yaml
+    orig = app.NMC_PATH
+    tmp = str(tmp_path / "node_model_capability.yaml")
+    with open(str(SCRIPTS_DIR / "node_model_capability.yaml"), "r") as f:
+        nmc = yaml.safe_load(f)
+    for n in ("21bao", "5bao", "9bao"):
+        for e in nmc.get("nodes", {}).get(n, {}).get("matrix", []):
+            if e.get("operator_approved") is True:
+                e["operator_approved"] = "unknown"
+    with open(tmp, "w") as f:
+        yaml.safe_dump(nmc, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    app.NMC_PATH = tmp
+    try:
+        yield tmp
+    finally:
+        app.NMC_PATH = orig
+
+
 @pytest.fixture(scope="session")
 def current_git_sha() -> str:
     r = subprocess.run(
@@ -95,7 +122,7 @@ class TestSchemaValidation:
                          "approved_entries": [{"node": "21bao", "model_id": "x"}]})
         assert r["verdict"] == "DRY_RUN_FAIL"
 
-    def test_missing_approved_entries_fails(self, valid_receipt):
+    def test_missing_approved_entries_fails(self, valid_receipt, clean_nmc_path):
         bad = copy.deepcopy(valid_receipt)
         bad["approved_entries"] = []
         r = app.dry_run(bad)
@@ -108,7 +135,7 @@ class TestSchemaValidation:
 # ══════════════════════════════════════════════════════════════════════
 
 class TestBaseSha:
-    def test_stale_base_sha_fails(self, valid_receipt):
+    def test_stale_base_sha_fails(self, valid_receipt, clean_nmc_path):
         bad = copy.deepcopy(valid_receipt)
         bad["base_sha"] = "0" * 40  # all-zero = wrong SHA
         r = app.dry_run(bad)
@@ -123,14 +150,14 @@ class TestBaseSha:
 class TestWildcardRejection:
     @pytest.mark.parametrize("wildcard", ["21bao/*", "*/opencode-go-mimo-v2-5",
                                            "21bao/全部", "21bao/所有"])
-    def test_wildcard_string_entry_rejected(self, valid_receipt, wildcard):
+    def test_wildcard_string_entry_rejected(self, valid_receipt, wildcard, clean_nmc_path):
         bad = copy.deepcopy(valid_receipt)
         bad["approved_entries"] = [wildcard]
         r = app.dry_run(bad)
         assert r["verdict"] == "DRY_RUN_FAIL"
         assert any("wildcard" in e.lower() for e in r["errors"])
 
-    def test_wildcard_dict_entry_rejected(self, valid_receipt):
+    def test_wildcard_dict_entry_rejected(self, valid_receipt, clean_nmc_path):
         bad = copy.deepcopy(valid_receipt)
         bad["approved_entries"] = [{"node": "21bao", "model_id": "全部"}]
         r = app.dry_run(bad)
@@ -138,14 +165,14 @@ class TestWildcardRejection:
         assert any("wildcard" in e.lower() for e in r["errors"])
 
     @pytest.mark.parametrize("bad_raw", ["21bao", "slashed/too/many"])
-    def test_invalid_entry_format_rejected(self, valid_receipt, bad_raw):
+    def test_invalid_entry_format_rejected(self, valid_receipt, bad_raw, clean_nmc_path):
         bad = copy.deepcopy(valid_receipt)
         bad["approved_entries"] = [bad_raw]
         r = app.dry_run(bad)
         assert r["verdict"] == "DRY_RUN_FAIL"
         assert any("invalid entry format" in e.lower() for e in r["errors"])
 
-    def test_missing_entry_fails(self, valid_receipt):
+    def test_missing_entry_fails(self, valid_receipt, clean_nmc_path):
         bad = copy.deepcopy(valid_receipt)
         bad["approved_entries"] = [{"node": "21bao", "model_id": "nonexistent-model-v9999"}]
         r = app.dry_run(bad)
@@ -158,7 +185,7 @@ class TestWildcardRejection:
 # ══════════════════════════════════════════════════════════════════════
 
 class TestEntryEligibility:
-    def test_ineligible_qwen_fails(self, valid_receipt):
+    def test_ineligible_qwen_fails(self, valid_receipt, clean_nmc_path):
         """qwen3-7-plus has all REQUIRED_STATES='unknown' → ineligible."""
         bad = copy.deepcopy(valid_receipt)
         # Replace approved_entries with qwen (currently ineligible)
@@ -170,7 +197,7 @@ class TestEntryEligibility:
         assert any("ineligible" in e.lower() or "blocked by" in e.lower()
                    for e in (r.get("errors", []) + r.get("entries_ineligible", [])))
 
-    def test_non_node_fails(self, valid_receipt):
+    def test_non_node_fails(self, valid_receipt, clean_nmc_path):
         """Entry with a node that does not exist → not found."""
         bad = copy.deepcopy(valid_receipt)
         bad["approved_entries"] = [{"node": "nonexistent", "model_id": "opencode-go-mimo-v2-5"}]
@@ -286,11 +313,13 @@ class TestValidDryRun:
         )
         assert any("base_sha mismatch" in e for e in r2["errors"])
 
-    def test_draft_receipt_post_merge_path(self):
-        """After main advances to draft.base_sha, dry-run must PASS.
+    def test_draft_receipt_post_merge_path(self, clean_nmc_path):
+        """Dry-run on draft (with base_sha=HEAD) against CLEAN NMC.
 
-        We simulate this by temporarily rewriting base_sha to HEAD and
-        verifying the tool then produces DRY_RUN_PASS."""
+        Against a clean NMC (operator_approved all 'unknown'), the draft
+        receipt's 6 approved entries must all flip to 'true' (6 to approve),
+        3 qwen non_scope entries are reaffirmed unknown.
+        """
         assert DRAFT_RECEIPT.exists(), f"Draft not found: {DRAFT_RECEIPT}"
         with open(DRAFT_RECEIPT, "r", encoding="utf-8") as f:
             receipt = yaml.safe_load(f)
@@ -302,10 +331,15 @@ class TestValidDryRun:
         r = app.dry_run(receipt)
         assert r["verdict"] == "DRY_RUN_PASS", f"Errors: {r.get('errors', [])}"
         assert len(r["entries_to_approve"]) == 6
+        assert len(r["entries_already_true"]) == 0
         assert len(r["entries_to_reaffirm_unknown"]) == 3
 
-    def test_draft_receipt_all_6_mimo_and_deepseek_pro(self, valid_receipt):
-        """Valid receipt: 6 entries to approve (mimo×3 + dsv4pro×3)."""
+    def test_draft_receipt_all_6_mimo_and_deepseek_pro(self, valid_receipt, clean_nmc_path):
+        """Valid receipt against CLEAN NMC: 6 entries to approve (mimo×3 + dsv4pro×3).
+
+        Post-apply the real NMC has these 6 already true; against the clean
+        baseline they all enter entries_to_approve.
+        """
         r = app.dry_run(valid_receipt)
         assert r["verdict"] == "DRY_RUN_PASS"
         approved = [(ae["node"], ae["model_id"])
@@ -328,12 +362,24 @@ class TestApplyWrite:
 
     @pytest.fixture
     def temp_nmc_env(self, tmp_path, current_git_sha):
-        """Copy real NMC to temp, override app.NMC_PATH, yield (path, sha)."""
+        """Provide a CLEAN temp NMC (operator_approved reset to 'unknown').
+
+        Post-G-L4-apply, real NMC has 6 entries with operator_approved=true.
+        Tests needing pre-apply baseline use this clean copy.
+        """
         import shutil
+        import yaml
         orig = app.NMC_PATH
         tmp = str(tmp_path / "node_model_capability.yaml")
-        # The real NMC from test module's NMC_PATH (absolute path)
-        shutil.copy2(str(SCRIPTS_DIR / "node_model_capability.yaml"), tmp)
+        # Load real NMC and reset operator_approved to 'unknown' (clean baseline)
+        with open(str(SCRIPTS_DIR / "node_model_capability.yaml"), "r") as f:
+            nmc = yaml.safe_load(f)
+        for n in ("21bao", "5bao", "9bao"):
+            for e in nmc.get("nodes", {}).get(n, {}).get("matrix", []):
+                if e.get("operator_approved") is True:
+                    e["operator_approved"] = "unknown"
+        with open(tmp, "w") as f:
+            yaml.safe_dump(nmc, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
         app.NMC_PATH = tmp
         yield (tmp, current_git_sha)
         app.NMC_PATH = orig
@@ -452,7 +498,11 @@ class TestApplyWrite:
         assert r2["written"] is True  # still writes (no-op save)
 
     def test_apply_receipt_does_not_touch_real_nmc(self, temp_nmc_env):
-        """After apply to temp copy, real NMC must have 0 operator_approved=true."""
+        """Apply to TEMP must not mutate real NMC; real NMC count is unchanged.
+
+        Post-apply invariant: real NMC has exactly 6 operator_approved=true
+        (the post-G-L4-apply state).  Applying to temp must not change this.
+        """
         tmp_path, sha = temp_nmc_env
         real_nmc = yaml.safe_load(
             open(str(SCRIPTS_DIR / "node_model_capability.yaml"), "r", encoding="utf-8")
@@ -462,7 +512,10 @@ class TestApplyWrite:
             for e in nd.get("matrix", [])
             if e.get("operator_approved") is True
         )
-        assert true_before == 0, "pre-condition: real NMC must have 0 true"
+        assert true_before == 6, (
+            f"pre-condition: real NMC must have 6 true (post-G-L4-apply), "
+            f"got {true_before}"
+        )
 
         r = app.apply_receipt(self._make_receipt(sha))
         assert r["verdict"] == "APPLY_PASS"
@@ -475,7 +528,9 @@ class TestApplyWrite:
             for e in nd.get("matrix", [])
             if e.get("operator_approved") is True
         )
-        assert true_after == 0, "real NMC must still have 0 true after apply"
+        assert true_after == 6, (
+            f"real NMC must still have 6 true after temp apply, got {true_after}"
+        )
 
     # ── --apply CLI flag existence ───────────────────────────────
 
