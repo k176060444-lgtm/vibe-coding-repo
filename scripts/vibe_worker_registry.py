@@ -500,6 +500,34 @@ class WorkerRegistry:
             w.health_status = status
             w.last_health_check = datetime.now(timezone.utc).isoformat()
 
+    def _resolve_ssh_key(self, key):
+        # Resolve SSH key path with safe fallback chain.
+        # Order: 1) abs existing path; 2) env VIBEDEV_SSH_KEY_DIR; 3) platform default
+        # (Windows: %LOCALAPPDATA%ibedev-tools\ssh, POSIX: ~/.local/vibedev-tools/ssh);
+        # 4) original key (will fail at ssh_cmd -> OFFLINE is safe outcome).
+        # Never exposes key content.
+        if not key:
+            return key
+        import os as _os
+        if _os.path.isabs(key) and _os.path.exists(key):
+            return key
+        basename = _os.path.basename(key)
+        env_dir = _os.environ.get("VIBEDEV_SSH_KEY_DIR", "").strip()
+        if env_dir:
+            candidate = _os.path.join(env_dir, basename)
+            if _os.path.exists(candidate):
+                return candidate
+        if _os.name == "nt":
+            local_app_data = _os.environ.get("LOCALAPPDATA", "")
+            default_dir = _os.path.join(local_app_data, "vibedev-tools", "ssh") if local_app_data else ""
+        else:
+            default_dir = _os.path.join(_os.path.expanduser("~"), ".local", "vibedev-tools", "ssh")
+        if default_dir:
+            candidate = _os.path.join(default_dir, basename)
+            if _os.path.exists(candidate):
+                return candidate
+        return key
+
     def health_probe(self, worker_id: str, ssh_key_path: str = None,
                      timeout: int = 10) -> dict:
         """Real SSH health probe. Returns evidence dict.
@@ -554,7 +582,7 @@ class WorkerRegistry:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
 
-        key = ssh_key_path or w.ssh_key_path
+        key = self._resolve_ssh_key(ssh_key_path or w.ssh_key_path)
         ssh_cmd = [
             "ssh", "-o", "StrictHostKeyChecking=no",
             "-o", "ConnectTimeout=%d" % timeout,
@@ -969,9 +997,15 @@ def main():
             sys.exit(1)
 
     elif args.health_check:
-        # Placeholder: in production, SSH to each worker
-        for w in reg.workers.values():
-            print(f"  {w.worker_id}: health check not yet implemented (requires SSH)")
+        # Real probe: reg.probe_all() -> health_probe() per worker.
+        # 21bao: local-exec (hostname). 5bao/9bao: SSH (echo HEALTH_OK && hostname).
+        results = reg.probe_all(timeout=10)
+        import json as _json
+        print(_json.dumps(results, indent=2, default=str))
+        # Exit non-zero if any worker is not ONLINE (for CI / shell gating)
+        all_online = all(r.get("status") == "ONLINE" for r in results.values())
+        if not all_online:
+            sys.exit(2)
 
     else:
         parser.print_help()
