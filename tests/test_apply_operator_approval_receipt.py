@@ -246,45 +246,53 @@ class TestIdempotentNoWrite:
 # ══════════════════════════════════════════════════════════════════════
 
 class TestValidDryRun:
-    def test_draft_receipt_dry_run_passes(self):
-        """The on-disk draft receipt must validate successfully.
+    def test_draft_receipt_stale_fixture_fail_closed(self):
+        """The on-disk draft receipt is a DELIBERATE stale fixture.
 
-        The draft's base_sha is pinned to a future expected main SHA.
-        On the PR branch, current HEAD is ahead of main, so we expect
-        either (a) DRY_RUN_PASS if HEAD equals base_sha, or (b) a
-        stale-base error if HEAD has moved past base_sha.  After merge
-        this test will PASS once main == branch HEAD == base_sha.
+        The draft's base_sha is pinned to e06216d (pre-#350-merge base) and
+        is intentionally NOT updated as main advances.  This test verifies
+        the dry-run tool's fail-closed base_sha detection: a stale receipt
+        must produce DRY_RUN_FAIL with a "base_sha mismatch" error, never
+        DRY_RUN_PASS.
+
+        Rationale: keeping the draft receipt stale on disk provides a
+        permanent regression fixture that proves the base_sha check works
+        against real on-disk data (not just synthetic in-memory receipts).
+        The DRY_RUN_PASS path is verified separately via
+        test_draft_receipt_post_merge_path (temp base_sha rewrite).
+
+        Invariant: receipt["base_sha"] must NOT equal current HEAD on
+        main, otherwise the fixture has been incorrectly advanced and
+        this test no longer validates fail-closed behavior.
         """
         assert DRAFT_RECEIPT.exists(), f"Draft not found: {DRAFT_RECEIPT}"
         with open(DRAFT_RECEIPT, "r", encoding="utf-8") as f:
             receipt = yaml.safe_load(f)
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+            cwd=SCRIPTS_DIR.parent,
+        ).stdout.strip()
+        # Invariant: on-disk draft is intentionally stale (base_sha != HEAD).
+        # If this fails, someone updated the draft receipt's base_sha in-tree
+        # and the stale-fixture invariant has been broken.
+        assert receipt["base_sha"] != head_sha, (
+            f"draft.base_sha={receipt['base_sha']} must differ from HEAD="
+            f"{head_sha} to remain a valid stale fixture.  If you are "
+            f"intentionally refreshing the draft, also update this test "
+            f"and the README."
+        )
+        # Fail-closed: stale receipt must produce DRY_RUN_FAIL with
+        # "base_sha mismatch" error.
         r = app.dry_run(receipt)
-        # Either PASS (HEAD == base_sha) or FAIL with stale-base message
-        if r["verdict"] != "DRY_RUN_PASS":
-            assert any("base_sha mismatch" in e for e in r["errors"]), \
-                f"Unexpected failure: {r.get('errors', [])}"
-            # Verify that resolving against post-merge main would pass:
-            # fetch main and check the discrepancy
-            main_sha = subprocess.run(
-                ["git", "rev-parse", "main"],
-                capture_output=True, text=True,
-                cwd=str(SCRIPTS_DIR.parent),
-            ).stdout.strip()
-            head_sha = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True, text=True,
-                cwd=str(SCRIPTS_DIR.parent),
-            ).stdout.strip()
-            # On PR branch, HEAD != main.  If base_sha == main, then receipt
-            # is intentionally pinned to post-merge main.  When merged, HEAD
-            # will equal main and the receipt will validate.
-            assert receipt["base_sha"] == main_sha, (
-                f"draft.base_sha={receipt['base_sha']} should equal "
-                f"main_sha={main_sha} for post-merge semantics"
-            )
-            assert head_sha != main_sha, (
-                f"branch HEAD ({head_sha}) should differ from main ({main_sha})"
-            )
+        assert r["verdict"] == "DRY_RUN_FAIL", (
+            f"stale fixture must produce DRY_RUN_FAIL, got {r['verdict']}; "
+            f"errors={r.get('errors', [])}"
+        )
+        assert any("base_sha mismatch" in e for e in r["errors"]), (
+            f"stale-base error must mention 'base_sha mismatch'; "
+            f"got errors={r.get('errors', [])}"
+        )
 
     def test_draft_receipt_post_merge_path(self):
         """After main advances to draft.base_sha, dry-run must PASS.
