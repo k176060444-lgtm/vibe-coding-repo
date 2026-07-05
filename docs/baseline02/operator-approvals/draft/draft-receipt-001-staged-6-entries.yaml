@@ -1,0 +1,42 @@
+# Draft operator approval receipt — DO NOT USE AS ACTUAL RECEIPT
+# This is a developer fixture for dry-run testing only.
+# A real operator receipt must be issued by the human operator,
+# with explicit approval and signed/committed under operator control.
+
+receipt_id: op-app-draft-20260704-001
+issued_by: "operator"  # placeholder — real receipt: human operator identity
+issued_at: "2026-07-04T15:00:00Z"
+base_sha: e06216d5592d1ec3660fa6f3f38431c081a2e7e1
+target_branch: main
+
+approved_entries:
+  - node: 21bao
+    model_id: opencode-go-mimo-v2-5
+  - node: 5bao
+    model_id: opencode-go-mimo-v2-5
+  - node: 9bao
+    model_id: opencode-go-mimo-v2-5
+  - node: 21bao
+    model_id: opencode-go-deepseek-v4-pro
+  - node: 5bao
+    model_id: opencode-go-deepseek-v4-pro
+  - node: 9bao
+    model_id: opencode-go-deepseek-v4-pro
+
+non_scope:
+  - node: 21bao
+    model_id: opencode-go-qwen3-7-plus
+  - node: 5bao
+    model_id: opencode-go-qwen3-7-plus
+  - node: 9bao
+    model_id: opencode-go-qwen3-7-plus
+
+evidence_prs: [341, 342, 343, 349]
+evidence_kind: ["model_call_canary", "runtime_visible", "wrapper_valid", "env_loaded"]
+
+revocable: true
+draft: true
+notes: >
+  DRAFT for dry-run testing only. NOT a real operator approval.
+  Covers all 6 currently-eligible (6/6 REQUIRED_STATES True) entries.
+  qwen3-7-plus explicitly excluded from scope.
