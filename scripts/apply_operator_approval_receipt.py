@@ -185,6 +185,7 @@ def dry_run(receipt: dict) -> dict:
         "verdict": "DRY_RUN_PASS",
         "receipt_id": receipt.get("receipt_id", ""),
         "base_sha_ok": False,
+        "base_sha_mode": None,
         "entries_to_approve": [],
         "entries_to_reaffirm_unknown": [],
         "entries_already_true": [],
@@ -198,17 +199,22 @@ def dry_run(receipt: dict) -> dict:
         # 1. Schema
         validate_receipt_schema(receipt)
 
-        # 2. Base SHA match
+        # 2. Base SHA — ancestor check (not exact match)
+        # A receipt pinned to an ancestor commit of HEAD is valid;
+        # this accommodates PR merge workflows where HEAD advances
+        # past the receipt's base_sha.
         current_sha = _git_head_sha()
         receipt_sha = receipt["base_sha"]
-        if current_sha != receipt_sha:
+        if not _is_ancestor(receipt_sha, current_sha):
             result["errors"].append(
                 f"base_sha mismatch: receipt={receipt_sha}, "
-                f"current HEAD={current_sha} (stale/forked receipt)"
+                f"current HEAD={current_sha} — receipt base_sha "
+                f"is not an ancestor of current HEAD (stale/forked receipt)"
             )
             result["verdict"] = "DRY_RUN_FAIL"
             return result
         result["base_sha_ok"] = True
+        result["base_sha_mode"] = "ancestor"
 
         # 3. Load NMC
         nmc = load_nmc()
@@ -332,6 +338,28 @@ def _git_head_sha() -> str:
         cwd=repo_root,
     )
     return r.stdout.strip()
+
+
+def _is_ancestor(ancestor_candidate: str, descendant: str) -> bool:
+    """Return True if ancestor_candidate is an ancestor of descendant (or equal).
+
+    Uses `git merge-base --is-ancestor`.  On success (ancestor or equal)
+    returns True.  On failure (not ancestor, invalid SHA, git error)
+    returns False so the fail-closed gate stays engaged.
+    """
+    import subprocess
+    import os
+    if not re.match(r"^[0-9a-f]{40}$", ancestor_candidate):
+        return False
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(script_dir, ".."))
+    r = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor_candidate, descendant],
+        capture_output=True, text=True, timeout=10,
+        cwd=repo_root,
+    )
+    # git merge-base --is-ancestor exits 0 if ancestor, 1 if not
+    return r.returncode == 0
 
 
 # ============================================================
