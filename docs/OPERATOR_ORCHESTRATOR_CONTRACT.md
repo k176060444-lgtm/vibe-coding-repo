@@ -93,10 +93,10 @@ Each node's canonical primary transport is registered in the node registry and f
 
 ### §3.2 Node Activity and Control-Plane Readiness
 
-3.2.1 Each node carries two independent labels:
+3.2.1 The cluster recognises two **node availability** values and one **control-plane readiness** dimension:
 
-  - **node availability**: `ACTIVE` or `SUSPENDED_OFFLINE / NOT_ASSIGNABLE`. `SUSPENDED_OFFLINE` implies `NOT_ASSIGNABLE`.
-  - **control-plane readiness** (only meaningful for the unique control-plane node — see §3.6): `CONTROL_PLANE_READY` or `CONTROL_PLANE_UNAVAILABLE`.
+  - **node availability** of any node is exactly one of: `ACTIVE` or `SUSPENDED_OFFLINE`. `NOT_ASSIGNABLE` is **not** an availability value; it is the **mandatory scheduling consequence** of `SUSPENDED_OFFLINE` — a SUSPENDED_OFFLINE node is, by definition, not assignable to any role. The two state spaces are independent dimensions, not parallel availability values.
+  - **control-plane readiness** applies **only to the unique control-plane node** (`21bao`, per §3.6) and is exactly one of: `CONTROL_PLANE_READY` or `CONTROL_PLANE_UNAVAILABLE`. The other nodes do not carry a control-plane readiness label.
 
 3.2.2 A node labelled `SUSPENDED_OFFLINE` **must not** be recommended, allocated, SSH-ed, model-called, or otherwise executed until operator explicitly approves recovery and re-qualification completes.
 
@@ -122,9 +122,13 @@ Each node's canonical primary transport is registered in the node registry and f
   - connection failure;
   - readiness gate fail.
 
-3.4.2 **Exception (precedence of §3.5 over §3.4 / §7)**: For an `ACTIVE` node that has an operator-approved, registered, and qualified same-node route chain (§3.5), a transport-path failure matching §3.5.5 **first** enters the §3.5 failover flow and **does not** immediately trigger the §3.4 STOP above. The §3.4 STOP fires only when §3.5 has been exhausted or when the failure falls under §3.5.6 / §3.5.8 / §3.5.9 / §3.5.11.
+3.4.2 **Precedence of §3.5 over §3.4**: for an `ACTIVE` node that has an operator-approved, registered, and qualified same-node route chain, a transport-path failure matching §3.5.5 **first** enters the §3.5 failover flow. The §3.4 STOP above does not fire on that transport-path failure alone. The §3.4 STOP fires only when the §3.5 path has terminated, namely:
 
-3.4.3 Detailed failure handling is governed by §7. Strictly forbidden at the assignment level: automatic fallback, automatic node swap, automatic model swap, lowered independence, scope-shrinking continuation.
+  - the chain has been exhausted (§3.5.9);
+  - the failure is a §3.5.6 disallowed trigger class;
+  - a proposed or actual route switch violates §3.5.2 or §3.5.11 invariant.
+
+3.4.3 Detailed failure handling is governed by §7. Strictly forbidden at the **assignment level**: automatic fallback, automatic node swap, automatic model swap, lowered independence, scope-shrinking continuation.
 
 ### §3.5 Transport-Route Failover (Same Node, Operator-Approved Chain)
 
@@ -147,9 +151,17 @@ Each route entry, before entering an active chain, must independently qualify, d
   - the route does not change user, privilege, node identity, or credential scope;
   - the qualification evidence is auditable.
 
-#### §3.5.4 Excluded routes
+#### §3.5.4 Excluded routes and chain suspension
 
-Routes that are `UNKNOWN`, unqualified, suspended, not-assignable, or not operator-approved **must not** be tried automatically.
+A route entry within an active chain is eligible for automatic failover only when all of the following hold:
+
+  - the entry is `qualified` under §3.5.3;
+  - the entry is `enabled` and operator-approved;
+  - the entry is not `UNKNOWN`, not `unqualified`, not `disabled`, and not revoked.
+
+A route entry is **not** a node, and **must not** carry `SUSPENDED` or `NOT_ASSIGNABLE` as a state — those are node-level states.
+
+If the **owning node** of a route chain is `SUSPENDED_OFFLINE` (and therefore not assignable), the entire chain of that node is suspended: no route in that chain participates in failover. The cluster's failover machinery does not use route chains of SUSPENDED nodes to recover connectivity.
 
 #### §3.5.5 Allowed trigger classes (transport path only)
 
@@ -183,7 +195,7 @@ Per switch, runtime **must**:
   - re-verify credential binding;
   - re-verify applicable health / readiness;
   - record transition evidence in the controlled evidence ledger;
-  - immediately report to operator with at minimum: `node | previous route | active route | failure class | switched_at (UTC) | post-switch health / readiness | affected task / run evidence`.
+  - immediately report to operator with at minimum the **seven minimum information categories**: `node | previous route | active route | failure class | switched_at (UTC) | post-switch health / readiness | affected task / run evidence`. Specific field names and schemas are left to the runtime / evidence spec.
 
 #### §3.5.8 Cascade rules
 
@@ -199,11 +211,11 @@ The chain is ordered and operator-approved. Any of the following changes require
 
 #### §3.5.11 Categorisation
 
-Transport-route failover is **not** an assignment-level fallback. It does not change node, role, model, assignment, credential identity / scope, task scope, or operator-approved action range. It is a same-node transport-level re-route, and it is **distinct** from the assignment-level fallback prohibited by §7 and §10.
+Transport-route failover is **not** an assignment-level fallback. It does not change node, role, model, assignment, credential identity / scope, task scope, or operator-approved action range. It is a same-node transport-level re-route, and it is **distinct** from the assignment-level fallback prohibited by §7 and §10. Section §3.5.11 itself is **not** a failure class and **must not** be cited as a STOP trigger.
 
 #### §3.5.12 Contract scope
 
-Contract-level minimum report contents for any switch are the seven fields in §3.5.7. Schema, field names, file names (such as `routes.yaml`-style names), script names, receipt / ledger structures, and executor / wrapper internals are out of contract scope and live in the runtime / node-registry / evidence spec.
+Contract-level minimum report contents for any switch are the seven minimum information categories listed in §3.5.7. Schema, field names, file names (such as `routes.yaml`-style names), script names, receipt / ledger structures, and executor / wrapper internals are out of contract scope and live in the runtime / node-registry / evidence spec.
 
 ### §3.6 21bao as the Unique Control Plane
 
@@ -264,13 +276,15 @@ When `21bao` is restored from `CONTROL_PLANE_UNAVAILABLE`, VibeCoding dispatch *
 
 Only after **every** item above returns PASS may `21bao` be restored to `ACTIVE / CONTROL_PLANE_READY`. Re-opening dispatch before all checks pass is a §9.3 high-risk violation. The post-outage / recovery report captures the minimum semantics: outage / detection / recovery / re-dispatch times, validation outcomes, linked evidence, frozen or not-started tasks. The specific schema lives in the runtime / evidence spec.
 
+**State dimension separation**: recovery of dispatch requires **both** `node availability = ACTIVE` **and** `control-plane readiness = CONTROL_PLANE_READY`. If `21bao`'s node availability was already `ACTIVE` throughout (only the control-plane readiness was `CONTROL_PLANE_UNAVAILABLE`), the recovery transitions only the readiness dimension — it does not change the availability dimension. The two state spaces remain independent per §3.2.1.
+
 ### §3.7 Domain Endpoint Semantics
 
 3.7.1 `.top` and `.vip` are **complete** domain suffixes, **not** `top` / `vip` path segments. Same-name `.top` and `.vip` are hosted by **different** DNS providers with expected equal resolution values.
 
 3.7.2 `.top` is primary, `.vip` is fallback.
 
-3.7.3 `9bao` and `9bao2` are two distinct ISP links (primary ↔ secondary). Each link carries its own `.top` / `vip` redundancy.
+3.7.3 `9bao` and `9bao2` are two distinct ISP links (primary ↔ secondary). Each link carries its own `.top` / `.vip` redundancy.
 
 3.7.4 §3.1.4 explicitly registers canonical primary transports as governance facts. **Other** implementation-level endpoint parameters (additional ports, internal addresses, proxies, package manager paths, etc.) live in the controlled node registry / runtime spec; this contract does not fix them.
 
@@ -566,9 +580,16 @@ Any of the following immediately triggers STOP:
 - model call failure;
 - provider / credential / endpoint / alias / wrapper anomaly.
 
-### §7.2 Precedence over §3.4
+### §7.2 Precedence of §3.5 over §7
 
-For an `ACTIVE` node with an operator-approved, registered, qualified same-node route chain (§3.5), a transport-path failure matching §3.5.5 **first** enters the §3.5 failover flow and **does not** immediately trigger the §7.1 STOP above. The §7.1 STOP fires when §3.5 has been exhausted, when the failure falls under §3.5.6 / §3.5.8 / §3.5.9 / §3.5.11, or when the node has no approved same-node route chain. Local-exec and control-plane failures go directly to §3.6.4 / §3.6.7.
+For an `ACTIVE` node with an operator-approved, registered, qualified same-node route chain (§3.5), a transport-path failure matching §3.5.5 **first** enters the §3.5 failover flow and **does not** immediately trigger the §7.1 STOP above. The §7.1 STOP fires when the §3.5 path has terminated, namely:
+
+  - the chain has been exhausted (§3.5.9);
+  - the failure is a §3.5.6 disallowed trigger class;
+  - a proposed or actual route switch violates §3.5.2 or §3.5.11 invariant;
+  - the node has no approved same-node route chain.
+
+Local-exec and control-plane failures go directly to §3.6.4 / §3.6.7.
 
 ### §7.3 Immediate Actions
 
@@ -591,17 +612,21 @@ For an `ACTIVE` node with an operator-approved, registered, qualified same-node 
 - current Git / task / receipt state (HEAD SHA, current PR if any, list of produced receipts);
 - items requiring operator decision — statement of fact + options + their respective risks; orchestrator **does not** choose.
 
-### §7.5 Strictly Forbidden
+### §7.5 Strictly Forbidden (assignment-level only)
 
-- automatic fallback;
-- automatic node / model swap;
-- default substitute;
+The list below is the **assignment-level fallback** list. Each item is forbidden at the **assignment** layer, not at the transport layer. §3.5 same-node transport-route failover, which advances within an operator-approved, registered, qualified chain, is **not** an assignment-level fallback and is therefore **not** forbidden by this list. Conversely, no item in this list may be achieved by §3.5 transport failover or by chaining a §3.5 cascade to invoke the same effect.
+
+- assignment-level automatic fallback;
+- assignment-level automatic node / model swap;
+- default substitute (assignment-level);
 - automatic assignment rewrite;
 - lowered tester / reviewer independence;
 - scope-shrinking continuation;
 - continuing other unaffected roles into partial completion;
 - orchestrator unilaterally retrying or choosing an alternative path;
 - resuming route failover (§3.5) after this STOP has fired.
+
+Once §7 has fired (the **Failure STOP**), the §3.5 route-switching state is **not** resumed; recovery requires a new explicit operator decision.
 
 ### §7.6 Retry and Confirmation
 
@@ -630,7 +655,14 @@ Orchestrator submits fact, risk, and options only — **does not** choose. Runti
 - §7 does not replace §10.1 (five-step drift handling).
 - §7 does not replace §9.3 (high-risk double-confirmation).
 - §7 does **not** introduce retry tokens or preset automatic-retry mechanisms.
-- §7 is **not** the same as §3.5 transport-route failover; transport-route failover (§3.5) is a same-node transport-level re-route with its own trigger set (§3.5.5) and its own forbidden actions (§3.5.6), and stops per §7 only when §3.5.6 or §3.5.9 fires.
+- §7 is **not** the same as §3.5 transport-route failover; transport-route failover (§3.5) is a same-node transport-level re-route with its own trigger set (§3.5.5) and its own forbidden actions (§3.5.6), and stops per §7 only when the §3.5 path has terminated — namely the **exhaustive** STOP conditions shared across §3.4.2, §7.2, and §13:
+
+  - the chain has been exhausted (§3.5.9);
+  - the failure is a §3.5.6 disallowed trigger class;
+  - the next route is reachable but identity, credential, application readiness, model, gate, receipt, or evidence fails (§3.5.8 post-condition);
+  - a proposed or actual route switch violates §3.5.2 or §3.5.11 invariant.
+
+§3.5.11 itself is **not** a failure class and **must not** be cited as a STOP trigger.
 
 ---
 
@@ -646,7 +678,7 @@ Orchestrator submits fact, risk, and options only — **does not** choose. Runti
 - Operator **may** explicitly authorise wrapper, manual SCP / SSH, ad-hoc model calls for diagnosis, recovery, evidence collection, or local verification. Such executions must record operator authorisation and carry `execution_path: non_canonical`.
 - Their results may carry only the labels `diagnostic`, `local_verification`, or `historical_evidence`; **must not** claim canonical E2E PASS.
 - Unauthorised use is **forbidden**.
-- Non-canonical paths **must not** become automatic fallback.
+- Non-canonical paths **must not** become assignment-level automatic fallback.
 
 ### §8.3 Execution Kind and Role Tools
 
@@ -682,16 +714,18 @@ Historical evidence (including T3 / R3 / RW-1 reports, PR #341–#343 canary evi
 Such evidence:
 
 - is usable to demonstrate **local components** or **historical run capability**;
-- **does not** satisfy V2's full 9-role, canonical pipeline, dual-tester, dual-reviewer, and no-fallback requirements;
+- **does not** satisfy V2's full 9-role, canonical pipeline, dual-tester, dual-reviewer, and **no-assignment-level-fallback** requirements;
 - **must not** be reinterpreted as V2-compliant E2E PASS;
 - any current verdict referencing them must carry the banner above.
+
+References to "no-fallback" in this document mean **no assignment-level fallback** (§3.5.11, §7.5). The §3.5 same-node transport-route failover remains a permitted transport behaviour, not an assignment-level fallback.
 
 ### §8.9 Cluster Construction Operation (`CLUSTER_CONSTRUCTION_OPERATION`)
 
 While the full canonical 9-role runtime has not been accepted and declared in force by operator, any actions performed to **build, audit, or remediate** that runtime are uniformly labelled `CLUSTER_CONSTRUCTION_OPERATION`:
 
 - such actions **must not** be claimed as V2-compliant VibeCoding tasks, complete 9-role executions, or canonical E2E PASS;
-- such actions **remain subject to** operator decision authority, explicit authorisation, no-fallback, Failure STOP (§7), evidence levels (§8.5), historical / current distinction (§8.6, §8.8), and high-risk double-confirmation (§9.3);
+- such actions **remain subject to** operator decision authority, explicit authorisation, **no-assignment-level-fallback**, Failure STOP (§7), evidence levels (§8.5), historical / current distinction (§8.6, §8.8), and high-risk double-confirmation (§9.3);
 - **once** operator formally accepts and declares the canonical 9-role runtime in force, every VibeCoding task must run the full 9-role (§4);
 - this transitional label **must not** be used to bypass the post-acceptance 9-role, gates, evidence, or operator checkpoints.
 
@@ -749,7 +783,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (e) agent self-claim treated as operator acceptance;
   - (f) canonical-pipeline bypass (unauthorised wrapper / manual SSH / ad-hoc model call);
   - (g) authorisation expansion (extending a one-shot authorisation to later stages);
-  - (h) automatic fallback / automatic node / model swap;
+  - (h) assignment-level automatic fallback / automatic node / model swap;
   - (i) using a default substitute (including auto-picking a default model / node for an unspecified role);
   - (j) automatic assignment rewrite (orchestrator modifying operator's specification);
   - (k) scope-shrinking continuation (partial-execute forming pass-by-omission);
@@ -809,8 +843,10 @@ V2 takes effect **only after** explicit operator acceptance. `vibedev` **must no
 
 ### §10.6 Post-Effect PR
 
-- Through a new PR, **update** the existing `docs/OPERATOR_ORCHESTRATOR_CONTRACT.md`.
-- File header carries: `Version: 2.0`; `Supersedes: V1 / PR #276`; `Historical source retained in Git history`.
+- V2 enters force **only** when the operator explicitly accepts it in chat (e.g. "ACCEPT V2" or equivalent natural language). vibedev **must not** self-declare V2 as accepted, effective, or adopted.
+- The accepted body is applied to the existing contract file through an **operator-authorised PR update**. The current Draft PR (#365, or its successor) may serve as the landing PR **if and only if** its head content is **identical** to the operator-accepted text.
+- The landing PR proceeds through **two independent authorisations**: `Draft → Ready` (operator authorises) and `merge` (operator authorises separately). Neither step is automatic.
+- If the operator-accepted text differs semantically from the current Draft head, a new review cycle and renewed operator acceptance are required before landing.
 - **No** parallel V2 file is created.
 - **No** rewriting of PR #276's Git history.
 
@@ -936,9 +972,9 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model (§4.5) |
 | 8-role assignment pre-brief | absent | required; 4-column matrix; no `alternative` (§5.5) |
 | Assignment strictness | absent | strict per operator spec; failure follows §7 (§5.8, §5.9) |
-| Failure STOP | implicit | explicit triggers, preserved evidence, enumerated prohibitions, retry rules; §3.5 transport-path failures go through §3.5 first (§7.2) |
+| Failure STOP | implicit | explicit triggers, preserved evidence, enumerated prohibitions, retry rules; §3.5 transport-path failures go through §3.5 first (§7.2); STOP fires on chain exhaustion (§3.5.9), §3.5.6 disallowed trigger, §3.5.8 post-condition failure, or §3.5.2 / §3.5.11 invariant violation (§3.4.2, §7.2, §7.8, §13 all share the same exhaustive set); §3.5.11 itself is not a failure class |
 | Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary (§6.5–§6.8) |
-| Canonical pipeline | F1–F10 not detailed | F1–F10 real evaluation; non-canonical path requires operator authorisation and `execution_path: non_canonical`; non-canonical must not auto-fallback (§8.1, §8.2) |
+| Canonical pipeline | F1–F10 not detailed | F1–F10 real evaluation; non-canonical path requires operator authorisation and `execution_path: non_canonical`; non-canonical must not become assignment-level automatic fallback (§8.1, §8.2) |
 | Evidence levels | absent | 7 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, soft 3000-character target, exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
@@ -946,7 +982,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | High-risk checkpoints | §4 vague | §9 explicit 4 categories (A/B/C/D), 12+ high-risk items, including `Hermes` / `OpenCode` install / update / downgrade / migration / restart / switch (§9.3) |
 | Top-line governance | role authority scattered | §1 GP-1 / GP-2 / GP-3 single page; recommend → assign → execute locked |
 | Effect mechanism | §10 "signing" (later corrected to Working Agreement) | effective only on operator explicit chat acceptance; on acceptance update existing file with `Version: 2.0` + `Supersedes: V1 / PR #276` + `Historical source retained in Git history` |
-| Transport-route failover | absent | §3.5 same-node transport-route failover with operator-approved chain, standing authorization, per-switch no-permission-needed; wrong / unqualified / non-SAME-NODE routes forbidden; chain change needs operator approval; §3.5 STOP triggers (§3.5.6 / §3.5.8 / §3.5.9 / §3.5.11) take precedence over §7 |
+| Transport-route failover | absent | §3.5 same-node transport-route failover with operator-approved chain, standing authorization, per-switch no-permission-needed; wrong / unqualified / non-SAME-NODE routes forbidden; chain change needs operator approval; §3.5 STOP triggers (§3.5.6 / §3.5.8 / §3.5.9) take precedence over §7; §3.5.11 itself is not a failure class |
 | `21bao` as control plane | not labelled | §3.6 `ALWAYS_ON_CONTROL_PLANE` is design + SLA target; on unavailability enter `CONTROL_PLANE_UNAVAILABLE / VIBECODING_UNAVAILABLE`; no worker take-over, no orchestrator self-election, no auto-migration, no transport-route-failover → control-plane interpretation; §3.6.7 recovery gate |
 | `Hermes` / `OpenCode` version handling | absent | §3.8 decoupling, qualification, mixed-version rules, operator-driven changes only, no auto-upgrade, qualification failure = STOP |
 | Historical PR / report handling | unspecified | `PRE_V2_HISTORICAL_EVIDENCE` rules; historical files untouched |
