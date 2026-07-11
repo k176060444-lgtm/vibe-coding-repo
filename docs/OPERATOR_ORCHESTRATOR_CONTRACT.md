@@ -49,7 +49,12 @@ GP-1 / GP-2 / GP-3 interlock with §3, §4.1, §5.7, §7, §9, §10.1. **§9.4 b
 
 2.2 **ChatGPT / assistant + orchestrator consultant (AI)** — advisor. Duties: audit, planning, transfer-prompt generation, agent-output review, maintenance of the construction mainline, recommendation of authorisations. **Must not** approve execution, extend existing approvals, or substitute for operator decisions.
 
-2.3 **`vibedev` (Hermes profile on 21bao)** — future VibeCoding-business orchestrator. **Not** the final decision maker for the current "build the VibeCoding micro-cluster" task. `vibedev`'s own `SOUL.md` / `MEMORY.md` / runtime rules are **not** governed by this contract.
+2.3 **`vibedev` (Hermes profile on 21bao)** — future VibeCoding-business orchestrator. **Not** the final decision maker for the current "build the VibeCoding micro-cluster" task.
+
+  - V2 does **not** directly replace, edit, or merge `vibedev`'s own `SOUL.md`, `MEMORY.md`, or runtime rules. Those files belong to an independent downstream configuration layer.
+  - However, when `vibedev` acts as the VibeCoding orchestrator, its behaviour and the downstream rules it operates under **must comply** with V2.
+  - Any conflict between V2 and `vibedev`'s own rules triggers immediate STOP and operator report.
+  - `vibedev`'s own memory / runtime rules **must not** override operator authority, the 9-role pipeline, operator-only assignment, Failure STOP, secret handling, PR checkpoints, or any other V2 governance boundary.
 
 2.4 **`小马蹄 Hermes` (independent reviewer profile on 21bao)** — same host as `vibedev`, isolated profile; usable as an external blind reviewer. **Not** part of `vibedev` and **not** a node. Unless operator explicitly designates in chat that for the current task it acts as runtime `reviewer-a` and/or `reviewer-b`, it is **not** equal to runtime `reviewer-a` or `reviewer-b`.
 
@@ -104,14 +109,25 @@ Each node's canonical primary transport is registered in the node registry and f
 
 ### §3.3 Node Lifecycle Verification
 
-3.3.1 A **new** node (or an existing node after address / transport / identity change) **must not** enter production assignments before completing all six verification steps:
+3.3.1 The following **must not** enter production assignments before completing all verification steps:
 
-  - worker registry sync;
+  - a **new** node;
+  - an existing node after address / transport / identity change;
+  - an existing node being restored from `SUSPENDED_OFFLINE`.
+
+The verification covers at minimum:
+
+  - connectivity;
+  - credential binding;
+  - fresh health;
+  - readiness;
+  - wrapper validity;
   - Central Model Pool sync (including `allowed_nodes` and node-specific `runtime_provider` mapping);
-  - routing policy sync;
-  - health-probe sync (marked as fresh verified);
-  - permission / transport-credential sync — SSH key applies **only** when the node uses SSH transport;
-  - evidence / receipt pipeline sync.
+  - model capability and applicable bounded model-call verification;
+  - evidence / receipt pipeline qualification;
+  - operator explicit approval for recovery.
+
+Until **every** item above returns PASS, the node remains `SUSPENDED_OFFLINE` (and therefore `NOT_ASSIGNABLE`). A node **must not** be restored from `SUSPENDED_OFFLINE` through §3.5 transport-route failover — that mechanism is for same-node transport re-routing, not node-recovery authorisation. Specific commands, schemas, and receipt fields are left to the runtime / node-registry / evidence spec.
 
 ### §3.4 Unavailability Behaviour
 
@@ -124,9 +140,11 @@ Each node's canonical primary transport is registered in the node registry and f
 
 3.4.2 **Precedence of §3.5 over §3.4**: for an `ACTIVE` node that has an operator-approved, registered, and qualified same-node route chain, a transport-path failure matching §3.5.5 **first** enters the §3.5 failover flow. The §3.4 STOP above does not fire on that transport-path failure alone. The §3.4 STOP fires only when the §3.5 path has terminated, namely:
 
-  - the chain has been exhausted (§3.5.9);
   - the failure is a §3.5.6 disallowed trigger class;
-  - a proposed or actual route switch violates §3.5.2 or §3.5.11 invariant.
+  - the next route is reachable but identity, credential, application readiness, model, gate, receipt, or evidence fails (§3.5.8 post-condition);
+  - the chain has been exhausted (§3.5.9);
+  - a proposed or actual route switch violates §3.5.2 same-chain constraints or changes an invariant listed in §3.5.11;
+  - the node has no approved, registered, and qualified same-node route chain.
 
 3.4.3 Detailed failure handling is governed by §7. Strictly forbidden at the **assignment level**: automatic fallback, automatic node swap, automatic model swap, lowered independence, scope-shrinking continuation.
 
@@ -584,10 +602,11 @@ Any of the following immediately triggers STOP:
 
 For an `ACTIVE` node with an operator-approved, registered, qualified same-node route chain (§3.5), a transport-path failure matching §3.5.5 **first** enters the §3.5 failover flow and **does not** immediately trigger the §7.1 STOP above. The §7.1 STOP fires when the §3.5 path has terminated, namely:
 
-  - the chain has been exhausted (§3.5.9);
   - the failure is a §3.5.6 disallowed trigger class;
-  - a proposed or actual route switch violates §3.5.2 or §3.5.11 invariant;
-  - the node has no approved same-node route chain.
+  - the next route is reachable but identity, credential, application readiness, model, gate, receipt, or evidence fails (§3.5.8 post-condition);
+  - the chain has been exhausted (§3.5.9);
+  - a proposed or actual route switch violates §3.5.2 same-chain constraints or changes an invariant listed in §3.5.11;
+  - the node has no approved, registered, and qualified same-node route chain.
 
 Local-exec and control-plane failures go directly to §3.6.4 / §3.6.7.
 
@@ -657,10 +676,11 @@ Orchestrator submits fact, risk, and options only — **does not** choose. Runti
 - §7 does **not** introduce retry tokens or preset automatic-retry mechanisms.
 - §7 is **not** the same as §3.5 transport-route failover; transport-route failover (§3.5) is a same-node transport-level re-route with its own trigger set (§3.5.5) and its own forbidden actions (§3.5.6), and stops per §7 only when the §3.5 path has terminated — namely the **exhaustive** STOP conditions shared across §3.4.2, §7.2, and §13:
 
-  - the chain has been exhausted (§3.5.9);
   - the failure is a §3.5.6 disallowed trigger class;
   - the next route is reachable but identity, credential, application readiness, model, gate, receipt, or evidence fails (§3.5.8 post-condition);
-  - a proposed or actual route switch violates §3.5.2 or §3.5.11 invariant.
+  - the chain has been exhausted (§3.5.9);
+  - a proposed or actual route switch violates §3.5.2 same-chain constraints or changes an invariant listed in §3.5.11;
+  - the node has no approved, registered, and qualified same-node route chain.
 
 §3.5.11 itself is **not** a failure class and **must not** be cited as a STOP trigger.
 
@@ -857,7 +877,9 @@ V2 takes effect **only after** explicit operator acceptance. `vibedev` **must no
 
 ### §10.8 Out-of-Scope for This Contract
 
-AUTH-N numbering, receipt schema, executor / wrapper naming and boundaries, SSH-key canonical path, sync scripts, blind-review frequency and triggers, `routes.yaml`-style filename, route-entry field schema, transport endpoint port values, the post-acceptance 9-role runtime build pipeline — all remain in future runtime / node-registry / evidence specs.
+AUTH-N numbering, receipt schema, executor / wrapper naming and boundaries, SSH-key canonical path, sync scripts, blind-review frequency and triggers, `routes.yaml`-style filename, route-entry field schema — all remain in future runtime / node-registry / evidence specs.
+
+**Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `2222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec.
 
 ---
 
@@ -958,7 +980,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | `V2 Effective Date` | [awaiting operator acceptance] |
 | `V2 Version` | `2.0` (DRAFT — awaiting acceptance) |
 | Historical reference | `v1.0` (PR #276, commits `9f7e8b1` + follow-up `8509a07`); preserved in Git history |
-| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, complete 9-role, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, canonical pipeline, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, transport endpoint ports, SSH-key paths, route-chain field schemas, or executor / wrapper internals. |
+| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, complete 9-role, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, canonical pipeline, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `2222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
 
 ---
 
@@ -972,7 +994,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model (§4.5) |
 | 8-role assignment pre-brief | absent | required; 4-column matrix; no `alternative` (§5.5) |
 | Assignment strictness | absent | strict per operator spec; failure follows §7 (§5.8, §5.9) |
-| Failure STOP | implicit | explicit triggers, preserved evidence, enumerated prohibitions, retry rules; §3.5 transport-path failures go through §3.5 first (§7.2); STOP fires on chain exhaustion (§3.5.9), §3.5.6 disallowed trigger, §3.5.8 post-condition failure, or §3.5.2 / §3.5.11 invariant violation (§3.4.2, §7.2, §7.8, §13 all share the same exhaustive set); §3.5.11 itself is not a failure class |
+| Failure STOP | implicit | explicit triggers, preserved evidence, enumerated prohibitions, retry rules; §3.5.5 transport-path failure first enters §3.5 failover; STOP fires on §3.5.6 disallowed trigger, §3.5.8 post-condition failure, §3.5.9 chain exhaustion, §3.5.2 / §3.5.11 invariant violation, or no approved+qualified same-node route chain (§3.4.2, §7.2, §7.8, §13 all share the same exhaustive 5-condition set); §3.5.11 itself is not a failure class |
 | Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary (§6.5–§6.8) |
 | Canonical pipeline | F1–F10 not detailed | F1–F10 real evaluation; non-canonical path requires operator authorisation and `execution_path: non_canonical`; non-canonical must not become assignment-level automatic fallback (§8.1, §8.2) |
 | Evidence levels | absent | 7 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
@@ -982,7 +1004,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | High-risk checkpoints | §4 vague | §9 explicit 4 categories (A/B/C/D), 12+ high-risk items, including `Hermes` / `OpenCode` install / update / downgrade / migration / restart / switch (§9.3) |
 | Top-line governance | role authority scattered | §1 GP-1 / GP-2 / GP-3 single page; recommend → assign → execute locked |
 | Effect mechanism | §10 "signing" (later corrected to Working Agreement) | effective only on operator explicit chat acceptance; on acceptance update existing file with `Version: 2.0` + `Supersedes: V1 / PR #276` + `Historical source retained in Git history` |
-| Transport-route failover | absent | §3.5 same-node transport-route failover with operator-approved chain, standing authorization, per-switch no-permission-needed; wrong / unqualified / non-SAME-NODE routes forbidden; chain change needs operator approval; §3.5 STOP triggers (§3.5.6 / §3.5.8 / §3.5.9) take precedence over §7; §3.5.11 itself is not a failure class |
+| Transport-route failover | absent | §3.5 same-node transport-route failover with operator-approved chain, standing authorization, per-switch no-permission-needed; wrong / unqualified / non-SAME-NODE routes forbidden; chain change needs operator approval; matching §3.5.5 transport-path failure first enters §3.5 failover; after the 5 termination conditions (§3.5.6 / §3.5.8 / §3.5.9 / §3.5.2 or §3.5.11 invariant / no approved chain) fire, enters §7 Failure STOP; §3.5.11 itself is not a failure class |
 | `21bao` as control plane | not labelled | §3.6 `ALWAYS_ON_CONTROL_PLANE` is design + SLA target; on unavailability enter `CONTROL_PLANE_UNAVAILABLE / VIBECODING_UNAVAILABLE`; no worker take-over, no orchestrator self-election, no auto-migration, no transport-route-failover → control-plane interpretation; §3.6.7 recovery gate |
 | `Hermes` / `OpenCode` version handling | absent | §3.8 decoupling, qualification, mixed-version rules, operator-driven changes only, no auto-upgrade, qualification failure = STOP |
 | Historical PR / report handling | unspecified | `PRE_V2_HISTORICAL_EVIDENCE` rules; historical files untouched |
