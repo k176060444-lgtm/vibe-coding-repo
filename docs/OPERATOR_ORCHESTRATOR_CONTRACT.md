@@ -249,7 +249,7 @@ Transport-route failover is **not** an assignment-level fallback. It does not ch
 
 #### §3.5.12 Contract scope
 
-Contract-level minimum report contents for any switch are the seven minimum information categories listed in §3.5.7. Schema, field names, file names (such as `routes.yaml`-style names), script names, receipt / ledger structures, and executor / wrapper internals are out of contract scope and live in the runtime / node-registry / evidence spec.
+Contract-level minimum report contents for any switch are the minimum information categories listed in §3.5.7. Schema, field names, file names (such as `routes.yaml`-style names), script names, receipt / ledger structures, and executor / wrapper internals are out of contract scope and live in the runtime / node-registry / evidence spec.
 
 ### §3.6 21bao as the Unique Control Plane
 
@@ -382,7 +382,7 @@ Version compatibility layers **must not** alter the following governance semanti
   - Draft PR → operator-authorised Ready → independently authorised merge;
   - Failure STOP;
   - Central Model Pool unified management;
-  - secret handling: public hard boundary + private single-user boundary (§6.5);
+  - secret handling: public hard boundary + private single-user boundary (§6.6);
 
 ---
 
@@ -519,11 +519,11 @@ role | recommended node | recommended model | brief reason
 
 ### §5.6 Recommendation ≠ Approval
 
-The available list and the recommendation matrix are **only** recommendations. Operator **must** explicitly specify node + model for every non-orchestrator role.
+The available list and the recommendation matrix are **only** recommendations. Operator **must** explicitly specify node + model for every actual non-orchestrator role in the operator-selected execution mode.
 
 ### §5.7 No Pre-Spec Execution
 
-Before operator's explicit 8-role node + model specification, orchestrator **must not**:
+Before operator's explicit node + model specification for the operator-selected execution mode's actual roles, orchestrator **must not**:
 
 - start execution;
 - auto-fill empty roles;
@@ -608,10 +608,6 @@ Any failure STOP + report:
 - bounded canary / model-call;
 - drift.
 
-### §6.10 Route-Chain Integration Boundary
-
-The Central Model Pool regulates models and providers. Transport-route chain (§3.5) regulates *how* a node is reached. The two are orthogonal; this contract does **not** mix them and does **not** embed transport endpoint / port values in any model descriptor.
-
 ### §6.9 CENTRAL_MODEL_POOL_GOVERNANCE_GATE
 
 This is a **dedicated governance gate** managed uniformly by `vibedev` on `21bao`. It does **not** enter the three VibeCoding execution modes (§4.1) and does **not** trigger FULL 9-role or 8-role assignment. Operator is the sole final decision maker. `vibedev` is responsible for unified inventory, audit, proposal, preparation, approved-scope execution, qualification, and reporting. `vibedev` **must not** self-approve, auto-change, auto-expand, or auto-rollback.
@@ -651,6 +647,10 @@ Verify: rendered config, alias / endpoint / provider, credential presence, decla
 #### §6.9.9 C8 — Closeout
 
 Report: result, model matrix, evidence, and residual risks. Failure triggers immediate STOP. **No** auto-model-change, auto-node-expansion, auto-rollback, auto-credential-replacement, or auto-loop of source-of-truth modification.
+
+### §6.10 Route-Chain Integration Boundary
+
+The Central Model Pool regulates models and providers. Transport-route chain (§3.5) regulates *how* a node is reached. The two are orthogonal; this contract does **not** mix them and does **not** embed transport endpoint / port values in any model descriptor.
 
 ---
 
@@ -771,7 +771,7 @@ Orchestrator submits fact, risk, and options only — **does not** choose. Runti
 
 ### §8.3 Execution Kind and Role Tools
 
-`simulation` / `dry-run` / `unit test` / `fixture` / `historical receipt` / `real execution` must carry explicit `kind:` labels and may not impersonate each other. `pytest` / `fixture` / static analysis / `lint` / deterministic scripts **may** serve as a role's real execution means (subject to §4.2 / §4.3 / §4.4); merely running a generic command without role-specific `assignment` / `input` / `output` / `evidence` does **not** count as a role's execution.
+`simulation` / `dry-run` / `unit test` / `fixture` / `historical receipt` / `real execution` must carry explicit `kind:` labels and may not impersonate each other. `pytest` / `fixture` / static analysis / `lint` / deterministic scripts **may** serve as a role's real execution means (subject to §4.5–§4.8 and §8.3); merely running a generic command without role-specific `assignment` / `input` / `output` / `evidence` does **not** count as a role's execution.
 
 ### §8.4 Receipt Linkage
 
@@ -824,13 +824,24 @@ While the full canonical 9-role runtime has not been accepted and declared in fo
 
 (Interlocks with §1 GP-1 / GP-2 / GP-3. **§9.4 bounded-authorisation packages cannot substitute for operator's explicit per-role node + model specification.**)
 
-### §9.1 A. 8-Role Assignment
+### §9.1 A. Role Assignment
 
-Operator **must** explicitly specify node + model for every non-orchestrator role before execution (§5).
+Operator **must** explicitly specify node + model for every actual non-orchestrator role in the operator-selected execution mode before execution (§5).
+
+  - `FULL_9_ROLE_VIBECODING`: operator specifies the complete 8-role (excl. orchestrator) node + model assignment.
+  - `LIGHTWEIGHT_OPERATION`: operator specifies only the actual role set approved for that task.
+  - `CONSULTATION_ONLY` and the two dedicated governance gates (§3.8, §6.9): do **not** enter role assignment.
 
 ### §9.2 B. PR Workflow
 
-When a PR is needed, **default** to creating a **Draft PR** only. After creation, STOP and report URL, head SHA, changed files, tests, dual-tester / dual-reviewer verdicts, risks, and open items. Only operator's explicit authorisation may move Draft → Ready. Merge requires separate authorisation.
+When a PR is needed, **default** to creating a **Draft PR** only. After creation, STOP and report URL, head SHA, changed files, applicable verification / review verdicts, risks, and open items.
+
+  - `FULL_9_ROLE_VIBECODING`: report dual-tester / dual-reviewer verdicts.
+  - `LIGHTWEIGHT_OPERATION`: report the operator-approved actual verifier / reviewer verdicts.
+  - Dedicated governance gates (§3.8, §6.9): report the corresponding qualification and closeout results.
+  - Items not applicable to the selected entry must carry an explicit `NOT_APPLICABLE` verdict. Dual-tester / dual-reviewer verdicts **must not** be fabricated for entries that do not require them.
+
+Only operator's explicit authorisation may move Draft → Ready. Merge requires separate authorisation.
 
 ### §9.3 C. High-Risk Action Double Confirmation
 
@@ -857,7 +868,7 @@ Retry / repair actions trigger §9.3 **only** when they themselves fall within t
 
 Operator may grant a one-shot bounded authorisation package containing: task ID, approved assignment, node + model and call limits, SSH command classes, read / write paths, Git scope, forbidden actions, valid boundaries, acceptance criteria. Routine calls **within** the package need no further confirmation; **out-of-scope**, **node / model swap**, or **§9.3-trigger** actions → STOP and re-request authorisation.
 
-**§9.4 cannot override** §9.1 A, §9.2 B, §9.3 C, §1 GP-1 / GP-2 / GP-3. **§9.4 cannot pre-include automatic retry** (§7.6).
+**§9.4 cannot override** §9.1 A, §9.2 B, §9.3 C, §1 GP-1 / GP-2 / GP-3. **§9.4 cannot pre-include automatic retry** (§7.6). A bounded authorisation package **must not** be interpreted as bypassing operator approval for the applicable execution entry's role assignment or gate requirements.
 
 ---
 
@@ -882,11 +893,11 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (o) historical evidence reinterpreted as V2-compliant E2E PASS;
   - (p) `PRE_V2_HISTORICAL_EVIDENCE` cited without the banner `PRE_V2_HISTORICAL_EVIDENCE — not V2-compliant E2E evidence` per §8.8;
   - (q) runtime modifying operator-approved assignment or bypassing §1 GP-2;
-  - (r) runtime auto-swapping the orchestrator model (§4.1);
+  - (r) runtime auto-swapping the orchestrator model (§4.3);
   - (s) continuing on orchestrator-model unavailability without STOP;
   - (t) bounded authorisation packages pre-including automatic retry (§7.6, §9.4);
-  - (u) test or fixture evidence cited as V2 E2E PASS (§8.3, §4.2);
-  - (v) merely running a generic command counted as a role execution (§4.2, §4.4);
+  - (u) test or fixture evidence cited as V2 E2E PASS (§8.3, §4.5–§4.8);
+  - (v) merely running a generic command counted as a role execution (§4.5–§4.8);
   - (w) `CLUSTER_CONSTRUCTION_OPERATION` used to bypass post-acceptance 9-role / gates / evidence / checkpoints (§8.9);
   - (x) binding the cluster to a single fixed `Hermes` / `OpenCode` version without qualification (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
   - (y) claiming compatibility without verification / reusing stale qualification evidence / auto-expanding scope after single-node canary (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
@@ -907,9 +918,9 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (nn) continuing VibeCoding tasks while `21bao` is unavailable;
   - (oo) mis-interpreting `21bao`'s network route failover as control-plane failover;
   - (pp) re-opening `21bao` VibeCoding dispatch before every item in §3.6.7 passes (§3.6.7);
-  - (qq) credential discovery that prints a value-bearing environment map, or outputs secret-derived fragments into public / external / uncontrolled scope, or private operator-controlled output without operator permission (§6.5);
-  - (rr) treating a public-format token prefix marker as the credential value (§6.5);
-  - (ss) auto-rotating, auto-replacing, or auto-invalidating a credential without explicit operator authorisation (§6.5).
+  - (qq) credential discovery that prints a value-bearing environment map, or outputs secret-derived fragments into public / external / uncontrolled scope, or private operator-controlled output without operator permission (§6.6);
+  - (rr) treating a public-format token prefix marker as the credential value (§6.6);
+  - (ss) auto-rotating, auto-replacing, or auto-invalidating a credential without explicit operator authorisation (§6.6).
 
 ### §10.2 Drift Handling
 
@@ -1050,7 +1061,7 @@ Phase name; current baseline / HEAD; allowed / forbidden actions; whether SSH / 
 
 ### §11.9 Long-Context De-Drift
 
-All complete transfer prompts generated by ChatGPT / assistant + orchestrator consultant and handed to operator for verbatim forwarding to `vibedev`, `小马蹄 Hermes`, or any other operator-designated agent must, as task requires, re-anchor: operator as final decision maker; `21bao` / `5bao` / `9bao` as nodes; `vibedev` / `小马蹄 Hermes` as profiles; full 9-role requirement for the current task; current authorisation boundaries; current in-force or pending contract version; historical / current evidence boundary.
+All complete transfer prompts generated by ChatGPT / assistant + orchestrator consultant and handed to operator for verbatim forwarding to `vibedev`, `小马蹄 Hermes`, or any other operator-designated agent must, as task requires, re-anchor: operator as final decision maker; current stage / baseline-HEAD / operator profile / node / execution mode or dedicated governance gate and its applicable role / gate requirements; allowed / forbidden SSH, model, Git, PR, `--apply`; checkpoint / STOP / evidence / acceptance and output. Only when the entry is `FULL_9_ROLE_VIBECODING` does the re-anchor include the complete 9-role pipeline.
 
 ### §11.10 Forbidden Expansion
 
@@ -1079,7 +1090,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 |---|---|---|
 | 3000-character rule | "each segment < 3000 characters" (hard) | per-segment split threshold: ≤3000 single segment, >3000 split with each segment ≤3000; total prompt may exceed 3000; must not delete content to reduce segment count (§11.5) |
 | 9-role roster | five mixed roles | FULL_9_ROLE_VIBECODING: fully enumerated 9-role (§4.3); LIGHTWEIGHT: minimum recommended roles (§4.1.2); CONSULTATION_ONLY: no 8-role assignment (§4.1.1) |
-| Role trimming | not explicitly forbidden | explicit no-trim / no-skip / no "named-but-not-executed" (§4.5) |
+| Role trimming | not explicitly forbidden | FULL mode only: explicit no-trim / no-skip / no "named-but-not-executed" (§4.5); LIGHTWEIGHT executes operator-approved actual role set |
 | Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model (§4.8) |
 | 8-role assignment pre-brief | absent | FULL mode only: required; 4-column matrix; no `alternative` (§5.1, §5.5) |
 | Assignment strictness | absent | strict per operator spec; failure follows §7 (§5.8, §5.9) |
@@ -1090,12 +1101,12 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Canonical pipeline | F1–F10 not detailed | F1–F10 real evaluation; non-canonical path requires operator authorisation and `execution_path: non_canonical`; non-canonical must not become assignment-level automatic fallback (§8.1, §8.2) |
 | Evidence levels | absent | 7 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
-| Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, soft 3000-character target, exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
+| Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
 | Drift signals | 7 | expanded to (a)–(ss) |
 | High-risk checkpoints | §4 vague | §9 explicit 4 categories (A/B/C/D), 12+ high-risk items, including `Hermes` / `OpenCode` install / update / downgrade / migration / restart / switch (§9.3) |
 | Top-line governance | role authority scattered | §1 GP-1 / GP-2 / GP-3 single page; recommend → assign → execute locked |
 | Effect mechanism | §10 "signing" (later corrected to Working Agreement) | effective only on operator explicit chat acceptance; on acceptance update existing file with `Version: 2.0` + `Supersedes: V1 / PR #276` + `Historical source retained in Git history` |
-| Transport-route failover | absent | §3.5 same-node transport-route failover with operator-approved chain, standing authorization, per-switch no-permission-needed; wrong / unqualified / non-SAME-NODE routes forbidden; chain change needs operator approval; matching §3.5.5 transport-path failure first enters §3.5 failover; after the 5 termination conditions (§3.5.6 / §3.5.8 / §3.5.9 / §3.5.2 or §3.5.11 invariant / no approved chain) fire, enters §7 Failure STOP; §3.5.11 itself is not a failure class |
+| Transport-route failover | absent | §3.5 same-node transport-route failover with operator-approved chain, standing authorization, per-switch no-permission-needed; successful fallback continues the original task (no mid-task interrupt), standalone Transport Fallback Report after task completion; wrong / unqualified / non-SAME-NODE routes forbidden; chain change needs operator approval; matching §3.5.5 transport-path failure first enters §3.5 failover; after the 5 termination conditions (§3.5.6 / §3.5.8 / §3.5.9 / §3.5.2 or §3.5.11 invariant / no approved chain) fire, enters §7 Failure STOP; §3.5.11 itself is not a failure class |
 | `21bao` as control plane | not labelled | §3.6 `ALWAYS_ON_CONTROL_PLANE` is design + SLA target; on unavailability enter `CONTROL_PLANE_UNAVAILABLE / VIBECODING_UNAVAILABLE`; no worker take-over, no orchestrator self-election, no auto-migration, no transport-route-failover → control-plane interpretation; §3.6.7 recovery gate |
 | `Hermes` / `OpenCode` version handling | absent | §3.8 dedicated governance gate (V0–V8), decoupling, qualification, mixed-version rules, operator-driven changes only, no auto-upgrade, qualification failure = STOP |
 | Historical PR / report handling | unspecified | `PRE_V2_HISTORICAL_EVIDENCE` rules; historical files untouched |
