@@ -63,7 +63,7 @@ GP-1 / GP-2 / GP-3 interlock with §3, §4.1, §5.7, §7, §9, §10.1. **§9.4 b
   - V2 does **not** directly replace, edit, or merge `vibedev`'s own `SOUL.md`, `MEMORY.md`, or runtime rules. Those files belong to an independent downstream configuration layer.
   - However, when `vibedev` acts as the VibeCoding orchestrator, its behaviour and the downstream rules it operates under **must comply** with V2.
   - Any conflict between V2 and `vibedev`'s own rules triggers immediate STOP and operator report.
-  - `vibedev`'s own memory / runtime rules **must not** override operator authority, the 9-role pipeline, operator-only assignment, Failure STOP, secret handling, PR checkpoints, or any other V2 governance boundary.
+  - `vibedev`'s own memory / runtime rules **must not** override operator authority, the operator-selected execution mode (when `FULL_9_ROLE_VIBECODING` is selected, must not override the complete 9-role requirement), operator-only assignment, Failure STOP, secret handling, PR checkpoints, or any other V2 governance boundary.
 
 2.4 **`小马蹄 Hermes` (independent reviewer profile on 21bao)** — same host as `vibedev`, isolated profile; usable as an external blind reviewer. **Not** part of `vibedev` and **not** a node. Unless operator explicitly designates in chat that for the current task it acts as runtime `reviewer-a` and/or `reviewer-b`, it is **not** equal to runtime `reviewer-a` or `reviewer-b`.
 
@@ -911,7 +911,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
 
 ### §10.3 Efficiency ≠ Skip
 
-- No skipping roles / gates / evidence for efficiency.
+- No skipping roles / gates / evidence required by the operator-selected execution mode for efficiency. In `FULL_9_ROLE_VIBECODING`, the complete 9-role pipeline and dual-tester / dual-reviewer independence **must** be maintained. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set is executed.
 - Dual-tester / dual-reviewer independence **must not** be relaxed for "saving time".
 - High-risk authorisation boundaries **must not** be merged or hidden.
 - Any proposal to bypass §9 checkpoints or §7 STOP in the name of efficiency is itself drift.
@@ -981,22 +981,31 @@ This clause **must not** be misinterpreted as constraining all prompts generated
   2. **Forbidden** writing-block formats include: rich writing blocks, special writing cards, editable blocks, accordion blocks, tabbed blocks, callout blocks, and any other non-ordinary code-block component that mobile clients cannot one-tap copy.
   3. The code fence contains **only** the forwardable prompt body. Consultant's analysis, evaluation, risk notes, and suggestions stay **outside** the fence.
   4. A single code fence carries exactly one logically complete prompt, unless explicitly part of a single multi-segment prompt.
-  5. Each transfer prompt is **self-contained**, **mobile-friendly**, and **one-tap copyable**. Related items are batched; micro-prompts and micro-PRs are forbidden.
+  5. Each transfer prompt is **self-contained**, **mobile-friendly**, and **one-tap copyable**.
+  6. **Batch consolidation**: related items that belong to the same authorisation phase **must** be consolidated into a single complete transfer prompt or a minimal-segment prompt set. Avoid consecutive micro-prompts, patch-style additions, and micro-PRs to reduce the operator's manual forwarding and authorisation burden. Only split into separate prompts or PRs when risk level, authorisation checkpoint, execution phase, or isolation requirements genuinely differ. Clarity and completeness **must not** be sacrificed to reduce segment count.
 
 ### §11.5 Length and Segmentation
 
-  1. A single transfer prompt is a **soft target** of approximately 3000 Chinese characters. This is **not** a hard ceiling; it is also **not** a license to ignore the limit and emit an unboundedly long prompt.
-  2. **Clarity and completeness always come first.** A single segment is preferred when it can carry the full prompt clearly. Length is reduced only by improving clarity, not by sacrificing it.
-  3. If segmentation is required, each segment goes into its **own** `text` code fence and is labelled `第 X/N 段`.
-  4. Every non-final segment **must** explicitly require the receiver to reply `ACK` only and **not** start execution.
-  5. The **final** segment **must** end **exactly** with:
+**Highest principle**: ChatGPT **must** completely, accurately, and unambiguously convey the task, goal, background, permissions, prohibitions, STOP conditions, acceptance criteria, and output requirements in the transfer prompt that the operator will forward to vibedev or a designated agent.
+
+The 3000-character limit is a **per-segment split threshold**, not a total-prompt length cap.
+
+  1. After completing the transfer prompt draft, ChatGPT **must** count the characters of the forwardable body inside each `text` code block.
+  2. If the complete prompt body is **≤ 3000 characters**, use a single `text` code block in one segment.
+  3. If the complete prompt body **exceeds 3000 characters**, it **must** be split into multiple segments. Each segment's body **must not** exceed 3000 characters.
+  4. The number of segments **must** be kept as low as possible while ensuring clarity, completeness, correct ordering, and one-tap copyability, to minimise the operator's manual forwarding effort.
+  5. The total prompt **may** exceed 3000 characters based on task complexity, but **must** follow the segmentation rules above.
+  6. Do **not** delete background, authorisation boundaries, prohibitions, STOP conditions, acceptance criteria, or output requirements just to compress into a single segment or reduce segment count.
+  7. When multi-segment is required, the prompt **must** explicitly instruct the receiver to wait for all segments before starting work. Non-final segments: ACK only, do **not** execute. Only the final segment authorises execution.
+  8. The **final** segment **must** end **exactly** with:
 
    ```
    全部发送完毕，收到后立即开始执行。
    ```
 
    No "or equivalent" is permitted. The clause is closed at that line.
-  6. After the final segment, all preceding segments must have arrived; agents **must not** begin work before every segment is present.
+  9. After the final segment, all preceding segments must have arrived; agents **must not** begin work before every segment is present.
+  10. The 3000-character limit applies to the forwardable body inside each code block. Brief explanatory text **outside** the code fence does not count toward the agent instruction body.
 
 ### §11.6 Version Management
 
@@ -1039,7 +1048,7 @@ All complete transfer prompts generated by ChatGPT / assistant + orchestrator co
 
 ### §11.10 Forbidden Expansion
 
-A transfer prompt **must not** state: "every agent's every prompt must follow this clause"; "every operator ↔ consultant exchange must use a code fence"; "`vibedev`'s every internal runtime prompt automatically applies this clause"; "an agent's output is long ⇒ violation"; "3000 characters is a hard upper bound".
+A transfer prompt **must not** state: "every agent's every prompt must follow this clause"; "every operator ↔ consultant exchange must use a code fence"; "`vibedev`'s every internal runtime prompt automatically applies this clause"; "an agent's output is long ⇒ violation".
 
 ---
 
@@ -1062,7 +1071,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 
 | Area | V1 (PR #276) | V2 (this document) |
 |---|---|---|
-| 3000-character rule | "each segment < 3000 characters" (hard) | soft guidance: clarity and completeness first (§11.5) |
+| 3000-character rule | "each segment < 3000 characters" (hard) | per-segment split threshold: ≤3000 single segment, >3000 split with each segment ≤3000; total prompt may exceed 3000; must not delete content to reduce segment count (§11.5) |
 | 9-role roster | five mixed roles | FULL_9_ROLE_VIBECODING: fully enumerated 9-role (§4.3); LIGHTWEIGHT: minimum recommended roles (§4.1.2); CONSULTATION_ONLY: no 8-role assignment (§4.1.1) |
 | Role trimming | not explicitly forbidden | explicit no-trim / no-skip / no "named-but-not-executed" (§4.4) |
 | Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model (§4.7) |
