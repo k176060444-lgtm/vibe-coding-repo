@@ -116,8 +116,6 @@ Each node's canonical primary transport is registered in the node registry and f
 
 3.2.2 A node labelled `SUSPENDED_OFFLINE` **must not** be recommended, allocated, SSH-ed, model-called, or otherwise executed until operator explicitly approves recovery and re-qualification completes.
 
-3.2.3 The heading of this section uses the correct spelling. Cross-references in this document use the same spelling.
-
 ### §3.3 Node Lifecycle Verification
 
 3.3.1 The following **must not** enter production assignments before completing all verification steps:
@@ -215,7 +213,7 @@ Any of the following **must** trigger immediate STOP and §7 reporting; **must n
   - readiness / gate / receipt / evidence / scope failure;
   - any event outside operator-approved action range.
 
-#### §3.5.7 Per-switch post-conditions and report
+3.5.7 Per-switch post-conditions and report
 
 Per switch, runtime **must**:
 
@@ -223,8 +221,15 @@ Per switch, runtime **must**:
   - re-verify node / service identity;
   - re-verify credential binding;
   - re-verify applicable health / readiness;
-  - record transition evidence in the controlled evidence ledger;
-  - immediately report to operator with at minimum the **seven minimum information categories**: `node | previous route | active route | failure class | switched_at (UTC) | post-switch health / readiness | affected task / run evidence`. Specific field names and schemas are left to the runtime / evidence spec.
+  - record transition evidence in the controlled evidence ledger.
+
+**Successful same-node approved+registered+qualified route fallback**: after all post-switch verifications PASS, the runtime continues the original assignment. The successful fallback does **not** interrupt the current task. The runtime records transition evidence at switch time, but does **not** require operator attention mid-task for a successful fallback.
+
+**After the current task completes and before closeout**, the orchestrator **must** submit a standalone **Transport Fallback Report** to the operator, containing at minimum: `task / run | node | all previous→active route switches | failure class | switched_at (UTC) | post-switch verification results | impact on task | final result | evidence references`. Multiple successful fallbacks within the same task may be consolidated into a single report.
+
+**Immediate STOP** (no auto-retry) applies to: auth / identity / credential binding / application readiness / Hermes / OpenCode / model / gate / receipt / evidence / scope errors, or route chain exhaustion (§3.5.9). These follow §7 Failure STOP.
+
+Specific field names and schemas are left to the runtime / evidence spec.
 
 #### §3.5.8 Cascade rules
 
@@ -317,96 +322,53 @@ Only after **every** item above returns PASS may `21bao` be restored to `ACTIVE 
 
 3.7.4 §3.1.4 explicitly registers canonical primary transports as governance facts. **Other** implementation-level endpoint parameters (additional ports, internal addresses, proxies, package manager paths, etc.) live in the controlled node registry / runtime spec; this contract does not fix them.
 
-### §3.8 Hermes / OpenCode Version Decoupling and Compatibility Governance
+### §3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE
 
-#### §3.8.1 Decoupling principle
+This is a **dedicated governance gate** managed uniformly by `vibedev` on `21bao`. It does **not** enter the three VibeCoding execution modes (§4.1) and does **not** trigger FULL 9-role or 8-role assignment. Operator is the sole final decision maker. `vibedev` is responsible for unified inventory, audit, proposal, preparation, approved-scope execution, qualification, and reporting. `vibedev` **must not** self-approve, auto-change, auto-expand, or auto-rollback.
+
+#### §3.8.1 V0 — Scope
+
+Operator specifies the target component(s), node(s) / profile(s), and purpose.
+
+#### §3.8.2 V1 — Inventory
+
+`vibedev` read-only collects: current version, configuration, capability, adapter, qualification status, and evidence for each affected component / node / profile.
+
+#### §3.8.3 V2 — Proposal
+
+`vibedev` submits: target version, impact assessment, compatibility / migration analysis, backup plan, rollback plan, qualification plan, and scope recommendation.
+
+#### §3.8.4 V3 — Preparation Approval
+
+Operator approves preparation only. Allowed: download, checksum verification, backup, dry-run, migration / rollback preparation. **Not** allowed: real install, update, downgrade, config migration, restart, or switch.
+
+#### §3.8.5 V4 — Pre-Execution Checkpoint
+
+`vibedev` presents: target version / action / current state / rollback point / affected scope. Operator reviews.
+
+#### §3.8.6 V5 — Second Confirmation
+
+Real install / update / downgrade / config migration / restart / switch **must** receive a second explicit operator confirmation.
+
+#### §3.8.7 V6 — Exact-Scope Execution
+
+Execute only the operator-approved scope. **Must not** expand to other nodes, profiles, or components.
+
+#### §3.8.8 V7 — Qualification
+
+Verify: binary integrity, capability, configuration, provider, model, CMP sync, wrapper, bounded model call, gate, receipt, evidence, secret boundary, rollback feasibility, drift. All must PASS.
+
+#### §3.8.9 V8 — Closeout
+
+Report: result, version matrix, evidence, and residual risks. Failure triggers immediate STOP. **No** auto-rollback, auto-alternative-version, or auto-scope-expansion unless the operator has pre-approved an atomic rollback plan.
+
+#### §3.8.10 Decoupling principle
 
 `Hermes` and `OpenCode` are maintainable software dependencies of the small cluster. They are **not** immutable infrastructure. Operator may explicitly approve upgrade, downgrade, replacement, or rollback of `Hermes` / `OpenCode` on a designated node or profile.
 
-#### §3.8.2 Architecture-level independence
+#### §3.8.11 Architecture-level independence
 
 The cluster's architecture, 9-role pipeline, Central Model Pool, assignment rules, gates, receipts, wrapper, executor, synchronisation, audit, and evidence chain **must not** depend on a single fixed `Hermes` or `OpenCode` version.
-
-#### §3.8.3 Forbidden hard-coding
-
-Core governance and runtime **must not** hard-code, without adaptation:
-
-  - a single version number;
-  - CLI parameters that exist only in a specific version;
-  - a fixed install path;
-  - a fixed configuration format;
-  - a fixed output text;
-  - a fixed provider / model enumeration behaviour;
-  - an authentication, session, plugin, or interface behaviour that applies only to a specific version.
-
-When versions differ, the runtime / node-registry / evidence spec **must** use capability detection, version adapters, schema migration, or compatibility layers. Specific-version behaviour **must not** be treated as a global invariant.
-
-#### §3.8.4 "Version-compatible" engineering definition
-
-"Version-compatible" means:
-
-  - operator chooses the target `Hermes` / `OpenCode` version;
-  - the small cluster **must be able** to qualify execution compatibility for the target version;
-  - a target version becomes `QUALIFIED_COMPATIBLE` **only after** qualification passes;
-  - unverified, failed-qualification, unknown-future, or adapter-missing versions **must** be marked `UNQUALIFIED` / `INCOMPATIBLE` / `UNKNOWN` and **must not** be assumed compatible.
-
-#### §3.8.5 Qualification coverage (at minimum)
-
-  - binary discoverability and version identification;
-  - CLI / API capability detection;
-  - configuration read, generation, and schema migration;
-  - provider namespace, model ID, alias, endpoint, and credential reference;
-  - Central Model Pool synchronisation and node-local rendered configuration;
-  - wrapper / executor invocation;
-  - bounded model-call canary;
-  - 9-role assignment and execution chain;
-  - gates, receipts, traces, verdicts, and closeout artifacts;
-  - Draft PR, Ready, merge checkpoint tooling behaviour;
-  - secret handling: public hard boundary + private single-user boundary (§6.5);
-  - rollback feasibility;
-  - drift checks.
-
-#### §3.8.6 Audit-grade version inventory
-
-An auditable version inventory and compatibility matrix **must** be maintained, recording at minimum:
-
-`node/profile | component | installed version | detected capabilities | adapter version | qualification status | verified_at | evidence reference`
-
-A bare version number without compatibility status and verification evidence is **not** acceptable.
-
-#### §3.8.7 Mixed versions
-
-Mixed versions across nodes are **not** forbidden in principle, but each component-version combination **must** be independently qualified, and the qualification **must** demonstrate that the compatibility layer yields consistent governance semantics, assignment behaviour, and evidence. Unverified mixed versions **must not** enter production tasks.
-
-#### §3.8.8 Version-change decisions
-
-Version changes are operator decisions:
-
-  - orchestrator may audit and propose upgrades or downgrades;
-  - orchestrator **must not** auto-upgrade, auto-downgrade, auto-lock, or auto-select a substitute version;
-  - package manager auto-update, self-update, or any other auto mechanism **must not** bypass operator.
-
-#### §3.8.9 High-risk classification
-
-Real upgrade, downgrade, installation, configuration migration, service restart, and production switch are **high-risk actions** under §9.3:
-
-  - first confirmation authorises **only** preparation: version inventory, impact analysis, backup, migration plan, qualification plan, rollback plan;
-  - before execution, re-present to operator: target version, target node / profile, exact action, current state, rollback point;
-  - execution proceeds only after the second explicit operator confirmation.
-
-#### §3.8.10 Phased qualification
-
-Version changes use phased qualification:
-
-  - record the current version and configuration snapshot;
-  - perform the change in the operator-specified scope;
-  - run compatibility qualification;
-  - after qualification passes, wait for operator decision on scope expansion;
-  - **must not** auto-upgrade other nodes merely because a single-node canary passed.
-
-#### §3.8.11 Qualification failure = STOP
-
-If installation fails, capability is missing, configuration is incompatible, model call fails, receipt / gate behaviour changes, or any other qualification step fails, runtime **must** immediately STOP, preserve evidence, and report: affected node / profile, original version, target version, failed item, current state. Auto-rollback, auto-replacement with another version, or auto-expansion of deployment is **forbidden**. Rollback is allowed only through a pre-approved atomic rollback mechanism or a new explicit operator decision.
 
 #### §3.8.12 Immutability of governance semantics
 
@@ -416,7 +378,7 @@ Version compatibility layers **must not** alter the following governance semanti
   - orchestrator recommends only;
   - runtime executes exactly the operator-approved assignment;
   - no assignment-level fallback;
-  - complete 9-role;
+  - in `FULL_9_ROLE_VIBECODING`: complete 9-role; in `LIGHTWEIGHT_OPERATION`: operator-approved actual role set;
   - Draft PR → operator-authorised Ready → independently authorised merge;
   - Failure STOP;
   - Central Model Pool unified management;
@@ -458,13 +420,13 @@ Any of the following **requires** the orchestrator to recommend the complete 9-r
   - executable code / runtime / wrapper / executor / gate / receipt / evidence logic changes;
   - contract / governance / policy / authorisation boundary semantic changes;
   - node / topology / transport / SSH / credential / permission / secret management changes;
-  - CMP / provider / model / alias / routing changes;
-  - Hermes / OpenCode version or service changes;
   - production apply, deployment, migration, destructive operation;
   - cross-node real execution;
   - canonical E2E / release / readiness / production verdict;
   - failure / drift / incident recovery or high-uncertainty task;
   - operator explicitly requires FULL.
+
+**Hermes / OpenCode version or service changes** and **CMP / provider / model / alias / routing changes** are **not** automatic FULL triggers. They enter the dedicated governance gates (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE, §6.9 CENTRAL_MODEL_POOL_GOVERNANCE_GATE). If the task simultaneously changes business runtime logic or contains other FULL-scope items, the orchestrator must split the scope or the operator decides FULL.
 
 ### §4.2 Operator Final Decision
 
@@ -484,9 +446,11 @@ When operator selects FULL_9_ROLE_VIBECODING, the complete 9-role pipeline appli
   8. `reviewer-b`.
   9. `git-integrator` — if the task has no Git-write sub-task, the role **must still exist** with an explicit "no git write" sub-task note, and evidence must carry `no_git_write=true`.
 
-### §4.4 Forbidden Patterns (FULL mode)
+### §4.4 Parallel Entry Points
 
-**Forbidden** at the assignment / role level:
+The three VibeCoding execution modes (§4.1) and the two dedicated governance gates (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE, §6.9 CENTRAL_MODEL_POOL_GOVERNANCE_GATE) are **parallel entry points**. All are recommended by the orchestrator and finally selected by the operator. A dedicated governance gate **must not** be used to downgrade a business task, bypass operator, bypass Failure STOP, bypass evidence requirements, bypass public secret boundary, or convert a business task into a governance-only operation.
+
+### §4.5 Forbidden Patterns (FULL mode)
 
 - role trimming / merging / fast path / simple-bypass / low-risk-bypass;
 - named-but-not-executed (named without execution);
@@ -495,24 +459,22 @@ When operator selects FULL_9_ROLE_VIBECODING, the complete 9-role pipeline appli
 - claiming a role is completed **merely** by running generic commands such as `pytest`, `fixture`, `lint`, static analysis, deterministic scripts or simulation. Such tools **may serve** as a role's real execution means, **only** when the role carries role-specific `assignment`, `input`, `execution`, `output`, and `evidence`. `simulation` / `fixture` / `unit-test` evidence **must not** impersonate real production execution or canonical E2E evidence;
 - "workload is small → skip this role".
 
-### §4.5 Four-Attribute Requirement (FULL mode)
-
-Every role **must** carry:
+### §4.6 Four-Attribute Requirement (FULL mode)
 
 - **independent input** — role-specific input;
-- **real execution** — may be read-only analysis, deterministic-tool invocation, local / remote execution, model call, integration assessment, or the execution-side tools in §4.4 — **not every role must call a model, SSH, or write a file**;
+- **real execution** — may be read-only analysis, deterministic-tool invocation, local / remote execution, model call, integration assessment, or the execution-side tools in §4.5 — **not every role must call a model, SSH, or write a file**;
 - **independent output** — role-specific output;
 - **auditable evidence** — role-specific receipt / trace / verdict / closeout artifact.
 
-### §4.6 Empty-Placeholder Prohibition (FULL mode)
+### §4.7 Empty-Placeholder Prohibition (FULL mode)
 
 Empty placeholders (no input + no output + no evidence) are **forbidden**. Permitted output constants: `NO_CHANGE_REQUIRED`, `NOT_APPLICABLE`, `NO_GIT_WRITE_REQUIRED`.
 
-### §4.7 Independence of Dual Tester / Dual Reviewer (FULL mode)
+### §4.8 Independence of Dual Tester / Dual Reviewer (FULL mode)
 
 `tester-a` / `tester-b` and `reviewer-a` / `reviewer-b` **must** be independent across `assignment` / `context` / `prompt` / `execution batch` / `output` / `evidence`. Neither side **may** read the other's output before submitting its own conclusion. **Recommended** (not required) to prefer different node and different model. If independence cannot be achieved, runtime **must** STOP, explain the cause and risk, await operator decision, and **must not** automatically degrade.
 
-### §4.8 Conflict Escalation (FULL mode)
+### §4.9 Conflict Escalation (FULL mode)
 
 If any tester / reviewer demands changes, return to `implementer` and rerun the affected steps. Unresolvable conflict escalates to operator. Orchestrator **must not** unilaterally compromise.
 
@@ -588,24 +550,28 @@ Transport-route failover (§3.5) does **not** relax §5 strictness. A route fail
 
 ## §6. Central Model Pool
 
-### §6.1 Single Logical Source
+### §6.1 Unified Management
+
+The Central Model Pool (CMP) is a unified management gate (§6.9 CENTRAL_MODEL_POOL_GOVERNANCE_GATE). It does **not** enter the three VibeCoding execution modes (§4.1) and does **not** trigger FULL 9-role or 8-role assignment.
+
+### §6.2 Single Logical Source
 
 The Central Model Pool is the single logical model-management and dispatching entry point. Operator — through `vibedev` — manages model addition / modification / disable / deletion.
 
-### §6.2 Controlled Synchronisation
+### §6.3 Controlled Synchronisation
 
 After operator maintains the central pool, the system must perform controlled sync of each node's OpenCode configuration: `provider_namespace`; `model_id`; `endpoint` / `base_url`; `alias`; `enable` / `disable`; `allowed_node` / `role`; `credential_reference`; node-specific `runtime_provider` mapping.
 
-### §6.3 Node Calling Boundary
+### §6.4 Node Calling Boundary
 
 Each node's OpenCode **may only** call models registered in the central pool, synced, allowed for that node, and passing readiness.
 
-### §6.4 Forbidden Patterns
+### §6.5 Forbidden Patterns
 
 - node-local private model addition;
 - unregistered alias reverse-override of the central pool.
 
-### §6.5 Secret Handling and Credential Discovery Boundary
+### §6.6 Secret Handling and Credential Discovery Boundary
 
 Secrets are classified into two boundaries:
 
@@ -623,13 +589,13 @@ Secrets are classified into two boundaries:
   - **Public / external / uncontrolled scope**: STOP, preserve facts, report to operator; operator decides rotation / revocation.
   - Runtime **must not** auto-rotate, auto-revoke, or auto-replace credentials.
 
-### §6.6 Single Write Direction
+### §6.7 Single Write Direction
 
 - The Central Model Pool has a single write flow;
 - Direction of sync is explicit;
 - **Forbidden**: cyclic `source_of_truth` between `model_pool`, NMC, `alias_config`, and `node-local config`.
 
-### §6.7 Post-Sync Validation
+### §6.8 Post-Sync Validation
 
 Any failure STOP + report:
 
@@ -642,9 +608,49 @@ Any failure STOP + report:
 - bounded canary / model-call;
 - drift.
 
-### §6.8 Route-Chain Integration Boundary
+### §6.10 Route-Chain Integration Boundary
 
 The Central Model Pool regulates models and providers. Transport-route chain (§3.5) regulates *how* a node is reached. The two are orthogonal; this contract does **not** mix them and does **not** embed transport endpoint / port values in any model descriptor.
+
+### §6.9 CENTRAL_MODEL_POOL_GOVERNANCE_GATE
+
+This is a **dedicated governance gate** managed uniformly by `vibedev` on `21bao`. It does **not** enter the three VibeCoding execution modes (§4.1) and does **not** trigger FULL 9-role or 8-role assignment. Operator is the sole final decision maker. `vibedev` is responsible for unified inventory, audit, proposal, preparation, approved-scope execution, qualification, and reporting. `vibedev` **must not** self-approve, auto-change, auto-expand, or auto-rollback.
+
+#### §6.9.1 C0 — Scope
+
+Operator specifies the target CMP change(s), affected node(s) / profile(s), and purpose.
+
+#### §6.9.2 C1 — Audit
+
+`vibedev` read-only collects: current provider / model / alias inventory, allowed node / role mapping, credential reference status, seven-state status per node-model entry, drift from source of truth, and evidence.
+
+#### §6.9.3 C2 — Proposed Delta
+
+`vibedev` submits: exact additions, modifications, and deletions; affected nodes; sync direction; secret scope; verification plan; rollback plan.
+
+#### §6.9.4 C3 — Preparation Approval
+
+Operator approves preparation only. Allowed: render, diff, dry-run, backup, validation plan. **Not** allowed: real CMP write, provider / model / alias / endpoint change, node sync / distribution, secret overlay write or distribution.
+
+#### §6.9.5 C4 — Pre-Execution Checkpoint
+
+`vibedev` presents: target delta / action / current state / rollback point / affected scope. Operator reviews.
+
+#### §6.9.6 C5 — Second Confirmation
+
+Real CMP write, provider / model / alias / endpoint change, node sync / distribution, secret overlay write or distribution **must** receive a second explicit operator confirmation.
+
+#### §6.9.7 C6 — Exact-Scope Apply
+
+Execute only the operator-approved scope. **Must not** expand to other models, nodes, or profiles.
+
+#### §6.9.8 C7 — Post-Apply Qualification
+
+Verify: rendered config, alias / endpoint / provider, credential presence, declared / synced / runtime-visible / env-loaded / wrapper-valid / model-call-verified / operator-approved, drift. All must PASS.
+
+#### §6.9.9 C8 — Closeout
+
+Report: result, model matrix, evidence, and residual risks. Failure triggers immediate STOP. **No** auto-model-change, auto-node-expansion, auto-rollback, auto-credential-replacement, or auto-loop of source-of-truth modification.
 
 ---
 
@@ -837,13 +843,13 @@ The high-risk action list (non-exhaustive):
 - force-push;
 - destructive branch operations;
 - real `--apply`;
-- Central Model Pool or secret write / distribution;
 - node add / remove / transport change;
 - permission modification;
 - service / gateway restart;
 - destructive commands;
 - out-of-scope production changes;
-- `Hermes` / `OpenCode` install, update, downgrade, configuration migration, restart, or version switch (per §3.8).
+- `Hermes` / `OpenCode` install, update, downgrade, configuration migration, restart, or version switch (per §3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
+- Central Model Pool write, provider / model / alias / endpoint change, node sync / distribution, secret overlay write or distribution (per §6.9 CENTRAL_MODEL_POOL_GOVERNANCE_GATE);
 
 Retry / repair actions trigger §9.3 **only** when they themselves fall within the list above, or when operator explicitly marks them as high-risk in the new decision. Ordinary, read-only, or scope-bounded retries — after a failure STOP — still **must** await a new explicit operator decision; they do not become high-risk merely by virtue of being labelled "retry".
 
@@ -882,12 +888,12 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (u) test or fixture evidence cited as V2 E2E PASS (§8.3, §4.2);
   - (v) merely running a generic command counted as a role execution (§4.2, §4.4);
   - (w) `CLUSTER_CONSTRUCTION_OPERATION` used to bypass post-acceptance 9-role / gates / evidence / checkpoints (§8.9);
-  - (x) binding the cluster to a single fixed `Hermes` / `OpenCode` version without qualification (§3.8);
-  - (y) claiming compatibility without verification / reusing stale qualification evidence / auto-expanding scope after single-node canary (§3.8);
-  - (z) automatic `Hermes` / `OpenCode` upgrade / downgrade / version lock / substitute selection, or any update mechanism bypassing operator (§3.8.8);
-  - (aa) continuing assignments after a node-version change without re-qualification, or different node versions producing governance-semantic divergence while claiming E2E PASS (§3.8.7);
+  - (x) binding the cluster to a single fixed `Hermes` / `OpenCode` version without qualification (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
+  - (y) claiming compatibility without verification / reusing stale qualification evidence / auto-expanding scope after single-node canary (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
+  - (z) using a dedicated governance gate (§3.8, §6.9) to downgrade a business task, bypass operator, bypass Failure STOP, bypass evidence requirements, bypass public secret boundary, or convert a business task into a governance-only operation (§4.4);
+  - (aa) continuing assignments after a node-version change without re-qualification, or different node versions producing governance-semantic divergence while claiming E2E PASS (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
   - (bb) using `Hermes` / `OpenCode` version switching to evade Failure STOP or operator checkpoints (§3.8.12);
-  - (cc) hardcoding a single version / CLI / path / schema in core governance or runtime without adaptation (§3.8.3);
+  - (cc) hardcoding a single version / CLI / path / schema in core governance or runtime without adaptation (§3.8.11);
   - (dd) using a non-registered or unqualified route in §3.5 transport-route failover;
   - (ee) mis-classifying an auth / identity / application error as transport-path failure (§3.5.6) and switching routes anyway;
   - (ff) §3.5 route switch that changes node / model / role / assignment / credential / scope (§3.5.11);
@@ -901,7 +907,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (nn) continuing VibeCoding tasks while `21bao` is unavailable;
   - (oo) mis-interpreting `21bao`'s network route failover as control-plane failover;
   - (pp) re-opening `21bao` VibeCoding dispatch before every item in §3.6.7 passes (§3.6.7);
-  - (qq) credential discovery that prints a value-bearing environment map, or outputs secret-derived fragments into chat / log / report (§6.5);
+  - (qq) credential discovery that prints a value-bearing environment map, or outputs secret-derived fragments into public / external / uncontrolled scope, or private operator-controlled output without operator permission (§6.5);
   - (rr) treating a public-format token prefix marker as the credential value (§6.5);
   - (ss) auto-rotating, auto-replacing, or auto-invalidating a credential without explicit operator authorisation (§6.5).
 
@@ -1073,12 +1079,14 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 |---|---|---|
 | 3000-character rule | "each segment < 3000 characters" (hard) | per-segment split threshold: ≤3000 single segment, >3000 split with each segment ≤3000; total prompt may exceed 3000; must not delete content to reduce segment count (§11.5) |
 | 9-role roster | five mixed roles | FULL_9_ROLE_VIBECODING: fully enumerated 9-role (§4.3); LIGHTWEIGHT: minimum recommended roles (§4.1.2); CONSULTATION_ONLY: no 8-role assignment (§4.1.1) |
-| Role trimming | not explicitly forbidden | explicit no-trim / no-skip / no "named-but-not-executed" (§4.4) |
-| Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model (§4.7) |
+| Role trimming | not explicitly forbidden | explicit no-trim / no-skip / no "named-but-not-executed" (§4.5) |
+| Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model (§4.8) |
 | 8-role assignment pre-brief | absent | FULL mode only: required; 4-column matrix; no `alternative` (§5.1, §5.5) |
 | Assignment strictness | absent | strict per operator spec; failure follows §7 (§5.8, §5.9) |
 | Failure STOP | implicit | explicit triggers, preserved evidence, enumerated prohibitions, retry rules; §3.5.5 transport-path failure first enters §3.5 failover; STOP fires on §3.5.6 disallowed trigger, §3.5.8 post-condition failure, §3.5.9 chain exhaustion, §3.5.2 / §3.5.11 invariant violation, or no approved+qualified same-node route chain (§3.4.2, §7.2, §7.8, §13 all share the same exhaustive 5-condition set); §3.5.11 itself is not a failure class |
-| Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.5–§6.8) |
+| Execution mode gate | absent | CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING; operator final classifier; LIGHTWEIGHT risk escalation = STOP (§4) |
+| Dedicated governance gates | absent | HERMES_OPENCODE_VERSION_GOVERNANCE_GATE (§3.8) + CENTRAL_MODEL_POOL_GOVERNANCE_GATE (§6.9); do **not** enter VibeCoding modes; do **not** trigger 8-role / 9-role; parallel entry points (§4.4) |
+| Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.6–§6.9); dedicated governance gate (§6.9) |
 | Canonical pipeline | F1–F10 not detailed | F1–F10 real evaluation; non-canonical path requires operator authorisation and `execution_path: non_canonical`; non-canonical must not become assignment-level automatic fallback (§8.1, §8.2) |
 | Evidence levels | absent | 7 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
@@ -1089,7 +1097,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Effect mechanism | §10 "signing" (later corrected to Working Agreement) | effective only on operator explicit chat acceptance; on acceptance update existing file with `Version: 2.0` + `Supersedes: V1 / PR #276` + `Historical source retained in Git history` |
 | Transport-route failover | absent | §3.5 same-node transport-route failover with operator-approved chain, standing authorization, per-switch no-permission-needed; wrong / unqualified / non-SAME-NODE routes forbidden; chain change needs operator approval; matching §3.5.5 transport-path failure first enters §3.5 failover; after the 5 termination conditions (§3.5.6 / §3.5.8 / §3.5.9 / §3.5.2 or §3.5.11 invariant / no approved chain) fire, enters §7 Failure STOP; §3.5.11 itself is not a failure class |
 | `21bao` as control plane | not labelled | §3.6 `ALWAYS_ON_CONTROL_PLANE` is design + SLA target; on unavailability enter `CONTROL_PLANE_UNAVAILABLE / VIBECODING_UNAVAILABLE`; no worker take-over, no orchestrator self-election, no auto-migration, no transport-route-failover → control-plane interpretation; §3.6.7 recovery gate |
-| `Hermes` / `OpenCode` version handling | absent | §3.8 decoupling, qualification, mixed-version rules, operator-driven changes only, no auto-upgrade, qualification failure = STOP |
+| `Hermes` / `OpenCode` version handling | absent | §3.8 dedicated governance gate (V0–V8), decoupling, qualification, mixed-version rules, operator-driven changes only, no auto-upgrade, qualification failure = STOP |
 | Historical PR / report handling | unspecified | `PRE_V2_HISTORICAL_EVIDENCE` rules; historical files untouched |
 
 ---
