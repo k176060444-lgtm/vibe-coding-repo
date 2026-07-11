@@ -11,19 +11,28 @@
 
 ## §0. Effective Status
 
-### §0.1 Operator acceptance requirement
+### §0.1 V2 Baseline / Mainline Positioning
+
+After operator explicit acceptance, V2 is the highest-layer meta-governance baseline for the operator–ChatGPT/assistant+orchestrator consultant collaboration, and the mainline for building the VibeCoding micro-cluster.
+
+  - All planning, ChatGPT transfer prompts, agent reviews, runtime / node-registry / model-pool / evidence specs, and subsequent PRs **must** trace to and comply with V2.
+  - Agent memory, historical implementation, self-check PASS, or efficiency reasons **must not** override V2.
+  - Operator's subsequent explicit instructions have final authority. If they form a semantic change to V2, the change must enter the V2 amendment, review, and operator re-acceptance process (§10).
+  - V2 is currently **DRAFT** and **must not** be claimed as accepted or in force.
+
+### §0.2 Operator acceptance requirement
 
 This V2 document enters into force **only after** operator (KK) explicitly accepts it in chat.
 
-0.2 V1 (PR #276) is a merged historical contract and the previous operator-approved meta-collaboration baseline. Until V2 is accepted, V1 remains the historical reference; operator's updated instructions in the current conversation take precedence over any V1 clause with which they conflict. After operator's explicit acceptance of V2, V2 supersedes V1; V1 remains in PR #276 and in Git history.
+0.3 V1 (PR #276) is a merged historical contract and the previous operator-approved meta-collaboration baseline. Until V2 is accepted, V1 remains the historical reference; operator's updated instructions in the current conversation take precedence over any V1 clause with which they conflict. After operator's explicit acceptance of V2, V2 supersedes V1; V1 remains in PR #276 and in Git history.
 
-0.3 `vibedev` **must not** self-declare V2 as signed, in force, or adopted in any PR, report, receipt, or chat.
+0.4 `vibedev` **must not** self-declare V2 as signed, in force, or adopted in any PR, report, receipt, or chat.
 
-0.4 V1 → V2 differences are summarised in §13. **No** separate `CHANGELOG_V1_to_V2.md` is created; the new Draft PR body lists the principal deltas.
+0.5 V1 → V2 differences are summarised in §13. **No** separate `CHANGELOG_V1_to_V2.md` is created; the new Draft PR body lists the principal deltas.
 
-0.5 Once V2 is in force, any further amendment (semantic or editorial) requires explicit operator approval per §10.
+0.6 Once V2 is in force, any further amendment (semantic or editorial) requires explicit operator approval per §10.
 
-0.6 Historical evidence (including T3 / R3 / RW-1 reports, PR #341–#343 canary evidence, `readiness-receipt-20260705-150000`, untracked `docs/baseline02/gray/*`, the corresponding PR bodies, the corresponding receipts) remains untouched. Future references must carry the `PRE_V2_HISTORICAL_EVIDENCE — not V2-compliant E2E evidence` banner per §8.
+0.7 Historical evidence (including T3 / R3 / RW-1 reports, PR #341–#343 canary evidence, `readiness-receipt-20260705-150000`, untracked `docs/baseline02/gray/*`, the corresponding PR bodies, the corresponding receipts) remains untouched. Future references must carry the `PRE_V2_HISTORICAL_EVIDENCE — not V2-compliant E2E evidence` banner per §8.
 
 ---
 
@@ -92,9 +101,11 @@ Each node's canonical primary transport is registered in the node registry and f
 
   - **5bao** — `vibeworker@192.168.5.6:22222` → `5bao.kingjinjing.top` → `5bao.kingjinjing.vip`.
 
-  - **9bao** — `vibeworker@192.168.9.6:2222` → `9bao.kingjinjing.top` → `9bao.kingjinjing.vip` → `9bao2.kingjinjing.top` → `9bao2.kingjinjing.vip`.
+  - **9bao** — `vibeworker@192.168.9.6:22222` → `9bao.kingjinjing.top` → `9bao.kingjinjing.vip` → `9bao2.kingjinjing.top` → `9bao2.kingjinjing.vip`.
 
-3.1.5 Cross-reference for failover semantics: §3.5.1 – §3.5.12 (governance); **not** §3.7 (which addresses domain endpoint semantics, not failover).
+3.1.5 The above ports and route order are current operator-approved governance facts. After V2 enters force, any change to canonical transport endpoint, port, route order, DNS, or ISP primary/secondary designation **must** go through a new Draft PR. The PR requires operator review, explicit approval, and separate Draft→Ready and merge authorisations before becoming a new governance fact. The runtime registry **must not** override contract-registered canonical transports.
+
+3.1.6 Cross-reference for failover semantics: §3.5.1 – §3.5.12 (governance); **not** §3.7 (which addresses domain endpoint semantics, not failover).
 
 ### §3.2 Node Activity and Control-Plane Readiness
 
@@ -351,7 +362,7 @@ When versions differ, the runtime / node-registry / evidence spec **must** use c
   - 9-role assignment and execution chain;
   - gates, receipts, traces, verdicts, and closeout artifacts;
   - Draft PR, Ready, merge checkpoint tooling behaviour;
-  - secret non-leakage;
+  - secret handling: public hard boundary + private single-user boundary (§6.5);
   - rollback feasibility;
   - drift checks.
 
@@ -409,15 +420,59 @@ Version compatibility layers **must not** alter the following governance semanti
   - Draft PR → operator-authorised Ready → independently authorised merge;
   - Failure STOP;
   - Central Model Pool unified management;
-  - secret non-leakage into Git, PR, log, receipt, or chat.
+  - secret handling: public hard boundary + private single-user boundary (§6.5);
 
 ---
 
-## §4. Fixed Complete 9-Role
+## §4. Execution Mode Gate
 
-### §4.1 Mandatory 9 Roles
+### §4.1 Classification
 
-Every VibeCoding task — regardless of size, risk, read / write, docs / code, Git involvement — **must** traverse all of:
+Before any task execution, the orchestrator **must** classify the task into one of three execution modes. Operator makes the final mode decision.
+
+#### §4.1.1 CONSULTATION_ONLY
+
+Ordinary discussion, planning, explanation, or research. Does **not** write to the repo, SSH, call workers, or change state. **Does not** enter 8-role assignment. Orchestrator may proceed with operator's go-ahead after classification.
+
+#### §4.1.2 LIGHTWEIGHT_OPERATION
+
+A task may be classified as LIGHTWEIGHT only when **all** of the following hold:
+
+  - the task is localised, reversible, low-risk, and has clear boundaries;
+  - it does **not** change: code or runtime behaviour; contract / governance / policy semantics; permissions, security, or secrets; node, topology, transport, SSH, or credential; CMP, provider, model, alias, or routing; Hermes or OpenCode version or service;
+  - it does **not** execute: production apply, deployment, migration, restart, or destructive action;
+  - it does **not** require: canonical E2E, release, or readiness verdict.
+
+Recommended minimum roles for LIGHTWEIGHT:
+  - orchestrator;
+  - explorer or implementer;
+  - one independent verifier / reviewer;
+  - git-integrator (if Git write is involved).
+
+The orchestrator **must** recommend actual roles, nodes, models, and reasons. Operator **must** explicitly specify and approve before execution.
+
+#### §4.1.3 FULL_9_ROLE_VIBECODING
+
+Any of the following **requires** the orchestrator to recommend the complete 9-role pipeline (§4.3):
+
+  - executable code / runtime / wrapper / executor / gate / receipt / evidence logic changes;
+  - contract / governance / policy / authorisation boundary semantic changes;
+  - node / topology / transport / SSH / credential / permission / secret management changes;
+  - CMP / provider / model / alias / routing changes;
+  - Hermes / OpenCode version or service changes;
+  - production apply, deployment, migration, destructive operation;
+  - cross-node real execution;
+  - canonical E2E / release / readiness / production verdict;
+  - failure / drift / incident recovery or high-uncertainty task;
+  - operator explicitly requires FULL.
+
+### §4.2 Operator Final Decision
+
+Operator is the **sole** classifier. If operator explicitly approves an exception, the orchestrator records the scope and reason. If risk escalates or a FULL condition is triggered during LIGHTWEIGHT, the orchestrator **must** immediately STOP and re-request classification.
+
+### §4.3 Full 9-Role Pipeline (FULL_9_ROLE_VIBECODING)
+
+When operator selects FULL_9_ROLE_VIBECODING, the complete 9-role pipeline applies:
 
   1. `orchestrator` — fixed to be `vibedev` on `21bao`. The orchestrator's model is operator-specified at VibeCoding-mode entry and is **not** part of the per-task 8-role assignment. Runtime **must not** auto-swap the orchestrator model within the task.
   2. `explorer`.
@@ -429,7 +484,7 @@ Every VibeCoding task — regardless of size, risk, read / write, docs / code, G
   8. `reviewer-b`.
   9. `git-integrator` — if the task has no Git-write sub-task, the role **must still exist** with an explicit "no git write" sub-task note, and evidence must carry `no_git_write=true`.
 
-### §4.2 Forbidden Patterns
+### §4.4 Forbidden Patterns (FULL mode)
 
 **Forbidden** at the assignment / role level:
 
@@ -440,24 +495,24 @@ Every VibeCoding task — regardless of size, risk, read / write, docs / code, G
 - claiming a role is completed **merely** by running generic commands such as `pytest`, `fixture`, `lint`, static analysis, deterministic scripts or simulation. Such tools **may serve** as a role's real execution means, **only** when the role carries role-specific `assignment`, `input`, `execution`, `output`, and `evidence`. `simulation` / `fixture` / `unit-test` evidence **must not** impersonate real production execution or canonical E2E evidence;
 - "workload is small → skip this role".
 
-### §4.3 Four-Attribute Requirement
+### §4.5 Four-Attribute Requirement (FULL mode)
 
 Every role **must** carry:
 
 - **independent input** — role-specific input;
-- **real execution** — may be read-only analysis, deterministic-tool invocation, local / remote execution, model call, integration assessment, or the execution-side tools in §4.2 — **not every role must call a model, SSH, or write a file**;
+- **real execution** — may be read-only analysis, deterministic-tool invocation, local / remote execution, model call, integration assessment, or the execution-side tools in §4.4 — **not every role must call a model, SSH, or write a file**;
 - **independent output** — role-specific output;
 - **auditable evidence** — role-specific receipt / trace / verdict / closeout artifact.
 
-### §4.4 Empty-Placeholder Prohibition
+### §4.6 Empty-Placeholder Prohibition (FULL mode)
 
 Empty placeholders (no input + no output + no evidence) are **forbidden**. Permitted output constants: `NO_CHANGE_REQUIRED`, `NOT_APPLICABLE`, `NO_GIT_WRITE_REQUIRED`.
 
-### §4.5 Independence of Dual Tester / Dual Reviewer
+### §4.7 Independence of Dual Tester / Dual Reviewer (FULL mode)
 
 `tester-a` / `tester-b` and `reviewer-a` / `reviewer-b` **must** be independent across `assignment` / `context` / `prompt` / `execution batch` / `output` / `evidence`. Neither side **may** read the other's output before submitting its own conclusion. **Recommended** (not required) to prefer different node and different model. If independence cannot be achieved, runtime **must** STOP, explain the cause and risk, await operator decision, and **must not** automatically degrade.
 
-### §4.6 Conflict Escalation
+### §4.8 Conflict Escalation (FULL mode)
 
 If any tester / reviewer demands changes, return to `implementer` and rerun the affected steps. Unresolvable conflict escalates to operator. Orchestrator **must not** unilaterally compromise.
 
@@ -467,7 +522,7 @@ If any tester / reviewer demands changes, return to `implementer` and rerun the 
 
 ### §5.1 Trigger
 
-Before requesting the 8-role assignment (excluding orchestrator), orchestrator **must first** complete §5 in full.
+The complete 8-role assignment pre-brief (excluding orchestrator) is **mandatory only** when operator selects `FULL_9_ROLE_VIBECODING` (§4.1.3). In `LIGHTWEIGHT_OPERATION` (§4.1.2), the orchestrator presents a same-format 4-column matrix containing only the actual roles for that task, with no `alternative` / default / fallback fields. `CONSULTATION_ONLY` (§4.1.1) does not enter any assignment pre-brief.
 
 ### §5.2 Display Available Models and Recommendation Matrix
 
@@ -552,13 +607,21 @@ Each node's OpenCode **may only** call models registered in the central pool, sy
 
 ### §6.5 Secret Handling and Credential Discovery Boundary
 
-  - Secrets may live in an operator-controlled local-only / gitignored overlay.
-  - Secrets **must not** appear in Git, commits, PRs, reports, receipts, logs, or chat.
-  - Syncing secrets to workers requires controlled channel, minimum privilege, restrictive file permissions.
-  - **Credential discovery** (any code, prompt, or report that lists environment variables) **must not** serialise or print a value-bearing environment map. Only the variable **name** and a categorical **presence** state (`PRESENT_NONEMPTY` / `PRESENT_EMPTY` / `ABSENT`) are permitted outputs.
-  - **Any** secret-derived fragment (value, prefix, length, hash, or encoding) entering chat, log, or report triggers immediate STOP and an **exposure assessment**. The exposure assessment is **read-only**: it does not rotate, replace, or invalidate the credential automatically.
-  - Public-format prefix markers (e.g. token family identifiers that are widely documented for a service) **must not** be treated as the credential value itself; they are still token-derived fragments and the same boundary applies.
-  - Until operator explicitly authorises rotation, affected variables are flagged `POTENTIALLY_EXPOSED` and recorded in the controlled exposure inventory.
+Secrets are classified into two boundaries:
+
+**1. Hard public boundary**: plaintext secret values **must not** enter tracked Git, commits, public PRs / issues, public artifacts, publicly or externally shared reports / logs, or third-party-accessible persistent media.
+
+**2. Private single-user boundary**: operator-personal, operator-only, local-only / gitignored configuration, controlled worker files, and private micro-cluster internal communication **may** contain secrets when operationally necessary. Such internal occurrence does **not** automatically constitute a security incident, does **not** automatically trigger STOP, and does **not** automatically require rotation.
+
+**Default handling**:
+  - Prefer credential reference, variable name, or categorical presence state (`PRESENT_NONEMPTY` / `PRESENT_EMPTY` / `ABSENT`) over value-bearing output.
+  - Credential discovery (any code, prompt, or report that lists environment variables) **must not** serialise or print a value-bearing environment map. Only variable **name** and categorical **presence** state are permitted outputs.
+  - ChatGPT transfer prompts default to **not** embedding secret values. If operator explicitly requires secret embedding in a private-cluster channel, the prompt must document the usage scope and the prohibition against entering Git or public artifacts.
+
+**Exposure classification**:
+  - **Private operator-controlled scope only**: record context; operator decides whether to continue or clean up.
+  - **Public / external / uncontrolled scope**: STOP, preserve facts, report to operator; operator decides rotation / revocation.
+  - Runtime **must not** auto-rotate, auto-revoke, or auto-replace credentials.
 
 ### §6.6 Single Write Direction
 
@@ -746,7 +809,7 @@ While the full canonical 9-role runtime has not been accepted and declared in fo
 
 - such actions **must not** be claimed as V2-compliant VibeCoding tasks, complete 9-role executions, or canonical E2E PASS;
 - such actions **remain subject to** operator decision authority, explicit authorisation, **no-assignment-level-fallback**, Failure STOP (§7), evidence levels (§8.5), historical / current distinction (§8.6, §8.8), and high-risk double-confirmation (§9.3);
-- **once** operator formally accepts and declares the canonical 9-role runtime in force, every VibeCoding task must run the full 9-role (§4);
+- **once** operator formally accepts and declares the canonical 9-role runtime in force, every VibeCoding task classified as `FULL_9_ROLE_VIBECODING` must run the full 9-role (§4.3); `LIGHTWEIGHT_OPERATION` and `CONSULTATION_ONLY` follow their respective mode rules;
 - this transitional label **must not** be used to bypass the post-acceptance 9-role, gates, evidence, or operator checkpoints.
 
 ---
@@ -879,29 +942,40 @@ V2 takes effect **only after** explicit operator acceptance. `vibedev` **must no
 
 AUTH-N numbering, receipt schema, executor / wrapper naming and boundaries, SSH-key canonical path, sync scripts, blind-review frequency and triggers, `routes.yaml`-style filename, route-entry field schema — all remain in future runtime / node-registry / evidence specs.
 
-**Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `2222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec.
+**Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec.
 
 ---
 
-## §11. Prompt Delivery Contract
+## §11. ChatGPT-Authored Transfer Prompt Delivery Contract
 
-### §11.1 Scope
+### §11.1 Unique Path
 
-This clause governs every complete **transfer prompt** that ChatGPT / assistant + orchestrator consultant generates and hands to operator for verbatim forwarding to `vibedev`, `小马蹄 Hermes`, or any other operator-designated agent.
+The only path for a transfer prompt governed by this clause is:
 
-Out of scope (handled by a separate runtime prompt spec, not by this clause):
+> **ChatGPT / assistant + orchestrator consultant authors → operator reviews and forwards → vibedev / 小马蹄 Hermes / operator-designated agent executes**
 
-- operator ↔ ChatGPT ordinary discussion;
-- operator's own ad-hoc messages;
-- agent reports;
-- `vibedev`'s internal 9-role runtime prompts;
-- agent-to-agent communication.
+### §11.2 Definition
 
-### §11.2 Goal
+A **transfer prompt** under this clause is a complete task prompt that ChatGPT / assistant + orchestrator consultant generates for the operator, for the operator to review and then forward verbatim to an executing agent.
 
-Each transfer prompt must clearly convey: facts, objective, identity boundaries, allowed / forbidden actions, authorisation, method, stopping conditions, evidence requirements, acceptance criteria, and output format.
+  - While ChatGPT generates it, it is only a consultant's recommended text.
+  - When the operator chooses to forward it, only the permissions explicitly stated in the prompt are activated. Forwarding does **not** expand authorisation and does **not** replace §9 high-risk confirmation.
+  - The primary goal is to assist the operator in directing vibedev to build, audit, remediate, and operate the VibeCoding micro-cluster, while maintaining the V2 baseline / mainline, identity, authorisation, STOP, and evidence boundaries.
 
-### §11.3 One-Copy Format and Writing-Block Prohibition
+### §11.3 Out of Scope
+
+The following are **not** governed by this clause (they are handled by the runtime prompt spec or the corresponding context):
+
+  - vibedev's self-generated internal 9-role / runtime prompts;
+  - prompts generated by vibedev or any other agent and sent to downstream agents;
+  - agent-to-agent communication;
+  - agent reports;
+  - operator's own ad-hoc messages;
+  - ordinary operator ↔ ChatGPT discussion.
+
+This clause **must not** be misinterpreted as constraining all prompts generated by vibedev.
+
+### §11.4 One-Copy Format and Writing-Block Prohibition
 
   1. Each complete transfer prompt that operator forwards **must** be placed in a **plain Markdown fenced code block** with the language tag fixed to `text`. Example: ` ```text `.
   2. **Forbidden** writing-block formats include: rich writing blocks, special writing cards, editable blocks, accordion blocks, tabbed blocks, callout blocks, and any other non-ordinary code-block component that mobile clients cannot one-tap copy.
@@ -909,7 +983,7 @@ Each transfer prompt must clearly convey: facts, objective, identity boundaries,
   4. A single code fence carries exactly one logically complete prompt, unless explicitly part of a single multi-segment prompt.
   5. Each transfer prompt is **self-contained**, **mobile-friendly**, and **one-tap copyable**. Related items are batched; micro-prompts and micro-PRs are forbidden.
 
-### §11.4 Length and Segmentation
+### §11.5 Length and Segmentation
 
   1. A single transfer prompt is a **soft target** of approximately 3000 Chinese characters. This is **not** a hard ceiling; it is also **not** a license to ignore the limit and emit an unboundedly long prompt.
   2. **Clarity and completeness always come first.** A single segment is preferred when it can carry the full prompt clearly. Length is reduced only by improving clarity, not by sacrificing it.
@@ -924,7 +998,7 @@ Each transfer prompt must clearly convey: facts, objective, identity boundaries,
    No "or equivalent" is permitted. The clause is closed at that line.
   6. After the final segment, all preceding segments must have arrived; agents **must not** begin work before every segment is present.
 
-### §11.5 Version Management
+### §11.6 Version Management
 
   1. **Full replacement** of a previous prompt: the code fence must explicitly contain the line
 
@@ -946,7 +1020,7 @@ Each transfer prompt must clearly convey: facts, objective, identity boundaries,
 
   3. The receiver **must not** be asked to infer how to merge two conflicting prompts.
 
-### §11.6 Blind-Review Additional Rules (for `小马蹄 Hermes`)
+### §11.7 Blind-Review Additional Rules (for `小马蹄 Hermes`)
 
   - whether the review is independent and blind;
   - forbidden reads — which `vibedev` reports, sessions, memory, scratchpads, intermediate conclusions;
@@ -955,15 +1029,15 @@ Each transfer prompt must clearly convey: facts, objective, identity boundaries,
   - evidence citation format;
   - prohibition on contamination by other agents' conclusions.
 
-### §11.7 `vibedev` Job Prompt Additional Rules
+### §11.8 `vibedev` Job Prompt Additional Rules
 
 Phase name; current baseline / HEAD; allowed / forbidden actions; whether SSH / real model calls / Git writes / Draft PR / Ready / merge / config writes / `--apply` are permitted; operator checkpoint; stopping conditions; acceptance criteria; report-only vs allowing in-repo artefacts; whether to mark `CLUSTER_CONSTRUCTION_OPERATION` or full-9-role runtime.
 
-### §11.8 Long-Context De-Drift
+### §11.9 Long-Context De-Drift
 
 All complete transfer prompts generated by ChatGPT / assistant + orchestrator consultant and handed to operator for verbatim forwarding to `vibedev`, `小马蹄 Hermes`, or any other operator-designated agent must, as task requires, re-anchor: operator as final decision maker; `21bao` / `5bao` / `9bao` as nodes; `vibedev` / `小马蹄 Hermes` as profiles; full 9-role requirement for the current task; current authorisation boundaries; current in-force or pending contract version; historical / current evidence boundary.
 
-### §11.9 Forbidden Expansion
+### §11.10 Forbidden Expansion
 
 A transfer prompt **must not** state: "every agent's every prompt must follow this clause"; "every operator ↔ consultant exchange must use a code fence"; "`vibedev`'s every internal runtime prompt automatically applies this clause"; "an agent's output is long ⇒ violation"; "3000 characters is a hard upper bound".
 
@@ -980,7 +1054,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | `V2 Effective Date` | [awaiting operator acceptance] |
 | `V2 Version` | `2.0` (DRAFT — awaiting acceptance) |
 | Historical reference | `v1.0` (PR #276, commits `9f7e8b1` + follow-up `8509a07`); preserved in Git history |
-| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, complete 9-role, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, canonical pipeline, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `2222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
+| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), complete 9-role, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, canonical pipeline, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
 
 ---
 
@@ -988,14 +1062,14 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 
 | Area | V1 (PR #276) | V2 (this document) |
 |---|---|---|
-| 3000-character rule | "each segment < 3000 characters" (hard) | soft guidance: clarity and completeness first (§11.4) |
-| 9-role roster | five mixed roles | fully enumerated 9-role (§4.1) |
-| Role trimming | not explicitly forbidden | explicit no-trim / no-skip / no "named-but-not-executed" (§4.2) |
-| Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model (§4.5) |
-| 8-role assignment pre-brief | absent | required; 4-column matrix; no `alternative` (§5.5) |
+| 3000-character rule | "each segment < 3000 characters" (hard) | soft guidance: clarity and completeness first (§11.5) |
+| 9-role roster | five mixed roles | FULL_9_ROLE_VIBECODING: fully enumerated 9-role (§4.3); LIGHTWEIGHT: minimum recommended roles (§4.1.2); CONSULTATION_ONLY: no 8-role assignment (§4.1.1) |
+| Role trimming | not explicitly forbidden | explicit no-trim / no-skip / no "named-but-not-executed" (§4.4) |
+| Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model (§4.7) |
+| 8-role assignment pre-brief | absent | FULL mode only: required; 4-column matrix; no `alternative` (§5.1, §5.5) |
 | Assignment strictness | absent | strict per operator spec; failure follows §7 (§5.8, §5.9) |
 | Failure STOP | implicit | explicit triggers, preserved evidence, enumerated prohibitions, retry rules; §3.5.5 transport-path failure first enters §3.5 failover; STOP fires on §3.5.6 disallowed trigger, §3.5.8 post-condition failure, §3.5.9 chain exhaustion, §3.5.2 / §3.5.11 invariant violation, or no approved+qualified same-node route chain (§3.4.2, §7.2, §7.8, §13 all share the same exhaustive 5-condition set); §3.5.11 itself is not a failure class |
-| Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary (§6.5–§6.8) |
+| Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.5–§6.8) |
 | Canonical pipeline | F1–F10 not detailed | F1–F10 real evaluation; non-canonical path requires operator authorisation and `execution_path: non_canonical`; non-canonical must not become assignment-level automatic fallback (§8.1, §8.2) |
 | Evidence levels | absent | 7 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
