@@ -13,7 +13,7 @@
 
 ### §0.1 Operator acceptance requirement
 
-This V2 document enters into force **only after** operator (KK) explicitly accepts it in chat (e.g. "ACCEPT V2" or equivalent natural language).
+This V2 document enters into force **only after** operator (KK) explicitly accepts it in chat.
 
 0.2 V1 (PR #276) is a merged historical contract and the previous operator-approved meta-collaboration baseline. Until V2 is accepted, V1 remains the historical reference; operator's updated instructions in the current conversation take precedence over any V1 clause with which they conflict. After operator's explicit acceptance of V2, V2 supersedes V1; V1 remains in PR #276 and in Git history.
 
@@ -39,7 +39,7 @@ No intermediate role (orchestrator, runtime, agent, verifier, drift detector, th
 
 **GP-3 (recommend ≠ approve)** — Orchestrator's recommendations — including the available-model list, the 4-column recommendation matrix, post-failure proposals, efficiency improvements — **are only** suggestions. **Only** operator's explicit chat statement constitutes approval.
 
-GP-1 / GP-2 / GP-3 interlock with §3.5, §4.1, §5.7, §7, §9, §10.1. **§9.4 bounded-authorisation packages cannot override these three principles.**
+GP-1 / GP-2 / GP-3 interlock with §3, §4.1, §5.7, §7, §9, §10.1. **§9.4 bounded-authorisation packages cannot override these three principles.**
 
 ---
 
@@ -57,38 +57,50 @@ GP-1 / GP-2 / GP-3 interlock with §3.5, §4.1, §5.7, §7, §9, §10.1. **§9.4
 
 ---
 
-## §3. Node Architecture & Availability
+## §3. Node Architecture, Routing, Transport-Route Failover, Control-Plane Availability
 
 ### §3.0 Topology
 
-### §3.0.1 Topology change control
+#### §3.0.1 Topology change control
 
-The current operator-approved canonical topology is **21bao / 5bao / 9bao** — three nodes. **Any** node addition, removal, replacement, address change, transport change, or identity change must be **explicitly approved by operator**, logged in the relevant transport / node registry spec, and validated through the verification chain in §3.3 before the change is allowed to enter production assignments. Topology change is **never permanent**; operator may revise approved topology at any time, and the contract follows operator decisions, not the reverse.
+The current operator-approved canonical topology is **21bao / 5bao / 9bao** — three nodes. This contract does **not** make the topology immutable. **Any** node addition, removal, replacement, address change, transport change, or identity change must be **explicitly approved by operator**, logged in the relevant transport / node registry spec, and validated through the verification chain in §3.3 before the change is allowed to enter production assignments.
 
 ### §3.1 Nodes and Transports
 
-### §3.1.1 Node roles in topology
+#### §3.1.1 Node roles in topology
 
-`21bao` — Windows local-exec / control host. Transport: `local-exec`.
+`21bao` is the **unique control plane** of the current operator-approved canonical topology. It also serves as the local-exec / control node. Its default transport for orchestrator / control is `local-exec`.
 
-3.1.2 `5bao` — Debian SSH worker. Default primary transport: SSH to `vibeworker@192.168.5.6:22222`.
+5bao is a Debian SSH worker. Its canonical primary transport endpoint is registered in the node registry and named in §3.1.4.
 
-3.1.3 `9bao` — Debian SSH worker. Default primary transport: SSH to `vibeworker@192.168.9.6:2222`.
+9bao is a Debian SSH worker. Its canonical primary transport endpoint is registered in the node registry and named in §3.1.4.
 
-3.1.4 Domain endpoints (each node also has an ordered network-service route chain — see §3.7 for route failover rules):
+3.1.2 A node carries exactly one of two availability states: `ACTIVE` or `SUSPENDED_OFFLINE`. `NOT_ASSIGNABLE` is **not** a third availability value; it is a mandatory consequence of `SUSPENDED_OFFLINE` (a SUSPENDED node is not assignable to any role).
 
-  - 21bao: `21bao.kingjinjing.top` → `21bao.kingjinjing.vip` (primary → fallback).
-  - 5bao: `5bao.kingjinjing.top` → `5bao.kingjinjing.vip`.
-  - 9bao: `9bao.kingjinjing.top` → `9bao.kingjinjing.vip` → `9bao2.kingjinjing.top` → `9bao2.kingjinjing.vip`.
+3.1.3 A route entry inside a transport route chain carries route-level status (e.g. `qualified` / `unqualified` / `disabled`). It **must not** carry `SUSPENDED` or `NOT_ASSIGNABLE` as a state — those are node-level states.
 
-### §3.2 Node Activity and Control-Plane Readyness
+#### §3.1.4 Canonical primary transports and route chains
+
+Each node's canonical primary transport is registered in the node registry and forms the head of its route chain:
+
+  - **21bao** — orchestrator / control / metadata reads use `local-exec`. Network-service domain chain (ordered): `21bao.kingjinjing.top` → `21bao.kingjinjing.vip`. The local-exec path and the network-service domain chain are **distinct** route chains; local-exec is not part of the domain chain.
+
+  - **5bao** — `vibeworker@192.168.5.6:22222` → `5bao.kingjinjing.top` → `5bao.kingjinjing.vip`.
+
+  - **9bao** — `vibeworker@192.168.9.6:2222` → `9bao.kingjinjing.top` → `9bao.kingjinjing.vip` → `9bao2.kingjinjing.top` → `9bao2.kingjinjing.vip`.
+
+3.1.5 Cross-reference for failover semantics: §3.5.1 – §3.5.12 (governance); **not** §3.7 (which addresses domain endpoint semantics, not failover).
+
+### §3.2 Node Activity and Control-Plane Readiness
 
 3.2.1 Each node carries two independent labels:
 
-  - **node availability**: `ACTIVE` or `SUSPENDED_OFFLINE / NOT_ASSIGNABLE`.
+  - **node availability**: `ACTIVE` or `SUSPENDED_OFFLINE / NOT_ASSIGNABLE`. `SUSPENDED_OFFLINE` implies `NOT_ASSIGNABLE`.
   - **control-plane readiness** (only meaningful for the unique control-plane node — see §3.6): `CONTROL_PLANE_READY` or `CONTROL_PLANE_UNAVAILABLE`.
 
-3.2.2 A node labelled `SUSPENDED_OFFLINE / NOT_ASSIGNABLE` **must not** be recommended, allocated, SSH-ed, model-called, or otherwise executed until operator explicitly approves recovery and re-qualification completes.
+3.2.2 A node labelled `SUSPENDED_OFFLINE` **must not** be recommended, allocated, SSH-ed, model-called, or otherwise executed until operator explicitly approves recovery and re-qualification completes.
+
+3.2.3 The heading of this section uses the correct spelling. Cross-references in this document use the same spelling.
 
 ### §3.3 Node Lifecycle Verification
 
@@ -110,7 +122,9 @@ The current operator-approved canonical topology is **21bao / 5bao / 9bao** — 
   - connection failure;
   - readiness gate fail.
 
-3.4.2 Detailed failure handling is governed by §7. Strictly forbidden at the assignment level: automatic fallback, automatic node swap, automatic model swap, lowered independence, scope-shrinking continuation.
+3.4.2 **Exception (precedence of §3.5 over §3.4 / §7)**: For an `ACTIVE` node that has an operator-approved, registered, and qualified same-node route chain (§3.5), a transport-path failure matching §3.5.5 **first** enters the §3.5 failover flow and **does not** immediately trigger the §3.4 STOP above. The §3.4 STOP fires only when §3.5 has been exhausted or when the failure falls under §3.5.6 / §3.5.8 / §3.5.9 / §3.5.11.
+
+3.4.3 Detailed failure handling is governed by §7. Strictly forbidden at the assignment level: automatic fallback, automatic node swap, automatic model swap, lowered independence, scope-shrinking continuation.
 
 ### §3.5 Transport-Route Failover (Same Node, Operator-Approved Chain)
 
@@ -135,7 +149,7 @@ Each route entry, before entering an active chain, must independently qualify, d
 
 #### §3.5.4 Excluded routes
 
-Routes that are `UNKNOWN`, unqualified, `SUSPENDED`, `NOT_ASSIGNABLE`, or not operator-approved **must not** be tried automatically.
+Routes that are `UNKNOWN`, unqualified, suspended, not-assignable, or not operator-approved **must not** be tried automatically.
 
 #### §3.5.5 Allowed trigger classes (transport path only)
 
@@ -193,24 +207,30 @@ Contract-level minimum report contents for any switch are the seven fields in §
 
 ### §3.6 21bao as the Unique Control Plane
 
-3.6.1 Within the operator-approved canonical topology (`21bao / 5bao / 9bao`):
+#### §3.6.1 Identity
+
+Within the operator-approved canonical topology (`21bao / 5bao / 9bao`):
 
   - `21bao` is the **unique** control plane.
   - `vibedev` runs on `21bao`.
   - `21bao` is the operator interaction entry.
   - `21bao` is also the local-exec / control node (per §3.1.1).
 
-3.6.2 The design and operational target for `21bao` is the label `ALWAYS_ON_CONTROL_PLANE`. This is an expression of intent and an SLA target — **not** a physical or absolute guarantee.
+#### §3.6.2 Design and operational target label
 
-### §3.6.3 Verifiable formulation
+The design and operational target for `21bao` is the label `ALWAYS_ON_CONTROL_PLANE`. This is an expression of intent and an SLA target — **not** a physical or absolute guarantee.
+
+#### §3.6.3 Verifiable formulation
 
 The correctly-formulated, verifiable statement that operator accepts for `21bao` is:
 
-> In the operator-approved canonical topology, `5bao` and `9bao` are workers; they are **not** a control-plane fallback for `21bao`. Any role or topology change requires explicit operator approval.
+> In the current operator-approved canonical topology, `5bao` and `9bao` are workers; they do **not** constitute a control-plane fallback for `21bao`. Any role or topology change requires explicit operator approval.
 
-This contract does not assert `21bao` is impossible to fail. It asserts that **when** `21bao` becomes unavailable — including `21bao` offline, `Hermes` gateway unavailable, `vibedev` unavailable, or `21bao`'s control-plane readiness failing — the system enters `CONTROL_PLANE_UNAVAILABLE / VIBECODING_UNAVAILABLE` and no worker node may take over the control-plane responsibilities.
+This contract does not assert that `21bao` is impossible to fail. It asserts that **when** `21bao` becomes unavailable — including `21bao` offline, `Hermes` gateway unavailable, `vibedev` unavailable, or `21bao`'s control-plane readiness failing — the system enters `CONTROL_PLANE_UNAVAILABLE / VIBECODING_UNAVAILABLE` and no worker node may take over the control-plane responsibilities.
 
-3.6.4 When the state in §3.6.3 holds:
+#### §3.6.4 Unavailability semantics
+
+When the state in §3.6.3 holds:
 
   - **No** new VibeCoding task may start.
   - **No** running task may be taken over by `5bao` or `9bao`.
@@ -218,8 +238,31 @@ This contract does not assert `21bao` is impossible to fail. It asserts that **w
   - Orchestrator **must not** auto-migrate.
   - A worker **must not** be elevated to control plane.
   - `21bao`'s transport-route failover (§3.5) **must not** be interpreted as control-plane migration, orchestrator migration, node substitution, or operator-entry migration — even when `5bao` / `9bao` are `ACTIVE`.
+  - `21bao` local-exec failure, `Hermes` gateway failure, `vibedev` profile failure, or `21bao` control-plane readiness failure **must not** attempt worker takeover; the system goes directly to `CONTROL_PLANE_UNAVAILABLE / VIBECODING_UNAVAILABLE`.
 
-3.6.5 `5bao` and `9bao`, even when `ACTIVE`, are workers within the operator-approved canonical topology. They are **never** a control-plane fallback for `21bao`.
+#### §3.6.5 Worker-only status
+
+`5bao` and `9bao`, even when `ACTIVE`, are workers in the current operator-approved canonical topology. They do **not** constitute a control-plane fallback for `21bao` in the current operator-approved topology.
+
+#### §3.6.6 Transport-route failover ≠ control-plane failover
+
+See §3.5.11 and §3.6.4: `21bao`'s same-node transport-route failover is **not** control-plane failover.
+
+#### §3.6.7 Recovery gate (control-plane re-acceptance)
+
+When `21bao` is restored from `CONTROL_PLANE_UNAVAILABLE`, VibeCoding dispatch **must not** be re-opened before **all** of the following checks pass:
+
+  - local control-plane availability;
+  - `Hermes` gateway status;
+  - `vibedev` profile status;
+  - Git working state;
+  - GitHub credential binding presence;
+  - worker credential binding;
+  - Central Model Pool current status;
+  - runtime / config integrity;
+  - readiness and drift checks.
+
+Only after **every** item above returns PASS may `21bao` be restored to `ACTIVE / CONTROL_PLANE_READY`. Re-opening dispatch before all checks pass is a §9.3 high-risk violation. The post-outage / recovery report captures the minimum semantics: outage / detection / recovery / re-dispatch times, validation outcomes, linked evidence, frozen or not-started tasks. The specific schema lives in the runtime / evidence spec.
 
 ### §3.7 Domain Endpoint Semantics
 
@@ -227,9 +270,114 @@ This contract does not assert `21bao` is impossible to fail. It asserts that **w
 
 3.7.2 `.top` is primary, `.vip` is fallback.
 
-3.7.3 `9bao` and `9bao2` are two distinct ISP links (primary ↔ secondary). Each link carries its own `.top` / `.vip` redundancy.
+3.7.3 `9bao` and `9bao2` are two distinct ISP links (primary ↔ secondary). Each link carries its own `.top` / `vip` redundancy.
 
-3.7.4 The contract does **not** embed endpoint port numbers, OpenCode / Hermes / package manager paths, or any other runtime implementation detail.
+3.7.4 §3.1.4 explicitly registers canonical primary transports as governance facts. **Other** implementation-level endpoint parameters (additional ports, internal addresses, proxies, package manager paths, etc.) live in the controlled node registry / runtime spec; this contract does not fix them.
+
+### §3.8 Hermes / OpenCode Version Decoupling and Compatibility Governance
+
+#### §3.8.1 Decoupling principle
+
+`Hermes` and `OpenCode` are maintainable software dependencies of the small cluster. They are **not** immutable infrastructure. Operator may explicitly approve upgrade, downgrade, replacement, or rollback of `Hermes` / `OpenCode` on a designated node or profile.
+
+#### §3.8.2 Architecture-level independence
+
+The cluster's architecture, 9-role pipeline, Central Model Pool, assignment rules, gates, receipts, wrapper, executor, synchronisation, audit, and evidence chain **must not** depend on a single fixed `Hermes` or `OpenCode` version.
+
+#### §3.8.3 Forbidden hard-coding
+
+Core governance and runtime **must not** hard-code, without adaptation:
+
+  - a single version number;
+  - CLI parameters that exist only in a specific version;
+  - a fixed install path;
+  - a fixed configuration format;
+  - a fixed output text;
+  - a fixed provider / model enumeration behaviour;
+  - an authentication, session, plugin, or interface behaviour that applies only to a specific version.
+
+When versions differ, the runtime / node-registry / evidence spec **must** use capability detection, version adapters, schema migration, or compatibility layers. Specific-version behaviour **must not** be treated as a global invariant.
+
+#### §3.8.4 "Version-compatible" engineering definition
+
+"Version-compatible" means:
+
+  - operator chooses the target `Hermes` / `OpenCode` version;
+  - the small cluster **must be able** to qualify execution compatibility for the target version;
+  - a target version becomes `QUALIFIED_COMPATIBLE` **only after** qualification passes;
+  - unverified, failed-qualification, unknown-future, or adapter-missing versions **must** be marked `UNQUALIFIED` / `INCOMPATIBLE` / `UNKNOWN` and **must not** be assumed compatible.
+
+#### §3.8.5 Qualification coverage (at minimum)
+
+  - binary discoverability and version identification;
+  - CLI / API capability detection;
+  - configuration read, generation, and schema migration;
+  - provider namespace, model ID, alias, endpoint, and credential reference;
+  - Central Model Pool synchronisation and node-local rendered configuration;
+  - wrapper / executor invocation;
+  - bounded model-call canary;
+  - 9-role assignment and execution chain;
+  - gates, receipts, traces, verdicts, and closeout artifacts;
+  - Draft PR, Ready, merge checkpoint tooling behaviour;
+  - secret non-leakage;
+  - rollback feasibility;
+  - drift checks.
+
+#### §3.8.6 Audit-grade version inventory
+
+An auditable version inventory and compatibility matrix **must** be maintained, recording at minimum:
+
+`node/profile | component | installed version | detected capabilities | adapter version | qualification status | verified_at | evidence reference`
+
+A bare version number without compatibility status and verification evidence is **not** acceptable.
+
+#### §3.8.7 Mixed versions
+
+Mixed versions across nodes are **not** forbidden in principle, but each component-version combination **must** be independently qualified, and the qualification **must** demonstrate that the compatibility layer yields consistent governance semantics, assignment behaviour, and evidence. Unverified mixed versions **must not** enter production tasks.
+
+#### §3.8.8 Version-change decisions
+
+Version changes are operator decisions:
+
+  - orchestrator may audit and propose upgrades or downgrades;
+  - orchestrator **must not** auto-upgrade, auto-downgrade, auto-lock, or auto-select a substitute version;
+  - package manager auto-update, self-update, or any other auto mechanism **must not** bypass operator.
+
+#### §3.8.9 High-risk classification
+
+Real upgrade, downgrade, installation, configuration migration, service restart, and production switch are **high-risk actions** under §9.3:
+
+  - first confirmation authorises **only** preparation: version inventory, impact analysis, backup, migration plan, qualification plan, rollback plan;
+  - before execution, re-present to operator: target version, target node / profile, exact action, current state, rollback point;
+  - execution proceeds only after the second explicit operator confirmation.
+
+#### §3.8.10 Phased qualification
+
+Version changes use phased qualification:
+
+  - record the current version and configuration snapshot;
+  - perform the change in the operator-specified scope;
+  - run compatibility qualification;
+  - after qualification passes, wait for operator decision on scope expansion;
+  - **must not** auto-upgrade other nodes merely because a single-node canary passed.
+
+#### §3.8.11 Qualification failure = STOP
+
+If installation fails, capability is missing, configuration is incompatible, model call fails, receipt / gate behaviour changes, or any other qualification step fails, runtime **must** immediately STOP, preserve evidence, and report: affected node / profile, original version, target version, failed item, current state. Auto-rollback, auto-replacement with another version, or auto-expansion of deployment is **forbidden**. Rollback is allowed only through a pre-approved atomic rollback mechanism or a new explicit operator decision.
+
+#### §3.8.12 Immutability of governance semantics
+
+Version compatibility layers **must not** alter the following governance semantics:
+
+  - operator as sole and final decision maker;
+  - orchestrator recommends only;
+  - runtime executes exactly the operator-approved assignment;
+  - no assignment-level fallback;
+  - complete 9-role;
+  - Draft PR → operator-authorised Ready → independently authorised merge;
+  - Failure STOP;
+  - Central Model Pool unified management;
+  - secret non-leakage into Git, PR, log, receipt, or chat.
 
 ---
 
@@ -370,11 +518,15 @@ Each node's OpenCode **may only** call models registered in the central pool, sy
 - node-local private model addition;
 - unregistered alias reverse-override of the central pool.
 
-### §6.5 Secret Handling
+### §6.5 Secret Handling and Credential Discovery Boundary
 
-- Secrets may live in an operator-controlled local-only / gitignored overlay.
-- Secrets **must not** appear in Git, commits, PRs, reports, receipts, logs, or chat.
-- Syncing secrets to workers requires controlled channel, minimum privilege, restrictive file permissions.
+  - Secrets may live in an operator-controlled local-only / gitignored overlay.
+  - Secrets **must not** appear in Git, commits, PRs, reports, receipts, logs, or chat.
+  - Syncing secrets to workers requires controlled channel, minimum privilege, restrictive file permissions.
+  - **Credential discovery** (any code, prompt, or report that lists environment variables) **must not** serialise or print a value-bearing environment map. Only the variable **name** and a categorical **presence** state (`PRESENT_NONEMPTY` / `PRESENT_EMPTY` / `ABSENT`) are permitted outputs.
+  - **Any** secret-derived fragment (value, prefix, length, hash, or encoding) entering chat, log, or report triggers immediate STOP and an **exposure assessment**. The exposure assessment is **read-only**: it does not rotate, replace, or invalidate the credential automatically.
+  - Public-format prefix markers (e.g. token family identifiers that are widely documented for a service) **must not** be treated as the credential value itself; they are still token-derived fragments and the same boundary applies.
+  - Until operator explicitly authorises rotation, affected variables are flagged `POTENTIALLY_EXPOSED` and recorded in the controlled exposure inventory.
 
 ### §6.6 Single Write Direction
 
@@ -414,7 +566,11 @@ Any of the following immediately triggers STOP:
 - model call failure;
 - provider / credential / endpoint / alias / wrapper anomaly.
 
-### §7.2 Immediate Actions
+### §7.2 Precedence over §3.4
+
+For an `ACTIVE` node with an operator-approved, registered, qualified same-node route chain (§3.5), a transport-path failure matching §3.5.5 **first** enters the §3.5 failover flow and **does not** immediately trigger the §7.1 STOP above. The §7.1 STOP fires when §3.5 has been exhausted, when the failure falls under §3.5.6 / §3.5.8 / §3.5.9 / §3.5.11, or when the node has no approved same-node route chain. Local-exec and control-plane failures go directly to §3.6.4 / §3.6.7.
+
+### §7.3 Immediate Actions
 
 - Immediately stop all new role / step / SSH / model call / Git write / file write.
 - Preserve current durable evidence, receipts, traces, logs, state snapshot.
@@ -423,7 +579,7 @@ Any of the following immediately triggers STOP:
 - Other rollback / recovery / compensation actions require a new explicit operator decision.
 - Secrets **must not** appear in reports or logs.
 
-### §7.3 Report Content (at minimum)
+### §7.4 Report Content (at minimum)
 
 - failing role;
 - designated node;
@@ -435,7 +591,7 @@ Any of the following immediately triggers STOP:
 - current Git / task / receipt state (HEAD SHA, current PR if any, list of produced receipts);
 - items requiring operator decision — statement of fact + options + their respective risks; orchestrator **does not** choose.
 
-### §7.4 Strictly Forbidden
+### §7.5 Strictly Forbidden
 
 - automatic fallback;
 - automatic node / model swap;
@@ -447,7 +603,7 @@ Any of the following immediately triggers STOP:
 - orchestrator unilaterally retrying or choosing an alternative path;
 - resuming route failover (§3.5) after this STOP has fired.
 
-### §7.5 Retry and Confirmation
+### §7.6 Retry and Confirmation
 
 - Failure follow-on actions — continue / retry / recover / roll back — **must** await a new explicit operator decision.
 - **No automatic retry**; bounded-authorisation packages **must not** pre-include automatic retry.
@@ -455,7 +611,7 @@ Any of the following immediately triggers STOP:
   - Retry / repair actions that themselves fall within §9.3, or that operator explicitly marks as high-risk in the new decision, must follow §9.3.
   - Ordinary, read-only, or scope-bounded retries may be authorised directly in operator's new explicit decision.
 
-### §7.6 Continuation Conditions
+### §7.7 Continuation Conditions
 
 Continuation is permitted only after operator's new explicit decision. Operator may decide any of:
 
@@ -468,7 +624,7 @@ Continuation is permitted only after operator's new explicit decision. Operator 
 
 Orchestrator submits fact, risk, and options only — **does not** choose. Runtime strictly executes operator's latest decision. Any continuation generates a new authorisation record with linkage to the original failure evidence.
 
-### §7.7 Relation to Other Clauses
+### §7.8 Relation to Other Clauses
 
 - §7 does not replace §3.4 (top-level STOP trigger).
 - §7 does not replace §10.1 (five-step drift handling).
@@ -519,10 +675,13 @@ This contract **does not** fix receipt counts. Each applicable gate produces an 
 
 ### §8.8 PRE_V2_HISTORICAL_EVIDENCE
 
-Historical evidence (including T3 / R3 / RW-1 reports, PR #341–#343 canary evidence, `readiness-receipt-20260705-150000`, untracked `docs/baseline02/gray/*`, the corresponding PR bodies, and the corresponding receipts) **remains untouched**:
+Historical evidence (including T3 / R3 / RW-1 reports, PR #341–#343 canary evidence, `readiness-receipt-20260705-150000`, untracked `docs/baseline02/gray/*`, the corresponding PR bodies, and the corresponding receipts) **remains untouched** and carries the banner:
 
-- `PRE_V2_HISTORICAL_EVIDENCE — not V2-compliant E2E evidence`;
-- usable to demonstrate **local components** or **historical run capability**;
+> `PRE_V2_HISTORICAL_EVIDENCE — not V2-compliant E2E evidence`
+
+Such evidence:
+
+- is usable to demonstrate **local components** or **historical run capability**;
 - **does not** satisfy V2's full 9-role, canonical pipeline, dual-tester, dual-reviewer, and no-fallback requirements;
 - **must not** be reinterpreted as V2-compliant E2E PASS;
 - any current verdict referencing them must carry the banner above.
@@ -566,7 +725,8 @@ The high-risk action list (non-exhaustive):
 - permission modification;
 - service / gateway restart;
 - destructive commands;
-- out-of-scope production changes.
+- out-of-scope production changes;
+- `Hermes` / `OpenCode` install, update, downgrade, configuration migration, restart, or version switch (per §3.8).
 
 Retry / repair actions trigger §9.3 **only** when they themselves fall within the list above, or when operator explicitly marks them as high-risk in the new decision. Ordinary, read-only, or scope-bounded retries — after a failure STOP — still **must** await a new explicit operator decision; they do not become high-risk merely by virtue of being labelled "retry".
 
@@ -574,7 +734,7 @@ Retry / repair actions trigger §9.3 **only** when they themselves fall within t
 
 Operator may grant a one-shot bounded authorisation package containing: task ID, approved assignment, node + model and call limits, SSH command classes, read / write paths, Git scope, forbidden actions, valid boundaries, acceptance criteria. Routine calls **within** the package need no further confirmation; **out-of-scope**, **node / model swap**, or **§9.3-trigger** actions → STOP and re-request authorisation.
 
-**§9.4 cannot override** §9.1 A, §9.2 B, §9.3 C, §1 GP-1 / GP-2 / GP-3. **§9.4 cannot pre-include automatic retry** (§7.5).
+**§9.4 cannot override** §9.1 A, §9.2 B, §9.3 C, §1 GP-1 / GP-2 / GP-3. **§9.4 cannot pre-include automatic retry** (§7.6).
 
 ---
 
@@ -597,32 +757,36 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (m) orchestrator unilaterally choosing an alternative path;
   - (n) presence of an `alternative` field in the recommendation matrix;
   - (o) historical evidence reinterpreted as V2-compliant E2E PASS;
-  - (p) `PRE_V2_HISTORICAL_EVIDENCE` cited without the `V2-不满足` banner;
+  - (p) `PRE_V2_HISTORICAL_EVIDENCE` cited without the banner `PRE_V2_HISTORICAL_EVIDENCE — not V2-compliant E2E evidence` per §8.8;
   - (q) runtime modifying operator-approved assignment or bypassing §1 GP-2;
   - (r) runtime auto-swapping the orchestrator model (§4.1);
   - (s) continuing on orchestrator-model unavailability without STOP;
-  - (t) bounded authorisation packages pre-including automatic retry (§7.5, §9.4);
+  - (t) bounded authorisation packages pre-including automatic retry (§7.6, §9.4);
   - (u) test or fixture evidence cited as V2 E2E PASS (§8.3, §4.2);
   - (v) merely running a generic command counted as a role execution (§4.2, §4.4);
   - (w) `CLUSTER_CONSTRUCTION_OPERATION` used to bypass post-acceptance 9-role / gates / evidence / checkpoints (§8.9);
-  - (x) binding the cluster to a single fixed Hermes / OpenCode version without qualification;
-  - (y) claiming compatibility without verification / reusing stale qualification evidence / auto-expanding scope after single-node canary;
-  - (z) automatic upgrade / downgrade / version lock / substitute selection, or any update mechanism bypassing operator;
-  - (aa) continuing assignments after a node-version change without re-qualification, or different node versions producing governance-semantic divergence while claiming E2E PASS;
-  - (bb) using version switching to evade Failure STOP or operator checkpoints;
-  - (cc) hardcoding a single version / CLI / path / schema in core governance or runtime without adaptation;
-  - **(dd)** using a non-registered or unqualified route in §3.5 transport-route failover;
-  - **(ee)** mis-classifying an auth / identity / application error as transport-path failure (§3.5.6) and switching routes anyway;
-  - **(ff)** §3.5 route switch that changes node / model / role / assignment / credential / scope (§3.5.11);
-  - **(gg)** §3.5 switch into another node's route;
-  - **(hh)** restoring a `SUSPENDED` / `OFFLINE` / `NOT_ASSIGNABLE` / unqualified node to `ACTIVE` via route failover or any other automatic channel;
-  - **(ii)** continuing to try routes after the chain is exhausted (§3.5.9);
-  - **(jj)** modifying the route chain without operator approval (§3.5.10);
-  - **(kk)** interpreting §3.5 transport-route failover as a license for assignment-level fallback;
-  - **(ll)** `5bao` / `9bao` taking over `21bao` control plane;
-  - **(mm)** automatic orchestrator migration;
-  - **(nn)** continuing VibeCoding tasks while `21bao` is unavailable;
-  - **(oo)** mis-interpreting `21bao`'s network route failover as control-plane failover.
+  - (x) binding the cluster to a single fixed `Hermes` / `OpenCode` version without qualification (§3.8);
+  - (y) claiming compatibility without verification / reusing stale qualification evidence / auto-expanding scope after single-node canary (§3.8);
+  - (z) automatic `Hermes` / `OpenCode` upgrade / downgrade / version lock / substitute selection, or any update mechanism bypassing operator (§3.8.8);
+  - (aa) continuing assignments after a node-version change without re-qualification, or different node versions producing governance-semantic divergence while claiming E2E PASS (§3.8.7);
+  - (bb) using `Hermes` / `OpenCode` version switching to evade Failure STOP or operator checkpoints (§3.8.12);
+  - (cc) hardcoding a single version / CLI / path / schema in core governance or runtime without adaptation (§3.8.3);
+  - (dd) using a non-registered or unqualified route in §3.5 transport-route failover;
+  - (ee) mis-classifying an auth / identity / application error as transport-path failure (§3.5.6) and switching routes anyway;
+  - (ff) §3.5 route switch that changes node / model / role / assignment / credential / scope (§3.5.11);
+  - (gg) §3.5 switch into another node's route;
+  - (hh) restoring a `SUSPENDED` / `OFFLINE` / `NOT_ASSIGNABLE` / unqualified node to `ACTIVE` via route failover or any other automatic channel;
+  - (ii) continuing to try routes after the chain is exhausted (§3.5.9);
+  - (jj) modifying the route chain without operator approval (§3.5.10);
+  - (kk) interpreting §3.5 transport-route failover as a license for assignment-level fallback;
+  - (ll) `5bao` / `9bao` taking over `21bao` control plane;
+  - (mm) automatic orchestrator migration;
+  - (nn) continuing VibeCoding tasks while `21bao` is unavailable;
+  - (oo) mis-interpreting `21bao`'s network route failover as control-plane failover;
+  - (pp) re-opening `21bao` VibeCoding dispatch before every item in §3.6.7 passes (§3.6.7);
+  - (qq) credential discovery that prints a value-bearing environment map, or outputs secret-derived fragments into chat / log / report (§6.5);
+  - (rr) treating a public-format token prefix marker as the credential value (§6.5);
+  - (ss) auto-rotating, auto-replacing, or auto-invalidating a credential without explicit operator authorisation (§6.5).
 
 ### §10.2 Drift Handling
 
@@ -665,61 +829,83 @@ AUTH-N numbering, receipt schema, executor / wrapper naming and boundaries, SSH-
 
 ### §11.1 Scope
 
-- **In scope**: every complete transfer prompt that ChatGPT / assistant + orchestrator consultant generates and hands to operator for verbatim forwarding to `vibedev`, `小马蹄 Hermes`, or any other operator-designated agent.
-- **Out of scope**: ordinary operator ↔ consultant discussion, operator's own ad-hoc messages, agent reports, `vibedev`'s internal 9-role runtime prompts, and agent-to-agent communication. Those prompt categories, if to be governed, belong to a separate runtime prompt spec.
+This clause governs every complete **transfer prompt** that ChatGPT / assistant + orchestrator consultant generates and hands to operator for verbatim forwarding to `vibedev`, `小马蹄 Hermes`, or any other operator-designated agent.
+
+Out of scope (handled by a separate runtime prompt spec, not by this clause):
+
+- operator ↔ ChatGPT ordinary discussion;
+- operator's own ad-hoc messages;
+- agent reports;
+- `vibedev`'s internal 9-role runtime prompts;
+- agent-to-agent communication.
 
 ### §11.2 Goal
 
-A transfer prompt must clearly convey: facts, objective, identity boundaries, allowed / forbidden actions, authorisation, method, stopping conditions, evidence requirements, acceptance criteria, output format.
+Each transfer prompt must clearly convey: facts, objective, identity boundaries, allowed / forbidden actions, authorisation, method, stopping conditions, evidence requirements, acceptance criteria, and output format.
 
-### §11.3 Priority (fixed)
+### §11.3 One-Copy Format and Writing-Block Prohibition
 
-> **clarity and completeness > fewer segments > ~3000-character general guidance**
+  1. Each complete transfer prompt that operator forwards **must** be placed in a **plain Markdown fenced code block** with the language tag fixed to `text`. Example: ` ```text `.
+  2. **Forbidden** writing-block formats include: rich writing blocks, special writing cards, editable blocks, accordion blocks, tabbed blocks, callout blocks, and any other non-ordinary code-block component that mobile clients cannot one-tap copy.
+  3. The code fence contains **only** the forwardable prompt body. Consultant's analysis, evaluation, risk notes, and suggestions stay **outside** the fence.
+  4. A single code fence carries exactly one logically complete prompt, unless explicitly part of a single multi-segment prompt.
+  5. Each transfer prompt is **self-contained**, **mobile-friendly**, and **one-tap copyable**. Related items are batched; micro-prompts and micro-PRs are forbidden.
 
-3000 characters is **not** a hard ceiling. When a single segment is clear, prefer it. **Must not** compress content, fragment tasks, or smuggle hidden authorisations for the sake of length.
+### §11.4 Length and Segmentation
 
-### §11.4 Batching and Operator Throughput
+  1. A single transfer prompt is a **soft target** of approximately 3000 Chinese characters. This is **not** a hard ceiling; it is also **not** a license to ignore the limit and emit an unboundedly long prompt.
+  2. **Clarity and completeness always come first.** A single segment is preferred when it can carry the full prompt clearly. Length is reduced only by improving clarity, not by sacrificing it.
+  3. If segmentation is required, each segment goes into its **own** `text` code fence and is labelled `第 X/N 段`.
+  4. Every non-final segment **must** explicitly require the receiver to reply `ACK` only and **not** start execution.
+  5. The **final** segment **must** end **exactly** with:
 
-Same-cycle related small items go in the same transfer prompt to reduce operator forwarding overhead. Forbidden: one item per prompt, re-forwarding on every field edit, fragmenting the objective into micro-stages / micro-PRs. Batching **must not** hide high-risk authorisations.
+   ```
+   全部发送完毕，收到后立即开始执行。
+   ```
 
-### §11.5 Segmentation
+   No "or equivalent" is permitted. The clause is closed at that line.
+  6. After the final segment, all preceding segments must have arrived; agents **must not** begin work before every segment is present.
 
-Only segment when a single segment cannot be clear and safe. Keep segment count minimal. Each segment carries `第 X/N 段`. Non-final segments only ACK without starting work. Final segment carries `全部发送完毕，收到后立即开始执行。` (or equivalent). Agents **must not** begin work before all segments arrive.
+### §11.5 Version Management
 
-### §11.6 Self-Contained
+  1. **Full replacement** of a previous prompt: the code fence must explicitly contain the line
 
-A transfer prompt must not require operator to assemble or supplement it. It must include version, PR, HEAD, file, prior-conclusion identifiers. Known facts must not be re-asked. "Do what we discussed earlier" is **not** an acceptable primary instruction.
+   ```
+   上一版提示词作废，以本版为准。
+   ```
 
-### §11.7 One-Copy Format
+  2. **Incremental revision**: the code fence **must** explicitly contain the marker
 
-- Independent plain Markdown code fence;
-- the fence contains only the forwardable prompt body;
-- consultant's analysis, evaluation, risk notes, and suggestions stay **outside** the fence;
-- one fence carries exactly one logically complete prompt, unless explicitly part of a single multi-segment prompt.
+   ```
+   增量补充
+   ```
 
-### §11.8 Version Management
+   and **must** list:
 
-- Full replacement: fence body contains `上一版提示词作废，以本版为准。`.
-- Incremental revision: list covered scope, retained old clauses, conflict-resolution authority; **must not** ask the receiver to infer how to merge.
+   - the scope of the new clause(s);
+   - the previous clause(s) that **remain in force**;
+   - the resolution authority when new and old clauses conflict.
 
-### §11.9 Blind-Review Additional Rules (for `小马蹄 Hermes`)
+  3. The receiver **must not** be asked to infer how to merge two conflicting prompts.
 
-- whether the review is independent and blind;
-- forbidden reads — which `vibedev` reports, sessions, memory, scratchpads, intermediate conclusions;
-- allowed reads — which repos, PRs, configs, and `PRE_V2_HISTORICAL_EVIDENCE` may be referenced;
-- blind-review isolation boundaries;
-- evidence citation format;
-- prohibition on contamination by other agents' conclusions.
+### §11.6 Blind-Review Additional Rules (for `小马蹄 Hermes`)
 
-### §11.10 `vibedev` Job Prompt Additional Rules
+  - whether the review is independent and blind;
+  - forbidden reads — which `vibedev` reports, sessions, memory, scratchpads, intermediate conclusions;
+  - allowed reads — which repos, PRs, configs, and `PRE_V2_HISTORICAL_EVIDENCE` may be referenced;
+  - blind-review isolation boundaries;
+  - evidence citation format;
+  - prohibition on contamination by other agents' conclusions.
+
+### §11.7 `vibedev` Job Prompt Additional Rules
 
 Phase name; current baseline / HEAD; allowed / forbidden actions; whether SSH / real model calls / Git writes / Draft PR / Ready / merge / config writes / `--apply` are permitted; operator checkpoint; stopping conditions; acceptance criteria; report-only vs allowing in-repo artefacts; whether to mark `CLUSTER_CONSTRUCTION_OPERATION` or full-9-role runtime.
 
-### §11.11 Long-Context De-Drift
+### §11.8 Long-Context De-Drift
 
 All complete transfer prompts generated by ChatGPT / assistant + orchestrator consultant and handed to operator for verbatim forwarding to `vibedev`, `小马蹄 Hermes`, or any other operator-designated agent must, as task requires, re-anchor: operator as final decision maker; `21bao` / `5bao` / `9bao` as nodes; `vibedev` / `小马蹄 Hermes` as profiles; full 9-role requirement for the current task; current authorisation boundaries; current in-force or pending contract version; historical / current evidence boundary.
 
-### §11.12 Forbidden Expansion
+### §11.9 Forbidden Expansion
 
 A transfer prompt **must not** state: "every agent's every prompt must follow this clause"; "every operator ↔ consultant exchange must use a code fence"; "`vibedev`'s every internal runtime prompt automatically applies this clause"; "an agent's output is long ⇒ violation"; "3000 characters is a hard upper bound".
 
@@ -744,24 +930,25 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 
 | Area | V1 (PR #276) | V2 (this document) |
 |---|---|---|
-| 3000-character rule | "each segment < 3000 characters" (hard) | soft guidance: clarity and completeness first |
-| 9-role roster | five mixed roles | fully enumerated 9-role |
-| Role trimming | not explicitly forbidden | explicit no-trim / no-skip / no "named-but-not-executed" |
-| Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model |
-| 8-role assignment pre-brief | absent | required; 4-column matrix; no `alternative` |
-| Assignment strictness | absent | strict per operator spec; failure follows §7 |
-| Failure STOP | implicit | explicit triggers, preserved evidence, enumerated prohibitions, retry rules |
-| Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary |
-| Canonical pipeline | F1–F10 not detailed | F1–F10 real evaluation; non-canonical path requires operator authorisation and `execution_path: non_canonical`; non-canonical must not auto-fallback |
-| Evidence levels | absent | 7 levels; anti-extrapolation rules; double-hash rule for untracked |
-| `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation |
-| Prompt Delivery Contract | informal §7 guidance | full contract, scope boundary, 12 sub-rules, anti-expansion |
-| Drift signals | 7 | expanded to (a)–(oo) |
-| High-risk checkpoints | §4 vague | §9 explicit 4 categories (A/B/C/D), 12+ high-risk items |
+| 3000-character rule | "each segment < 3000 characters" (hard) | soft guidance: clarity and completeness first (§11.4) |
+| 9-role roster | five mixed roles | fully enumerated 9-role (§4.1) |
+| Role trimming | not explicitly forbidden | explicit no-trim / no-skip / no "named-but-not-executed" (§4.2) |
+| Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model (§4.5) |
+| 8-role assignment pre-brief | absent | required; 4-column matrix; no `alternative` (§5.5) |
+| Assignment strictness | absent | strict per operator spec; failure follows §7 (§5.8, §5.9) |
+| Failure STOP | implicit | explicit triggers, preserved evidence, enumerated prohibitions, retry rules; §3.5 transport-path failures go through §3.5 first (§7.2) |
+| Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary (§6.5–§6.8) |
+| Canonical pipeline | F1–F10 not detailed | F1–F10 real evaluation; non-canonical path requires operator authorisation and `execution_path: non_canonical`; non-canonical must not auto-fallback (§8.1, §8.2) |
+| Evidence levels | absent | 7 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
+| `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
+| Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, soft 3000-character target, exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
+| Drift signals | 7 | expanded to (a)–(ss) |
+| High-risk checkpoints | §4 vague | §9 explicit 4 categories (A/B/C/D), 12+ high-risk items, including `Hermes` / `OpenCode` install / update / downgrade / migration / restart / switch (§9.3) |
 | Top-line governance | role authority scattered | §1 GP-1 / GP-2 / GP-3 single page; recommend → assign → execute locked |
 | Effect mechanism | §10 "signing" (later corrected to Working Agreement) | effective only on operator explicit chat acceptance; on acceptance update existing file with `Version: 2.0` + `Supersedes: V1 / PR #276` + `Historical source retained in Git history` |
-| Hermes / OpenCode version handling | absent | §3.5 same-node transport-route failover with operator-approved chain, standing authorization, per-switch no-permission-needed; wrong / unqualified / non-SAME-NODE routes forbidden; chain change needs operator approval |
-| `21bao` as control plane | not labelled | §3.6 `ALWAYS_ON_CONTROL_PLANE` is design + SLA target; on unavailability enter `CONTROL_PLANE_UNAVAILABLE / VIBECODING_UNAVAILABLE`; no worker take-over, no orchestrator self-election, no auto-migration, no transport-route-failover → control-plane interpretation |
+| Transport-route failover | absent | §3.5 same-node transport-route failover with operator-approved chain, standing authorization, per-switch no-permission-needed; wrong / unqualified / non-SAME-NODE routes forbidden; chain change needs operator approval; §3.5 STOP triggers (§3.5.6 / §3.5.8 / §3.5.9 / §3.5.11) take precedence over §7 |
+| `21bao` as control plane | not labelled | §3.6 `ALWAYS_ON_CONTROL_PLANE` is design + SLA target; on unavailability enter `CONTROL_PLANE_UNAVAILABLE / VIBECODING_UNAVAILABLE`; no worker take-over, no orchestrator self-election, no auto-migration, no transport-route-failover → control-plane interpretation; §3.6.7 recovery gate |
+| `Hermes` / `OpenCode` version handling | absent | §3.8 decoupling, qualification, mixed-version rules, operator-driven changes only, no auto-upgrade, qualification failure = STOP |
 | Historical PR / report handling | unspecified | `PRE_V2_HISTORICAL_EVIDENCE` rules; historical files untouched |
 
 ---
