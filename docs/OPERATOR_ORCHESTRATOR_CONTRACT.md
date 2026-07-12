@@ -52,7 +52,10 @@ This V2 document enters into force **only after** operator (KK) explicitly accep
 
 Neither chain may interpret recommendation as approval.
 
-**GP-3 (recommend ≠ approve)** — Orchestrator's recommendations — including the available-model list, the 4-column recommendation matrix, post-failure proposals, efficiency improvements — **are only** suggestions. **Only** operator's explicit chat statement constitutes approval.
+**GP-3 (recommend ≠ approve)** — Recommendations are **only** suggestions. **Only** operator's explicit chat statement constitutes approval.
+
+  - **Construction phase**: ChatGPT (construction-phase consultant) recommendations — including construction plans, transfer-prompt content, agent-output review findings — are advisory. Operator decides and authorises.
+  - **Operational phase**: `vibedev` (VibeCoding operational orchestrator) recommendations — including the available-model list, the 4-column recommendation matrix, post-failure proposals, efficiency improvements — are advisory. Operator assigns and decides.
 
 GP-1 / GP-2 / GP-3 interlock with §3, §4.1, §5.7, §7, §9, §10.1. **§9.4 bounded-authorisation packages cannot override these three principles.**
 
@@ -475,7 +478,7 @@ Any of the following **requires** `vibedev` to recommend the complete 9-role pip
 
 Operator is the **sole** classifier. Operator decides whether to enter `VIBECODING_MODE` (and which sub-mode), or to enter a dedicated governance gate (`HERMES_OPENCODE_VERSION_GOVERNANCE_GATE` §3.8 or `CENTRAL_MODEL_POOL_GOVERNANCE_GATE` §6.9). The two dedicated gates are **outside** `VIBECODING_MODE`; they are **not** sub-modes of it and do **not** form "five parallel entries" with the three sub-modes.
 
-A dedicated governance gate **must not** be re-classified as `VIBECODING_CONSULTATION_ONLY`, `LIGHTWEIGHT_OPERATION`, or `FULL_9_ROLE_VIBECODING`. If operator explicitly approves an exception, `vibedev` records the scope and reason. If risk escalates or a FULL condition is triggered during LIGHTWEIGHT, `vibedev` **must** immediately STOP and re-request classification.
+A dedicated governance gate **must not** be re-classified as `VIBECODING_CONSULTATION_ONLY`, `LIGHTWEIGHT_OPERATION`, or `FULL_9_ROLE_VIBECODING`. A dedicated gate **must not** be re-classified into a `VIBECODING_MODE` sub-mode within a single operation. If the same requirement simultaneously involves business tasks and version / CMP governance, the scope **must** be split with separate authorisation records, or the governance structure changed through a V2 amendment. Operator's ordinary single-operation approval does **not** change this structural hierarchy. If risk escalates or a FULL condition is triggered during LIGHTWEIGHT, `vibedev` **must** immediately STOP and re-request classification.
 
 Ordinary discussion, `VIBECODING_CONSULTATION_ONLY`, or a dedicated governance gate **must not** be used to bypass the applicable LIGHTWEIGHT / FULL sub-mode, operator assignment, or high-risk checkpoint.
 
@@ -864,15 +867,29 @@ Orchestrator submits fact, risk, and options only — **does not** choose. Runti
 
 ---
 
-## §8. Canonical Pipeline and Evidence
+## §8. Operational Workflow Governance Envelope and Evidence
 
-### §8.1 Real F1–F10 Evaluation
+### §8.1 Confirmed Entry Skeleton
 
-`intake → classify → plan/recommend → operator approval → role-node-model assignment → readiness → public-PR permission → execute → evidence/report → closeout`. Listing the 9-role in an assignment **does not** equal real execution completion. Non-applicable gates **must** emit a `NOT_APPLICABLE` verdict / artifact; they **must not** be skipped. Dedicated governance gates (§3.8, §6.9) **must not** be forced into role-node-model assignment; their non-applicable pipeline steps carry `NOT_APPLICABLE`.
+The following entry skeleton is confirmed:
+
+> operator ↔ `vibedev` ordinary discussion → operator explicitly enters `VIBECODING_MODE` → `vibedev` recommends internal sub-mode → operator selects and approves.
+
+The following items are **not yet finalised** by operator and remain for future V2 amendment or operator-approved operational workflow spec:
+
+- intake / Work Order format;
+- plan checkpoint sequence;
+- readiness order and scope;
+- role execution order;
+- test / review sequence;
+- Git / PR workflow order;
+- closeout procedure;
+- state machine for `VIBECODING_MODE`.
+
+Until the operational workflow is formally accepted and `OPERATIONAL_PHASE` cutover declared, no action may claim V2-compliant formal VibeCoding E2E or canonical pipeline `PASS`.
 
 ### §8.2 Non-Canonical Paths
 
-- Formal VibeCoding E2E **must** traverse the canonical pipeline.
 - Operator **may** explicitly authorise wrapper, manual SCP / SSH, ad-hoc model calls for diagnosis, recovery, evidence collection, or local verification. Such executions must record operator authorisation and carry `execution_path: non_canonical`.
 - Their results may carry only the labels `diagnostic`, `local_verification`, or `historical_evidence`; **must not** claim canonical E2E PASS.
 - Unauthorised use is **forbidden**.
@@ -926,8 +943,8 @@ While the full canonical 9-role runtime has not been accepted and declared in fo
 
 - such actions **must not** be claimed as V2-compliant VibeCoding tasks, complete 9-role executions, or canonical E2E PASS;
 - such actions **remain subject to** operator decision authority, explicit authorisation, **no-assignment-level-fallback**, Failure STOP (§7), evidence levels (§8.5), historical / current distinction (§8.6, §8.8), and high-risk double-confirmation (§9.3);
-- **once** operator formally accepts and declares the canonical 9-role runtime in force, every VibeCoding task classified as `FULL_9_ROLE_VIBECODING` must run the full 9-role (§4.3); `LIGHTWEIGHT_OPERATION` and `VIBECODING_CONSULTATION_ONLY` follow their respective mode rules;
-- this transitional label **must not** be used to bypass the post-acceptance 9-role, gates, evidence, or operator checkpoints.
+- **after** operator explicitly accepts the canonical runtime/workflow and declares `OPERATIONAL_PHASE` cutover, every VibeCoding task classified as `FULL_9_ROLE_VIBECODING` must run the full 9-role (§4.3); `LIGHTWEIGHT_OPERATION` and `VIBECODING_CONSULTATION_ONLY` follow their respective mode rules;
+- this transitional label **must not** be used to bypass the 9-role, gates, evidence, or operator checkpoints that apply after operator accepts the canonical runtime/workflow and declares `OPERATIONAL_PHASE` cutover.
 
 ---
 
@@ -992,7 +1009,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (c) substituting simulation for real execution;
   - (d) historical evidence treated as current;
   - (e) agent self-claim treated as operator acceptance;
-  - (f) canonical-pipeline bypass (unauthorised wrapper / manual SSH / ad-hoc model call);
+  - (f) workflow bypass (unauthorised wrapper / manual SSH / ad-hoc model call outside the future operator-approved operational workflow spec); during `CLUSTER_CONSTRUCTION_OPERATION`, judgement follows explicit authorisation, Failure STOP (§7), and evidence boundaries (§8);
   - (g) authorisation expansion (extending a one-shot authorisation to later stages);
   - (h) assignment-level automatic fallback / automatic node / model swap;
   - (i) using a default substitute (including auto-picking a default model / node for an unspecified role);
@@ -1009,7 +1026,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (t) bounded authorisation packages pre-including automatic retry (§7.6, §9.4);
   - (u) test or fixture evidence cited as V2 E2E PASS (§8.3, §4.5–§4.8);
   - (v) merely running a generic command counted as a role execution (§4.5–§4.8);
-  - (w) `CLUSTER_CONSTRUCTION_OPERATION` used to bypass post-acceptance 9-role / gates / evidence / checkpoints (§8.9);
+  - (w) `CLUSTER_CONSTRUCTION_OPERATION` used to bypass the 9-role / gates / evidence / checkpoints that apply after operator accepts the canonical runtime/workflow and declares `OPERATIONAL_PHASE` cutover (§8.9);
   - (x) binding the cluster to a single fixed `Hermes` / `OpenCode` version without qualification (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
   - (y) claiming compatibility without verification / reusing stale qualification evidence / auto-expanding scope after single-node canary (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
   - (z) using a dedicated governance gate (§3.8, §6.9) to downgrade a business task, bypass operator, bypass Failure STOP, bypass evidence requirements, bypass public secret boundary, or convert a business task into a governance-only operation (§4.4);
@@ -1091,7 +1108,7 @@ The only path for a transfer prompt governed by this clause is:
 
 ### §11.2 Definition
 
-A **transfer prompt** under this clause is a complete task prompt that ChatGPT / assistant + orchestrator consultant generates for the operator, for the operator to review and then forward verbatim to an executing agent.
+A **transfer prompt** under this clause is a complete task prompt that ChatGPT / assistant + construction-phase orchestrator consultant generates for the operator, for the operator to review and then forward verbatim to an executing agent.
 
   - While ChatGPT generates it, it is only a consultant's recommended text.
   - When the operator chooses to forward it, only the permissions explicitly stated in the prompt are activated. Forwarding does **not** expand authorisation and does **not** replace §9 high-risk confirmation.
@@ -1179,7 +1196,7 @@ Phase name; current baseline / HEAD; allowed / forbidden actions; whether SSH / 
 
 ### §11.9 Long-Context De-Drift
 
-All complete transfer prompts generated by ChatGPT / assistant + orchestrator consultant and handed to operator for verbatim forwarding to `vibedev`, `小马蹄 Hermes`, or any other operator-designated agent must, as task requires, re-anchor: operator as final decision maker; current stage / baseline-HEAD / operator profile / node / execution mode or dedicated governance gate and its applicable role / gate requirements; allowed / forbidden SSH, model, Git, PR, `--apply`; checkpoint / STOP / evidence / acceptance and output. Only when the entry is `FULL_9_ROLE_VIBECODING` does the re-anchor include the complete 9-role pipeline.
+All complete transfer prompts generated by ChatGPT / assistant + construction-phase orchestrator consultant and handed to operator for verbatim forwarding to `vibedev`, `小马蹄 Hermes`, or any other operator-designated agent must, as task requires, re-anchor: operator as final decision maker; current stage / baseline-HEAD / operator profile / node / execution mode or dedicated governance gate and its applicable role / gate requirements; allowed / forbidden SSH, model, Git, PR, `--apply`; checkpoint / STOP / evidence / acceptance and output. Only when the entry is `FULL_9_ROLE_VIBECODING` does the re-anchor include the complete 9-role pipeline.
 
 ### §11.10 Forbidden Expansion
 
@@ -1198,7 +1215,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | `V2 Effective Date` | [awaiting operator acceptance] |
 | `V2 Version` | `2.0` (DRAFT — awaiting acceptance) |
 | Historical reference | `v1.0` (PR #276, commits `9f7e8b1` + follow-up `8509a07`); preserved in Git history |
-| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, canonical pipeline, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
+| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role roster, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, workflow governance envelope, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. **Detailed VIBECODING_MODE workflow (intake, plan checkpoint, readiness, role execution order, test/review, Git/PR, closeout, state machine) is not yet finalised and remains for future V2 amendment or operator-approved operational workflow spec.** Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
 
 ---
 
@@ -1216,7 +1233,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Execution mode gate | absent | VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING; operator final classifier; LIGHTWEIGHT risk escalation = STOP (§4) |
 | Dedicated governance gates | absent | HERMES_OPENCODE_VERSION_GOVERNANCE_GATE (§3.8) + CENTRAL_MODEL_POOL_GOVERNANCE_GATE (§6.9); do **not** enter VibeCoding modes; do **not** trigger 8-role / 9-role; outside VIBECODING_MODE (§4.2) |
 | Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.6–§6.9); dedicated governance gate (§6.9) |
-| Canonical pipeline | F1–F10 not detailed | F1–F10 real evaluation; non-canonical path requires operator authorisation and `execution_path: non_canonical`; non-canonical must not become assignment-level automatic fallback (§8.1, §8.2) |
+| Workflow governance envelope | absent | confirmed entry skeleton (§8.1); detailed workflow (intake, plan checkpoint, readiness, role execution order, test/review, Git/PR, closeout, state machine) **not yet finalised** — pending operator approval |
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
