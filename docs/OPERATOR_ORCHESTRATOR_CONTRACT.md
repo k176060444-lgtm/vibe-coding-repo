@@ -637,6 +637,8 @@ The orchestrator's completion is evidenced by the coordinated run itself; it doe
 
 ### §4.9 Independence of Dual Tester / Dual Reviewer (FULL mode)
 
+The FULL default topology, isolation requirements, and gates are specified in §4.16. The following principles apply to both FULL and LIGHTWEIGHT modes:
+
 `tester-a` / `tester-b` and `reviewer-a` / `reviewer-b` **must** be independent across `assignment` / `context` / `prompt` / `execution batch` / `output` / `evidence`:
 
 - tester-a and tester-b **must** use different role invocation IDs, independent prompts / contexts, independent outputs, and independent evidence;
@@ -730,15 +732,15 @@ Same-node approved route fallback remains exclusively under §3.5; it is not a �
 
 `GLOBAL_READINESS_INVALIDATED` and re-running are recorded in evidence; the result is either `GLOBAL_READINESS_PASS` (continue) or `GLOBAL_READINESS_STOP` (STOP).
 
-#### §4.11 Conflict Escalation (FULL and LIGHTWEIGHT modes)
+### §4.11 Conflict Escalation (FULL and LIGHTWEIGHT modes)
 
 This section applies to:
-- in `FULL_9_ROLE_VIBECODING`: tester-a, tester-b, reviewer-a, reviewer-b;
+- in `FULL_9_ROLE_VIBECODING`: tester-a, tester-b, reviewer-a, reviewer-b (§4.16.3–§4.16.5);
 - in `LIGHTWEIGHT_OPERATION`: any operator-approved verifier, tester, or reviewer role.
 
 When such a role raises a valid change demand, the current candidate **must not** enter PASS, Git integration, or closeout. `vibedev` **must** record the disagreement, affected scope, and evidence.
 
-Which role to return to, which steps to re-run, and whether a new checkpoint is required are determined by the future operator-approved operational workflow spec or the current task-specific workflow plan. If the existing approved plan does not define a recovery path, or the disagreement cannot be resolved, runtime **must** STOP and await operator decision. `vibedev` **must not** unilaterally compromise, ignore a change demand, or invent an unapproved loop.
+For FULL tester / reviewer conflicts, follow the `TEST_CONTRADICTION_PACKET` / `REVIEW_CONTRADICTION_PACKET` procedure in §4.16.4 / §4.16.5 respectively. For other roles, which role to return to, which steps to re-run, and whether a new checkpoint is required are determined by the future operator-approved operational workflow spec or the current task-specific workflow plan. If the existing approved plan does not define a recovery path, or the disagreement cannot be resolved, runtime **must** STOP and await operator decision. `vibedev` **must not** unilaterally compromise, ignore a change demand, or invent an unapproved loop.
 
 ### §4.12 Work Order Pre-Approved Bounded Corrective Loop
 
@@ -918,6 +920,119 @@ After Plan approval, the cluster auto-continues under existing authorisations to
 
 
 ---
+
+### §4.16 FULL Default Mid-to-Late-Stage Topology: Candidate Freeze, Dual Tester, Test Gate, Dual Reviewer, Review Gate, Git-Integrator
+
+This section establishes the **FULL** default governance baseline for the post-implementer pipeline. It does **not** fix task-specific command details, workspace implementation, packet/schema fields, Git command-level order, closeout schema, or the complete `VIBECODING_MODE` state machine.
+
+#### §4.16.1 Pipeline Topology (FULL Default)
+
+```
+OPERATOR_APPROVED_IMPLEMENTATION_PLAN
+  → implementer ROLE_ACTIVATION_READINESS / execution
+  → IMPLEMENTATION_CANDIDATE (§4.16.2)
+  → CANDIDATE_FROZEN_FOR_TEST (§4.16.2)
+  → tester-a || tester-b (§4.16.3)
+  → TEST_EVIDENCE_PACKET (§4.16.4)
+  → TEST_GATE_PASS (§4.16.4)
+  → REVIEW_INPUT_PACKET (§4.16.5)
+  → reviewer-a || reviewer-b (§4.16.5)
+  → REVIEW_GATE_PASS (§4.16.5)
+  → git-integrator ROLE_ACTIVATION_READINESS / formal Git write (§4.16.7)
+```
+
+`||` denotes parallel execution with strict isolation (§4.16.3, §4.16.5). This dependency chain and its gates are the FULL default governance baseline. `LIGHTWEIGHT_OPERATION` applies the same independence, candidate-freeze, evidence-gate, and invalidation principles to the operator-approved actual tester / reviewer role set, but the Work Order **must not** auto-upgrade `LIGHTWEIGHT` to dual tester / dual reviewer.
+
+#### §4.16.2 `IMPLEMENTATION_CANDIDATE` and `CANDIDATE_FROZEN_FOR_TEST`
+
+When `implementer` completes an attempt and reaches `ROLE_COMPLETION_VERIFIED` (§4.13), a versioned `IMPLEMENTATION_CANDIDATE` is formed, binding at minimum:
+
+  - candidate ID / version / digest (or immutable tree / snapshot);
+  - approved `IMPLEMENTATION_PLAN_APPROVAL_PACKET` artifact ID / version / digest;
+  - actual diff, file manifest, build / test entry points, known limitations, `implementer` completion report, and self-verification evidence.
+
+`CANDIDATE_FROZEN_FOR_TEST` does **not** require a pre-commit; formal commit belongs to the `git-integrator` stage (§4.16.7). Once frozen, no role **may** modify this version in-place. If a fix is needed, `implementer` must be re-activated per §4.12, producing a new attempt, new candidate version, and new `ROLE_COMPLETION_REPORT`. The old candidate is retained for audit; all dependent test, review, and Git evidence is invalidated per §4.14.
+
+#### §4.16.3 Dual Tester Isolation and Charter (FULL Default)
+
+`tester-a` and `tester-b` **must** each independently hold:
+
+  - operator-approved assignment entry in `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`;
+  - its own `ROLE_ACTIVATION_READINESS` (§4.10.2);
+  - at least one distinct meaningful model invocation on the operator-assigned model (§4.5, §4.13);
+  - independent session / context, prompt / charter, execution batch, workspace or immutable candidate snapshot, commands and raw output, artifact, and `ROLE_COMPLETION_REPORT`;
+  - its own attributable artifact / evidence, versioned per §4.14.
+
+Before each tester's first report is frozen, it **must not** read the other tester's intermediate work, reports, or conclusions.
+
+Default complementary charter (Work Order may adjust focus but **must not** reduce independence or effective coverage):
+
+  - `tester-a`: normal functional paths, requirement acceptance, regression, compatibility, and deterministic verification;
+  - `tester-b`: failure paths, boundary / exceptional input, recovery / concurrency, negative and adversarial verification.
+
+Either tester **may** report any blocking issue; neither **may** merely "agree with the other tester". Testers operate read-only on the frozen candidate. Temporary test artifacts may be produced in an isolated workspace, but testers **must not** directly modify the formal candidate, business files, or tracked test files. Test changes that must enter the candidate are a change demand returned to `implementer` for a new candidate version.
+
+#### §4.16.4 `TEST_EVIDENCE_PACKET` and `TEST_GATE`
+
+After both testers complete, `vibedev` performs only §4.13 cross-verification and mechanical indexing, producing a `TEST_EVIDENCE_PACKET` bound to the current candidate digest. The packet contains both testers' original reports, invocation / command results, test artifacts, coverage, blockers, and source ID / version / digest references. `vibedev` **must not** perform testing, supplement business conclusions, or choose to believe one tester over the other.
+
+`TEST_GATE_PASS` is formed **only** when **all** of the following hold:
+
+  - both testers independently executed a real invocation and are `ROLE_COMPLETION_VERIFIED`;
+  - both testers operated on the same frozen candidate (matching digest);
+  - all applicable acceptance criteria pass;
+  - no unresolved blocking defect exists;
+  - independence and evidence chain are intact.
+
+Majority vote, compromise, or orchestrator override of a `FAIL` are **forbidden**. On conclusion conflict, `vibedev` produces a `TEST_CONTRADICTION_PACKET` containing only each tester's claims, evidence, and requirement / plan references. The packet is returned per the Work Order's pre-approved §4.12 loop to the relevant tester or `implementer`. If the conflict cannot be resolved within budget, runtime **must** STOP.
+
+#### §4.16.5 Dual Reviewer Isolation and `REVIEW_GATE`
+
+Formal reviewer invocations **must not** overlap with tester execution. After `TEST_GATE_PASS`, `vibedev` mechanically aggregates and freezes a `REVIEW_INPUT_PACKET` binding at minimum the ID / version / digest of: Work Order / scope, approved plan, validated Explorer / Planner artifacts, current candidate / diff, `TEST_EVIDENCE_PACKET`, risk / rollback, and review charter. A substantive change to any source artifact invalidates the old review.
+
+`reviewer-a` and `reviewer-b` operate as **default parallel blind review**:
+
+  - each independently holds assignment, `ROLE_ACTIVATION_READINESS`, distinct meaningful model invocation, independent session / context, prompt / charter, execution batch, output, evidence, and `ROLE_COMPLETION_REPORT`;
+  - before each reviewer's first report is frozen, it **must not** read the other reviewer's intermediate work or conclusions.
+
+Default complementary focus (Work Order may adjust):
+
+  - `reviewer-a`: correctness, requirement / design consistency, maintainability, test sufficiency;
+  - `reviewer-b`: security, governance boundaries, fail-closed, evidence trustworthiness, operational risk and rollback.
+
+Either reviewer **may** report blocking items; neither **may** merely echo the other or modify the candidate.
+
+`REVIEW_GATE_PASS` is formed **only** when **all** of the following hold:
+
+  - both reviewers independently executed a real invocation and are `ROLE_COMPLETION_VERIFIED`;
+  - both reviewers operated on the same `REVIEW_INPUT_PACKET` and candidate;
+  - no unresolved blocking change demand exists;
+  - provenance chain is intact.
+
+Majority vote is **forbidden**. On conflict, `vibedev` produces a `REVIEW_CONTRADICTION_PACKET` listing each reviewer's claims, evidence, and conflict points. The packet is returned per §4.12 to the earliest role that can fix the root cause. If unresolved within budget, runtime declares `UNRESOLVED_REVIEW_DISAGREEMENT` and **must** STOP. `vibedev` **must not** perform review or override an evidence-backed blocking opinion.
+
+#### §4.16.6 Invalidation and Re-Run Propagation
+
+The following rules supplement §4.12 and §4.14:
+
+  - candidate code or runtime behaviour materially changes → FULL: both testers, both reviewers, and all Git evidence are invalidated and must be re-run;
+  - test methodology materially changes but candidate unchanged → the affected tester(s) re-run; once a new `TEST_EVIDENCE_PACKET` is formed, both reviewers re-run;
+  - `TEST_EVIDENCE_PACKET` or `REVIEW_INPUT_PACKET` shared evidence materially changes → all dependent gates and reports are invalidated;
+  - formatting-only changes with unchanged technical meaning, evidence, and digest → only re-cross-verification is needed;
+  - reviewer identifies an implementation / plan / fact defect → return respectively to `implementer` / `planner` / `explorer` per §4.14, following the Plan checkpoint dependency chain (§4.15.3).
+
+#### §4.16.7 Git-Integrator Hard Gate
+
+`git-integrator` **must not** perform any formal Git write (commit, push, Draft PR create / update) until **all** of the following hold:
+
+  - `TEST_GATE_PASS` and `REVIEW_GATE_PASS` are both valid for the current candidate;
+  - all source packets and artifacts are valid (not `INVALIDATED` / `SUPERSEDED`);
+  - Work Order, scope, and assignment have not drifted;
+  - `git-integrator`'s own `ROLE_ACTIVATION_READINESS` (§4.10.2) has passed.
+
+Before this point, only read-only Git capability checks in `GLOBAL_READINESS` (§4.10.1) are permitted. `git-integrator` **must not** modify business files. If the diff is out of scope or the candidate requires change, return to the responsible role.
+
+
 
 ## §5. 8-Role Assignment Pre-Brief
 
@@ -1294,7 +1409,7 @@ The following items **remain** to be finalised by operator in the future operato
 - closeout schema;
 - complete `VIBECODING_MODE` state machine.
 
-Already confirmed and **not** subject to the "not yet finalised" label: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR (§4.1, §9.2); paused-and-revalidate path (§4.10.3).
+Already confirmed and **not** subject to the "not yet finalised" label: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR (§4.1, §9.2); paused-and-revalidate path (§4.10.3); FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16).
 
 Until the operational workflow is formally accepted and `OPERATIONAL_PHASE` cutover declared, no action may claim V2-compliant formal VibeCoding E2E or canonical pipeline `PASS`.
 
@@ -1482,6 +1597,12 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (lll) `SHARED_OR_REUSED_ROLE_OUTPUT_DETECTED` — single model invocation, response, or summary counted as multiple roles' distinct invocation, or output reused across `explorer` and `planner` (§4.5, §4.15.1);
   - (mmm) `IMPLEMENTATION_PLAN_APPROVAL_PACKET` expanding Work Order scope, permissions, sub-mode, assignment, node / model / provider, or governance boundary (§4.15.3);
   - (nnn) `FULL_9_ROLE_VIBECODING` `implementer` activation before `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` (§4.15.3).
+  - (ooo) `CANDIDATE_MUTATED_AFTER_FREEZE` — any role modifying the frozen `IMPLEMENTATION_CANDIDATE` in-place (§4.16.2);
+  - (ppp) `DUAL_TESTER_INDEPENDENCE_VIOLATION` — tester-a and tester-b sharing session, context, prompt, invocation, output, or evidence, or one reading the other's intermediate work before its own first report is frozen (§4.16.3);
+  - (qqq) `DUAL_REVIEWER_INDEPENDENCE_VIOLATION` — reviewer-a and reviewer-b sharing session, context, prompt, invocation, output, or evidence, or one reading the other's intermediate work before its own first report is frozen (§4.16.5);
+  - (rrr) `GATE_MAJORITY_VOTE_BYPASS` — treating a tester or reviewer `FAIL` as overridden by majority vote, compromise, or orchestrator override (§4.16.4, §4.16.5);
+  - (sss) `ORCHESTRATOR_TEST_OR_REVIEW_SUBSTITUTION_DETECTED` — `vibedev` performing testing, supplementing business conclusions, choosing to believe one tester/reviewer over the other, performing review, or overriding an evidence-backed blocking opinion (§4.16.4, §4.16.5);
+  - (ttt) `PREMATURE_GIT_INTEGRATION` — `git-integrator` performing formal Git write before `TEST_GATE_PASS` and `REVIEW_GATE_PASS` are both valid for the current candidate (§4.16.7).
 
 ### §10.2 Drift Handling
 
@@ -1656,7 +1777,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | `V2 Effective Date` | [awaiting operator acceptance] |
 | `V2 Version` | `2.0` (DRAFT — awaiting acceptance) |
 | Historical reference | `v1.0` (PR #276, commits `9f7e8b1` + follow-up `8509a07`); preserved in Git history |
-| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role roster, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, workflow governance envelope, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. **Confirmed** in this contract: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); paused-and-revalidate path (§4.10.3); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR. **Still to be finalised by operator in future operator-approved operational workflow spec**: Work Order schema, task-specific role linear order / concurrency / handoff topology, task-specific test / review choreography, Git command-level order, closeout schema, complete `VIBECODING_MODE` state machine. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
+| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role roster, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, workflow governance envelope, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. **Confirmed** in this contract: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); paused-and-revalidate path (§4.10.3); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR; FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16). **Still to be finalised by operator in future operator-approved operational workflow spec**: Work Order schema, task-specific role linear order / concurrency / handoff topology, task-specific test / review choreography, Git command-level order, closeout schema, complete `VIBECODING_MODE` state machine. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
 
 ---
 
@@ -1679,7 +1800,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Non-orchestrator assignment | absent | FULL: 8 roles item-by-item approval; LIGHTWEIGHT: actual role set item-by-item approval; after VC8, before Work Order; forms `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`; VIBECODING_CONSULTATION_ONLY: no assignment, no baseline, consultation-only Work Order instead |
 | Dedicated governance gates | absent | HERMES_OPENCODE_VERSION_GOVERNANCE_GATE (§3.8) + CENTRAL_MODEL_POOL_GOVERNANCE_GATE (§6.9); do **not** enter VibeCoding modes; do **not** trigger 8-role / 9-role; outside VIBECODING_MODE (§4.2) |
 | Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.6–§6.9); dedicated governance gate (§6.9) |
-| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → `OPERATOR_APPROVED_WORK_ORDER` is job start → `GLOBAL_READINESS` → per-role `ROLE_ACTIVATION_READINESS` → role execution with `ROLE_COMPLETION_REPORT` + cross-verification (§4.13) → Explorer `ROLE_COMPLETION_REPORT` → `EXPLORER_VALIDATION` (§4.15.2) — **hard gate: planner must not activate before `EXPLORER_VALIDATION_PASS`** → Planner `ROLE_COMPLETION_REPORT` → `PLAN_VALIDATION` (§4.15.2) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (recoverable deficiency class only) → `FULL` default `IMPLEMENTATION_PLAN_APPROVAL_PACKET` → operator reviews / requests revision / approves / rejects → `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` → implementer activation (§4.15.3) → test / review → git-integrator → commit / push → create or update **Draft PR** → STOP and report. `Draft → Ready` and merge require separate operator authorisation (§9.2, §10.6). Dual-layer readiness by `vibedev` / orchestrator (§4.10) with hard-failure STOP code set + bounded pause-and-revalidate path (§4.10.3); §4.12 bounded loop addresses recoverable completion deficiency only and **must not** be used to patch over missing / fabricated invocation, empty output, fabricated evidence, or evidence infrastructure failure; §4.15 prohibits orchestrator role substitution and artifact mutation by validator — faithful traceable summarisation in validation reports / approval packets referencing source artifact ID/version/digest does **not** constitute substitution; operator substantive plan revision must return to planner for new attempt and re-validation. Validation reports and approval packets carry provenance binding (artifact ID/version/digest); new source version auto-invalidates old reports/packets. Detailed workflow still to be finalised: Work Order schema; task-specific role linear order beyond the §4.15 dependencies; test / review choreography; Git command-level order; closeout schema; complete `VIBECODING_MODE` state machine. Bounded corrective loop budgets (§4.12) recommended by `vibedev`, approved by operator in Work Order |
+| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → `OPERATOR_APPROVED_WORK_ORDER` is job start → `GLOBAL_READINESS` → per-role `ROLE_ACTIVATION_READINESS` → role execution with `ROLE_COMPLETION_REPORT` + cross-verification (§4.13) → Explorer `ROLE_COMPLETION_REPORT` → `EXPLORER_VALIDATION` (§4.15.2) — **hard gate: planner must not activate before `EXPLORER_VALIDATION_PASS`** → Planner `ROLE_COMPLETION_REPORT` → `PLAN_VALIDATION` (§4.15.2) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (recoverable deficiency class only) → `FULL` default `IMPLEMENTATION_PLAN_APPROVAL_PACKET` → operator reviews / requests revision / approves / rejects → `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` → implementer activation (§4.15.3) → `IMPLEMENTATION_CANDIDATE` → `CANDIDATE_FROZEN_FOR_TEST` (§4.16.2) → tester-a || tester-b (§4.16.3) → `TEST_EVIDENCE_PACKET` → `TEST_GATE_PASS` (§4.16.4) → `REVIEW_INPUT_PACKET` (§4.16.5) → reviewer-a || reviewer-b (§4.16.5) → `REVIEW_GATE_PASS` (§4.16.5) → git-integrator ROLE_ACTIVATION_READINESS / formal Git write (§4.16.7) → commit / push → create or update **Draft PR** → STOP and report. `Draft → Ready` and merge require separate operator authorisation (§9.2, §10.6). Dual-layer readiness by `vibedev` / orchestrator (§4.10) with hard-failure STOP code set + bounded pause-and-revalidate path (§4.10.3); §4.12 bounded loop addresses recoverable completion deficiency only and **must not** be used to patch over missing / fabricated invocation, empty output, fabricated evidence, or evidence infrastructure failure; §4.15 prohibits orchestrator role substitution and artifact mutation by validator — faithful traceable summarisation in validation reports / approval packets referencing source artifact ID/version/digest does **not** constitute substitution; operator substantive plan revision must return to planner for new attempt and re-validation. Validation reports and approval packets carry provenance binding (artifact ID/version/digest); new source version auto-invalidates old reports/packets. §4.16 establishes FULL default mid-to-late-stage topology: candidate freeze, dual tester with strict isolation and complementary charter, `TEST_EVIDENCE_PACKET` / `TEST_GATE_PASS` (no majority vote; `TEST_CONTRADICTION_PACKET` on conflict), dual reviewer with blind parallel review, `REVIEW_INPUT_PACKET` / `REVIEW_GATE_PASS` (no majority vote; `REVIEW_CONTRADICTION_PACKET` on conflict), and git-integrator hard gate (both gates valid before any formal Git write). `LIGHTWEIGHT` applies same independence, freeze, gate, and invalidation principles to its actual role set but **must not** auto-upgrade to dual tester / dual reviewer. §4.16.6 codifies invalidation and re-run propagation. Drift signals (ooo)–(ttt) in §10.1 enforce these boundaries. Detailed workflow still to be finalised: Work Order schema; task-specific command details, workspace implementation, packet/schema fields, Git command-level order; closeout schema; complete `VIBECODING_MODE` state machine. Bounded corrective loop budgets (§4.12) recommended by `vibedev`, approved by operator in Work Order |
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
