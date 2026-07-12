@@ -621,7 +621,9 @@ A successful model invocation alone does **not** equal role completion. A role i
 5. acceptance criteria result available;
 6. associable evidence with completion status.
 
-Model invocation failure, quota exhaustion, empty or unparseable output, or missing evidence means the role is **not** complete and triggers §7 STOP. Scripts, other roles, or the orchestrator **must not** substitute for the failed role's output.
+Model invocation failure, quota exhaustion, missing or unparseable model output, or unreachable / untrustworthy evidence pipeline or channel — these are **hard failures** and trigger §7 STOP directly. Scripts, other roles, or the orchestrator **must not** substitute for the missing or untrustworthy output. The role **must not** retry, "补报告" (patch the report), or reissue an invocation outside the §4.12 bounded corrective loop just to satisfy criteria 1–6.
+
+By contrast, when the role did produce a real model invocation and a real work product but the `ROLE_COMPLETION_REPORT` has missing fields, recoverable evidence linkage gaps, `FAIL` on acceptance criteria, or a change demand / quality issue, the cross-verification yields `ROLE_COMPLETION_INCOMPLETE` or `ROLE_COMPLETION_REJECTED` (§4.13) and the run is eligible for the §4.12 bounded corrective loop — only if the Work Order's pre-approved path covers that signature. Otherwise STOP.
 
 In `FULL_9_ROLE_VIBECODING`, all nine roles **must** satisfy these criteria. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set **must** satisfy them. `VIBECODING_CONSULTATION_ONLY` does **not** trigger 8-role assignment.
 
@@ -706,13 +708,27 @@ Activation checks and probes **must not** count as the target role's execution, 
 
 #### §4.10.3 Readiness Failure, Invalidation, and Revalidation Policy
 
-The following policy unifies §4.10.1, §4.10.2, §7.1, §7.3, §7.6 and §4.14 and resolves earlier "readiness invalid → STOP" ambiguity:
+The following policy unifies §4.10.1, §4.10.2, §7.1, §7.3, §7.6 and §4.14 and resolves earlier "readiness invalid → STOP" ambiguity.
 
-  - `GLOBAL_READINESS_STOP` or `ROLE_ACTIVATION_READINESS_FAIL` → immediate STOP.
-  - Pause-and-revalidate path: when only a dynamic state has drifted (transient transport blip, fresh probe needed, transient credential / quota refresh, transient control-plane transient unavailability) **and** Work Order, VC6 scope, sub-mode, assignment, node / model / provider identity, and permissions are unchanged, `vibedev` may pause dispatch, re-run `GLOBAL_READINESS` (and the affected `ROLE_ACTIVATION_READINESS`), and resume. Operator re-approval is **not** required.
-  - STOP-back-to-operator path: when Work Order, VC6 scope, sub-mode, assignment, node / model / provider / credential identity, or permissions change, `vibedev` **must** STOP and return to operator; revalidation alone does **not** authorise continuation.
-  - Repo baseline progression that is normal, authorised, and within the Work Order (e.g. expected candidate / artifact version advance on the working branch) is **not** repo baseline drift. It is handled by the §4.14 dependency-invalidation rules. Only unexpected, external, or out-of-Work-Order changes to branch / base / HEAD / working tree trigger `GLOBAL_READINESS_INVALIDATED` or STOP.
-  - `GLOBAL_READINESS_INVALIDATED` and re-running are recorded in evidence; the result is either `GLOBAL_READINESS_PASS` (continue) or `GLOBAL_READINESS_STOP` (STOP).
+**Hard failure codes (no revalidation).** Each of the following enters the existing §7 STOP / recovery flow **immediately** and **must not** be hidden behind revalidation, dynamic refresh, or operator-absence waiting:
+
+  - `MODEL_QUOTA_EXHAUSTED` (§3.5.13, §5.10, §7.1);
+  - model call failure (§7.1);
+  - credential missing / not loaded / auth failure / credential provenance anomaly (§6.6, §7.1);
+  - `CONTROL_PLANE_UNAVAILABLE` (§3.6, §7.1) — `21bao` control-plane recovery follows §3.6.7 and **must not** be bypassed by §4.10.3;
+  - designated node unavailable / node health = `UNKNOWN` (§3.1, §7.1);
+  - `GLOBAL_READINESS_STOP` (whenever the underlying cause is any hard failure code above);
+  - `ROLE_ACTIVATION_READINESS_FAIL` (same).
+
+Same-node approved route fallback remains exclusively under §3.5; it is not a §4.10.3 revalidation path.
+
+**Pause-and-revalidate path (bounded).** Applicable **only** when **none** of the hard failure codes above fired, **and** Work Order, VC6 scope, sub-mode, assignment, node / model / provider / credential identity, and permissions are unchanged. Examples include freshness refresh of the node health timestamp, re-collection of read-only state evidence, fresh probe of an already-available route, or other non-identity dynamic evidence whose only defect is staleness — not absence or corruption. Under these conditions `vibedev` may pause dispatch, re-run `GLOBAL_READINESS` (and the affected `ROLE_ACTIVATION_READINESS`), and resume. Operator re-approval is **not** required.
+
+**STOP-back-to-operator path.** When Work Order, VC6 scope, sub-mode, assignment, node / model / provider / credential identity, or permissions change, `vibedev` **must** STOP and return to operator; revalidation alone does **not** authorise continuation.
+
+**Normal candidate progression.** Repo baseline progression that is normal, authorised, and within the Work Order (e.g. expected candidate / artifact version advance on the working branch) is **not** repo baseline drift. It is handled by the §4.14 dependency-invalidation rules. Only unexpected, external, or out-of-Work-Order changes to branch / base / HEAD / working tree trigger `GLOBAL_READINESS_INVALIDATED` or STOP.
+
+`GLOBAL_READINESS_INVALIDATED` and re-running are recorded in evidence; the result is either `GLOBAL_READINESS_PASS` (continue) or `GLOBAL_READINESS_STOP` (STOP).
 
 #### §4.11 Conflict Escalation (FULL and LIGHTWEIGHT modes)
 
@@ -726,7 +742,9 @@ Which role to return to, which steps to re-run, and whether a new checkpoint is 
 
 ### §4.12 Work Order Pre-Approved Bounded Corrective Loop
 
-When `vibedev` (orchestrator) cross-verifies a role completion (§4.8) and reaches `ROLE_COMPLETION_INCOMPLETE` or `ROLE_COMPLETION_REJECTED` (§4.13), the run **may** return to a relevant role **without** re-asking operator, **only if** the Work Order itself pre-approves the loop path. The Work Order **must** enumerate for each pre-approved path:
+The §4.12 loop addresses **recoverable completion deficiency** only. A role that **never produced a real model invocation**, **produced no parseable output**, or whose evidence pipeline / channel is **unreachable or untrustworthy** has not entered the recoverable-deficiency class — it is a hard failure (§4.8) and **must** trigger §7 STOP. The §4.12 loop **must not** be used to "补报告" (patch the report) over a missing or fabricated invocation, empty output, fabricated evidence, or evidence infrastructure failure.
+
+When `vibedev` (orchestrator) cross-verifies a role completion (§4.8) and reaches `ROLE_COMPLETION_INCOMPLETE` or `ROLE_COMPLETION_REJECTED` (§4.13) on the recoverable-deficiency class, the run **may** return to a relevant role **without** re-asking operator, **only if** the Work Order itself pre-approves the loop path. The Work Order **must** enumerate for each pre-approved path:
 
   - start role and end role (return-to role);
   - triggering condition (which `ROLE_COMPLETION` verdict or change-demand class triggers this path);
@@ -782,7 +800,7 @@ Each non-orchestrator role **must** submit one `ROLE_COMPLETION_REPORT` at the e
 
 The report **must** include at minimum:
 
-  - `attempt_id`, task / run ID, role, node, operator-specified model, canonical / runtime provider, formal invocation ID(s), and assignment reference;
+  - `attempt_id`, task / run ID, role, node, **`operator-assigned model` (sourced from the operator-approved `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`)**, canonical / runtime provider, formal invocation ID(s), and assignment reference;
   - actual input, scope / exclusions, and prerequisite artifact / version references;
   - distinct meaningful model invocation evidence (§4.5, §4.7) for each invocation in the attempt;
   - tools / commands, return code, outputs, artifacts, and side-effect evidence;
@@ -790,6 +808,8 @@ The report **must** include at minimum:
   - acceptance criteria, each marked `PASS` / `FAIL` / evidence-backed `NOT_APPLICABLE`;
   - blockers, warnings, assumptions, change demands, scope drift;
   - completion claim and status.
+
+`§4.13` applies only to non-orchestrator roles. The model field is unified to `operator-assigned model` referencing the approved assignment baseline; it **must not** be written as the orchestrator's session-preselected model. The orchestrator role does **not** submit a non-orchestrator `ROLE_COMPLETION_REPORT`; the orchestrator's coordination evidence follows §4.7.
 
 The role **must not** self-announce "verified" or "final". `vibedev` (orchestrator) cross-verifies the report against assignment, invocation uniqueness, tool results, artifacts / diff, acceptance evidence, permission scope, and tester / reviewer independence. Cross-verification yields exactly one of:
 
@@ -1570,7 +1590,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Non-orchestrator assignment | absent | FULL: 8 roles item-by-item approval; LIGHTWEIGHT: actual role set item-by-item approval; after VC8, before Work Order; forms `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`; VIBECODING_CONSULTATION_ONLY: no assignment, no baseline, consultation-only Work Order instead |
 | Dedicated governance gates | absent | HERMES_OPENCODE_VERSION_GOVERNANCE_GATE (§3.8) + CENTRAL_MODEL_POOL_GOVERNANCE_GATE (§6.9); do **not** enter VibeCoding modes; do **not** trigger 8-role / 9-role; outside VIBECODING_MODE (§4.2) |
 | Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.6–§6.9); dedicated governance gate (§6.9) |
-| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → `OPERATOR_APPROVED_WORK_ORDER` is job start → `GLOBAL_READINESS` → per-role `ROLE_ACTIVATION_READINESS` → role execution with `ROLE_COMPLETION_REPORT` + cross-verification (§4.13) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (if applicable) → test / review → git-integrator → commit / push → create or update **Draft PR** → STOP and report. `Draft → Ready` and merge require separate operator authorisation (§9.2, §10.6). Dual-layer readiness by `vibedev` / orchestrator (§4.10) with paused-and-revalidate path (§4.10.3). Detailed workflow still to be finalised: Work Order schema; task-specific role linear order, concurrency, handoff topology; task-specific test / review choreography; Git command-level order; closeout schema; complete `VIBECODING_MODE` state machine. Bounded corrective loop budgets (§4.12) recommended by `vibedev`, approved by operator in Work Order |
+| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → `OPERATOR_APPROVED_WORK_ORDER` is job start → `GLOBAL_READINESS` → per-role `ROLE_ACTIVATION_READINESS` → role execution with `ROLE_COMPLETION_REPORT` + cross-verification (§4.13) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (recoverable deficiency class only) → test / review → git-integrator → commit / push → create or update **Draft PR** → STOP and report. `Draft → Ready` and merge require separate operator authorisation (§9.2, §10.6). Dual-layer readiness by `vibedev` / orchestrator (§4.10) with hard-failure STOP code set + bounded pause-and-revalidate path (§4.10.3); §4.12 bounded loop addresses recoverable completion deficiency only and **must not** be used to patch over missing / fabricated invocation, empty output, fabricated evidence, or evidence infrastructure failure. Detailed workflow still to be finalised: Work Order schema; task-specific role linear order, concurrency, handoff topology; task-specific test / review choreography; Git command-level order; closeout schema; complete `VIBECODING_MODE` state machine. Bounded corrective loop budgets (§4.12) recommended by `vibedev`, approved by operator in Work Order |
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
