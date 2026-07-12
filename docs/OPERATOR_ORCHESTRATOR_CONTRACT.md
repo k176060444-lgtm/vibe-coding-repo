@@ -1231,11 +1231,19 @@ On push timeout, TLS disconnect, or indeterminate result, **first** read the rem
 
 Authentication failure, permission denied, credential missing / not loaded, branch protection, remote inconsistency, and non-fast-forward are **hard STOP** — not transport retries.
 
+**PR API recovery.** Before each Draft PR create / update API retry, **first** query the PR by repository, head / base branch, and Work Order / task identity:
+
+  - **create retry:** if a unique OPEN + DRAFT PR already exists with the correct head / base, verify its body and evidence version; if consistent, treat as successful (`PR_DRAFT_CREATED`). If no match yet exists, one more create attempt is permitted. Multiple matches, indeterminate state, or head / base mismatch → **immediate STOP**.
+  - **update retry:** if the target PR already reflects the expected body / evidence version, treat as successful (`PR_DRAFT_UPDATED`). If still the verified old version, one more update attempt is permitted. Unexpected version, head / base drift, or indeterminate state → **immediate STOP**.
+
+Blind repeated create / update, duplicate PR creation, or overwriting unknown updates are **forbidden**.
+
 States:
 
   - `PUSH_TRANSPORT_RECOVERY_IN_PROGRESS`
   - `PUSH_DELIVERY_VERIFIED`
   - `PUSH_RECOVERY_BUDGET_EXHAUSTED`
+  - `UNVERIFIED_PR_API_RETRY`
 
 #### §4.16.12 Draft PR Identification, Public Evidence Body, and Delivery Verification
 
@@ -1876,16 +1884,17 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (cccc) `GIT_INTEGRATION_INPUT_INVALID` — `GIT_INTEGRATION_INPUT_PACKET` source artifact invalidated, scope/assignment drifted, or packet content changed before Git write (§4.16.9). **Immediate STOP.**
   - (dddd) `BROAD_STAGE_OPERATION_DETECTED` — `git add .`, `git add -A`, or `git commit -am` used instead of exact staging per candidate manifest (§4.16.10). **Immediate STOP.**
   - (eeee) `CANDIDATE_COMMIT_TREE_MISMATCH` — final commit tree does not match frozen candidate content tree (§4.16.10). **Immediate STOP.**
-  - (ffff) `COMMIT_MESSAGE_EVIDENCE_MISMATCH` — commit message inconsistent with diffstat, test counts, Gate verdicts, scope, or PR body (§4.16.10). Return to responsible process before commit; do **not** amend after commit.
+  - (ffff) `COMMIT_MESSAGE_EVIDENCE_MISMATCH` — **pre-commit:** commit message inconsistent with the `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT`, candidate, Gate verdicts, diffstat, and test evidence (§4.16.10). **Immediate STOP** — must not commit. **Post-commit / PR update:** commit message inconsistent with the final `DRAFT_PR_EVIDENCE_BODY` non-Git-derived facts, diffstat, test numbers, or Gate status (§4.16.10). **Immediate STOP** — operator decides subsequent scope; do **not** amend. Only Git-derived fields (commit SHA / tree, remote, PR facts) are permitted to differ between draft and final body;
   - (gggg) `REMOTE_BASE_DRIFT` — remote base SHA changed from expected value (§4.16.11). **Immediate STOP.**
   - (hhhh) `REMOTE_TARGET_HEAD_DRIFT` — remote target head SHA changed from expected value (§4.16.11). **Immediate STOP.**
   - (iiii) `UNVERIFIED_PUSH_RETRY` — push retry attempted without first reading remote head to verify delivery state (§4.16.11). **Immediate STOP.**
+  - (ssss) `UNVERIFIED_PR_API_RETRY` — Draft PR create / update API retry attempted without first querying the PR by repository / head / base / Work Order identity to verify actual state (§4.16.11). **Immediate STOP.**
   - (jjjj) `DUPLICATE_OR_WRONG_PR_TARGET` — multiple PR matches, already Ready/closed/merged, base mismatch, or PR occupied by another task (§4.16.12). **Immediate STOP.**
   - (kkkk) `PUBLIC_EVIDENCE_SECRET_LEAK` — PR body contains credentials, tokens, private logs, unapproved host details, absolute paths, sensitive env values, or internal model prompts (§4.16.12). **Immediate STOP.**
   - (llll) `DRAFT_PR_DELIVERY_UNVERIFIED` — post-push independent verification incomplete or failed (§4.16.12). **Immediate STOP.**
   - (mmmm) `READY_OR_MERGE_WITHOUT_AUTHORIZATION` — Draft→Ready or merge attempted without operator authorisation, or authorisation invalidated by head/body/evidence change (§4.16.13). **Immediate STOP.**
   - (nnnn) `APPROVED_NEW_FILE_OMITTED_FROM_STAGE` — candidate manifest includes approved new paths but `git-integrator` omitted them from staging (§4.16.10). **Immediate STOP.**
-  - (oooo) `UNAPPROVED_UNTRACKED_PATH_STAGED` — untracked path outside the candidate manifest and Work Order protection was staged (§4.16.10). **Immediate STOP.**
+  - (oooo) `UNAPPROVED_UNTRACKED_PATH_STAGED` — any untracked path not in the candidate manifest was staged (§4.16.10). Entry-time untracked inventory and Work Order-protected paths are reference information only and do **not** constitute stage permission. Manifest-approved new paths remain permitted. **Immediate STOP.**
   - (pppp) `CONSTRUCTION_UNTRACKED_LIST_LEAKED_INTO_RUNTIME_POLICY` — a construction-workspace-specific untracked path list treated as a universal runtime constant (§4.16.10). **Immediate STOP.**
   - (qqqq) `MODE_SPECIFIC_PLAN_PROVENANCE_MISMATCH` — Draft PR body plan source does not match the mode-appropriate provenance type (§4.16.12). **Immediate STOP.**
   - (rrrr) `PRECOMMIT_EVIDENCE_DRAFT_MISSING` — commit attempted without freezing a `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT` (§4.16.10). **Immediate STOP.**
