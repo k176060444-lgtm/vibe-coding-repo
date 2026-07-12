@@ -899,7 +899,7 @@ EXPLORER_VALIDATION_PASS
   → implementer ROLE_ACTIVATION_READINESS
 ```
 
-`FULL_9_ROLE_VIBECODING` implementer **must not** start until `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` is formed. `LIGHTWEIGHT_OPERATION` may enable this checkpoint; if enabled by the Work Order, it follows the same flow. If not enabled by the Work Order, `PLAN_VALIDATION_PASS` allows `LIGHTWEIGHT_OPERATION` to auto-advance to implementer per the Work Order. `VIBECODING_CONSULTATION_ONLY` does **not** apply.
+`FULL_9_ROLE_VIBECODING` implementer **must not** start until `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` is formed. `LIGHTWEIGHT_OPERATION` may enable this checkpoint; if enabled by the Work Order, it follows the same flow. If not enabled by the Work Order, `PLAN_VALIDATION_PASS` allows `LIGHTWEIGHT_OPERATION` to auto-advance to implementer per the Work Order; in this case the candidate plan source binding follows §4.16.2 (`LIGHTWEIGHT` without Plan checkpoint). `VIBECODING_CONSULTATION_ONLY` does **not** apply.
 
 The `IMPLEMENTATION_PLAN_APPROVAL_PACKET` **must** faithfully aggregate:
 
@@ -941,15 +941,23 @@ OPERATOR_APPROVED_IMPLEMENTATION_PLAN
   → git-integrator ROLE_ACTIVATION_READINESS / formal Git write (§4.16.7)
 ```
 
-`||` denotes parallel execution with strict isolation (§4.16.3, §4.16.5). This dependency chain and its gates are the FULL default governance baseline. `LIGHTWEIGHT_OPERATION` applies the same independence, candidate-freeze, evidence-gate, and invalidation principles to the operator-approved actual tester / reviewer role set, but the Work Order **must not** auto-upgrade `LIGHTWEIGHT` to dual tester / dual reviewer.
+`||` denotes parallel execution with strict isolation (§4.16.3, §4.16.5). This dependency chain and its gates are the FULL default governance baseline. `LIGHTWEIGHT_OPERATION` applies the same independence, candidate-freeze, evidence-gate, and invalidation principles to the operator-approved actual tester / reviewer role set, but the Work Order **must not** auto-upgrade `LIGHTWEIGHT` to dual tester / dual reviewer. Candidate plan source binding follows §4.16.2 per sub-mode.
 
 #### §4.16.2 `IMPLEMENTATION_CANDIDATE` and `CANDIDATE_FROZEN_FOR_TEST`
 
-When `implementer` completes an attempt and reaches `ROLE_COMPLETION_VERIFIED` (§4.13), a versioned `IMPLEMENTATION_CANDIDATE` is formed, binding at minimum:
+When `implementer` completes an attempt and reaches `ROLE_COMPLETION_VERIFIED` (§4.13), a versioned `IMPLEMENTATION_CANDIDATE` is formed. The plan source binding depends on sub-mode:
+
+  - **`FULL_9_ROLE_VIBECODING`**: candidate **must** bind both the `IMPLEMENTATION_PLAN_APPROVAL_PACKET` artifact ID / version / digest **and** a non-repudiable reference to the `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` approval record / status. Neither the packet name alone ("approved" in the label) nor orchestrator self-attestation substitutes for operator approval evidence.
+  - **`LIGHTWEIGHT_OPERATION` with Plan checkpoint enabled** (per Work Order): same binding as FULL.
+  - **`LIGHTWEIGHT_OPERATION` without Plan checkpoint** (per Work Order): candidate binds the `planner` artifact ID / version / digest that passed `PLAN_VALIDATION_PASS`, the `PLAN_VALIDATION_REPORT` verdict, and the Work Order field explicitly recording "no Plan checkpoint required".
+  - **`VIBECODING_CONSULTATION_ONLY`**: does **not** produce an `IMPLEMENTATION_CANDIDATE`.
+
+All candidates additionally bind:
 
   - candidate ID / version / digest (or immutable tree / snapshot);
-  - approved `IMPLEMENTATION_PLAN_APPROVAL_PACKET` artifact ID / version / digest;
   - actual diff, file manifest, build / test entry points, known limitations, `implementer` completion report, and self-verification evidence.
+
+If any source artifact, validation report, or operator approval status is invalidated, the candidate and all downstream test, review, and Git evidence are automatically invalidated (§4.14, §4.16.6).
 
 `CANDIDATE_FROZEN_FOR_TEST` does **not** require a pre-commit; formal commit belongs to the `git-integrator` stage (§4.16.7). Once frozen, no role **may** modify this version in-place. If a fix is needed, `implementer` must be re-activated per §4.12, producing a new attempt, new candidate version, and new `ROLE_COMPLETION_REPORT`. The old candidate is retained for audit; all dependent test, review, and Git evidence is invalidated per §4.14.
 
@@ -984,7 +992,25 @@ After both testers complete, `vibedev` performs only §4.13 cross-verification a
   - no unresolved blocking defect exists;
   - independence and evidence chain are intact.
 
-Majority vote, compromise, or orchestrator override of a `FAIL` are **forbidden**. On conclusion conflict, `vibedev` produces a `TEST_CONTRADICTION_PACKET` containing only each tester's claims, evidence, and requirement / plan references. The packet is returned per the Work Order's pre-approved §4.12 loop to the relevant tester or `implementer`. If the conflict cannot be resolved within budget, runtime **must** STOP.
+Majority vote, compromise, or orchestrator override of a `FAIL` are **forbidden**.
+
+**Non-PASS paths:**
+
+  - Both testers agree on a blocking issue: this is **not** a contradiction, but `TEST_GATE_PASS` **must not** be formed. Return per the Work Order's pre-approved §4.12 loop to the earliest role that can fix the root cause.
+  - One or both testers are `ROLE_COMPLETION_INCOMPLETE` / `ROLE_COMPLETION_REJECTED`: the Gate **must not** be formed. Handle per §4.12 for role completion first.
+  - `TEST_CONTRADICTION_PACKET` applies **only** when both testers have real, verifiable but mutually conflicting business conclusions.
+
+**Contradiction routing by root cause:**
+
+  - Test execution, test tool, or test methodology defect that does **not** change acceptance criteria → return to the affected tester.
+  - Candidate implementation defect → return to `implementer`.
+  - Planner test design, coverage, or acceptance mapping defect → return to `planner`, then determine per §4.15.3 whether a new Plan checkpoint is required.
+  - Explorer fact base error → return to `explorer`; then `planner`, `PLAN_VALIDATION`, Plan checkpoint (if applicable), and all downstream dependencies re-run.
+  - Root cause requires changing VC6 success criteria, scope, sub-mode, assignment, permissions, node / model / provider, or governance boundary → **STOP** and return to operator.
+
+`vibedev` **must not** determine new acceptance criteria, supplement test design, or invent routing not pre-approved in the Work Order. `vibedev` produces only the claims–evidence contradiction packet and executes the existing routing. If the conflict cannot be resolved within budget, runtime **must** STOP.
+
+Any re-activation of a role produces a new attempt, new formal invocation, new report, and new artifact version. When candidate or packet evidence changes, §4.16.6 invalidation propagation applies.
 
 #### §4.16.5 Dual Reviewer Isolation and `REVIEW_GATE`
 
@@ -1009,13 +1035,14 @@ Either reviewer **may** report blocking items; neither **may** merely echo the o
   - no unresolved blocking change demand exists;
   - provenance chain is intact.
 
-Majority vote is **forbidden**. On conflict, `vibedev` produces a `REVIEW_CONTRADICTION_PACKET` listing each reviewer's claims, evidence, and conflict points. The packet is returned per §4.12 to the earliest role that can fix the root cause. If unresolved within budget, runtime declares `UNRESOLVED_REVIEW_DISAGREEMENT` and **must** STOP. `vibedev` **must not** perform review or override an evidence-backed blocking opinion.
+Majority vote is **forbidden**. **Non-PASS paths** follow the same principles as §4.16.4: both reviewers agreeing on a blocking issue does **not** form `REVIEW_GATE_PASS`; one or both reviewers `INCOMPLETE` / `REJECTED` prevents Gate formation; `REVIEW_CONTRADICTION_PACKET` applies only when both reviewers have real, verifiable but mutually conflicting conclusions. On conflict, `vibedev` produces a `REVIEW_CONTRADICTION_PACKET` listing each reviewer's claims, evidence, and conflict points. The packet is returned per §4.12 to the earliest role that can fix the root cause. If unresolved within budget, runtime declares `UNRESOLVED_REVIEW_DISAGREEMENT` and **must** STOP. `vibedev` **must not** perform review or override an evidence-backed blocking opinion.
 
 #### §4.16.6 Invalidation and Re-Run Propagation
 
 The following rules supplement §4.12 and §4.14:
 
   - candidate code or runtime behaviour materially changes → FULL: both testers, both reviewers, and all Git evidence are invalidated and must be re-run;
+  - candidate plan source artifact, validation report, or operator approval status invalidated → candidate and all downstream test, review, and Git evidence automatically invalidated (§4.16.2);
   - test methodology materially changes but candidate unchanged → the affected tester(s) re-run; once a new `TEST_EVIDENCE_PACKET` is formed, both reviewers re-run;
   - `TEST_EVIDENCE_PACKET` or `REVIEW_INPUT_PACKET` shared evidence materially changes → all dependent gates and reports are invalidated;
   - formatting-only changes with unchanged technical meaning, evidence, and digest → only re-cross-verification is needed;
@@ -1409,7 +1436,7 @@ The following items **remain** to be finalised by operator in the future operato
 - closeout schema;
 - complete `VIBECODING_MODE` state machine.
 
-Already confirmed and **not** subject to the "not yet finalised" label: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR (§4.1, §9.2); paused-and-revalidate path (§4.10.3); FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16).
+Already confirmed and **not** subject to the "not yet finalised" label: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR (§4.1, §9.2); paused-and-revalidate path (§4.10.3); FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16); candidate plan source binding per sub-mode (§4.16.2); contradiction routing by root cause (§4.16.4); non-PASS gate paths (§4.16.4, §4.16.5); drift signals (uuu)–(xxx) (§10.1).
 
 Until the operational workflow is formally accepted and `OPERATIONAL_PHASE` cutover declared, no action may claim V2-compliant formal VibeCoding E2E or canonical pipeline `PASS`.
 
@@ -1603,6 +1630,10 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (rrr) `GATE_MAJORITY_VOTE_BYPASS` — treating a tester or reviewer `FAIL` as overridden by majority vote, compromise, or orchestrator override (§4.16.4, §4.16.5);
   - (sss) `ORCHESTRATOR_TEST_OR_REVIEW_SUBSTITUTION_DETECTED` — `vibedev` performing testing, supplementing business conclusions, choosing to believe one tester/reviewer over the other, performing review, or overriding an evidence-backed blocking opinion (§4.16.4, §4.16.5);
   - (ttt) `PREMATURE_GIT_INTEGRATION` — `git-integrator` performing formal Git write before `TEST_GATE_PASS` and `REVIEW_GATE_PASS` are both valid for the current candidate (§4.16.7).
+  - (uuu) `CANDIDATE_PLAN_PROVENANCE_MISSING` — `IMPLEMENTATION_CANDIDATE` missing required plan source binding per sub-mode (§4.16.2). **Immediate STOP.**
+  - (vvv) `OPERATOR_PLAN_APPROVAL_BYPASSED` — candidate formed without valid operator approval evidence where required (§4.16.2). **Immediate STOP.**
+  - (www) `LIGHTWEIGHT_PLAN_SOURCE_MISMATCH` — `LIGHTWEIGHT` candidate plan source does not match the Work Order's Plan checkpoint setting (§4.16.2). Return to correct binding; if unresolvable within pre-approved budget, STOP.
+  - (xxx) `TEST_CONTRADICTION_MISROUTED` — `TEST_CONTRADICTION_PACKET` returned to a role that cannot fix the root cause (§4.16.4). Re-route per §4.16.4 root-cause routing; if unresolvable within pre-approved budget, STOP.
 
 ### §10.2 Drift Handling
 
