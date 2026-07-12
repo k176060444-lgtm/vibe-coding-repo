@@ -494,9 +494,15 @@ Any of the following **requires** `vibedev` to recommend the complete 9-role ros
 
 ### §4.2 Operator Decision
 
-Operator is the **sole** classifier. Operator decides whether to enter `VIBECODING_MODE` (and which sub-mode), or to enter a dedicated governance gate (`HERMES_OPENCODE_VERSION_GOVERNANCE_GATE` §3.8 or `CENTRAL_MODEL_POOL_GOVERNANCE_GATE` §6.9). The two dedicated gates are **outside** `VIBECODING_MODE`; they are **not** sub-modes of it and do **not** form "five parallel entries" with the three sub-modes.
+Operator is the **sole** classifier. The decision is a two-stage process:
 
-A dedicated governance gate **must not** be re-classified as `VIBECODING_CONSULTATION_ONLY`, `LIGHTWEIGHT_OPERATION`, or `FULL_9_ROLE_VIBECODING`. A dedicated gate **must not** be re-classified into a `VIBECODING_MODE` sub-mode within a single operation. If the same requirement simultaneously involves business tasks and version / CMP governance, the scope **must** be split with separate authorisation records, or the governance structure changed through a V2 amendment. Operator's ordinary single-operation approval does **not** change this structural hierarchy. If risk escalates or a FULL condition is triggered during LIGHTWEIGHT, `vibedev` **must** immediately STOP and re-request classification.
+1. **VC0** — Operator decides whether to enter `VIBECODING_MODE`. This is a standalone binary decision: enter or not enter. No sub-mode is selected or implied at this stage.
+
+2. **VC8** — After completing VC1–VC6 (pre-stage requirement alignment and Intake), `vibedev` recommends a sub-mode in VC7, and operator selects, modifies, or rejects it in VC8.
+
+Operator may also decide to enter a dedicated governance gate (`HERMES_OPENCODE_VERSION_GOVERNANCE_GATE` §3.8 or `CENTRAL_MODEL_POOL_GOVERNANCE_GATE` §6.9) instead of `VIBECODING_MODE`. The two dedicated gates are **outside** `VIBECODING_MODE`; they are **not** sub-modes of it and do **not** form "five parallel entries" with the three sub-modes.
+
+A dedicated governance gate **must not** be re-classified as `VIBECODING_CONSULTATION_ONLY`, `LIGHTWEIGHT_OPERATION`, or `FULL_9_ROLE_VIBECODING`. A dedicated gate **must not** be re-classified into a `VIBECODING_MODE` sub-mode within a single operation. If the same requirement simultaneously involves business tasks and version / CMP governance, the scope **must** be split or the governance structure amended via a future V2 amendment.
 
 Ordinary discussion, `VIBECODING_CONSULTATION_ONLY`, or a dedicated governance gate **must not** be used to bypass the applicable LIGHTWEIGHT / FULL sub-mode, operator assignment, or high-risk checkpoint.
 
@@ -529,7 +535,7 @@ In `FULL_9_ROLE_VIBECODING`, the 8 non-orchestrator roles (items 2–9 above) en
 
 ### §4.5 Distinct Model Invocation Requirement (FULL and LIGHTWEIGHT modes)
 
-In an operator-approved `FULL_9_ROLE_VIBECODING` run, each of the nine roles **must** execute at least one distinct, attributable, meaningful, evidence-bearing model invocation using the operator-assigned model for that role.
+In an operator-approved `FULL_9_ROLE_VIBECODING` run, each of the nine roles **must** execute at least one distinct, attributable, meaningful, evidence-bearing model invocation using the operator-specified model for that role. For the orchestrator, this is the operator-preselected session model (§4.3). For each non-orchestrator role, this is the operator-assigned model from the 8-role assignment (§5).
 
 In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set **must** satisfy the same distinct model invocation requirement. `VIBECODING_CONSULTATION_ONLY` does **not** trigger additional execution roles and therefore does **not** require per-role model invocation.
 
@@ -560,7 +566,7 @@ A constant alone does **not** satisfy the substantive work product or role compl
 
 Each role's model invocation evidence **must** associate at least:
 
-- task / run ID, role, node, operator-assigned model;
+- task / run ID, role, node, operator-specified model (operator-preselected session model for orchestrator, operator-assigned model for non-orchestrator roles);
 - canonical provider, runtime provider;
 - role invocation ID; provider request ID if available;
 - start / end time, success / failure;
@@ -571,7 +577,13 @@ Each role's model invocation evidence **must** associate at least:
 
 In `FULL_9_ROLE_VIBECODING`, all nine roles **must** satisfy this evidence requirement. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set **must** satisfy it. `VIBECODING_CONSULTATION_ONLY` does **not** trigger 8-role assignment and therefore does **not** require per-role invocation evidence.
 
-For the orchestrator role, the operator-approved assignment is satisfied by the operator-preselected orchestrator model and scope inherited from the current `vibedev` session (assignment_source=`OPERATOR_PRESELECTED_SESSION_BINDING`, §4.3). The orchestrator's model invocation evidence follows the same schema; its completion evidence is the coordinated run itself and does **not** substitute for any other role's evidence.
+For the orchestrator role, the operator-approved assignment is satisfied by two independent components:
+
+  a. **`OPERATOR_PRESELECTED_SESSION_BINDING`** — node fixed to `21bao`; current orchestrator model and its provider mapping are operator-preselected in the current `vibedev` session and inherited by the `VIBECODING_MODE` run. This binding does **not** enter the non-orchestrator assignment recommendation or approval process (§4.3).
+
+  b. **`OPERATOR_ALIGNED_TASK_SCOPE`** — task objective, scope, exclusions, and success criteria formed by VC6 final requirement alignment (§4.1). This scope is **not** part of the session binding; it is referenced and solidified by the selected sub-mode, the operator-approved role-node-model assignment baseline, and the Work Order.
+
+The orchestrator's model invocation evidence follows the same schema; its completion evidence is the coordinated run itself and does **not** substitute for any other role's evidence.
 
 ### §4.8 Role Completion Criteria (FULL and LIGHTWEIGHT modes)
 
@@ -588,7 +600,13 @@ Model invocation failure, quota exhaustion, empty or unparseable output, or miss
 
 In `FULL_9_ROLE_VIBECODING`, all nine roles **must** satisfy these criteria. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set **must** satisfy them. `VIBECODING_CONSULTATION_ONLY` does **not** trigger 8-role assignment.
 
-For the orchestrator role, criterion 1 (operator-approved assignment) is satisfied by the operator-preselected orchestrator model and scope inherited from the current `vibedev` session (assignment_source=`OPERATOR_PRESELECTED_SESSION_BINDING`, §4.3). The orchestrator's completion is evidenced by the coordinated run itself; it does **not** substitute for any other role's completion evidence.
+For the orchestrator role, criterion 1 (operator-approved assignment) is satisfied by two independent components:
+
+  a. **`OPERATOR_PRESELECTED_SESSION_BINDING`** — node fixed to `21bao`; current orchestrator model and its provider mapping are operator-preselected in the current `vibedev` session and inherited by the `VIBECODING_MODE` run (§4.3).
+
+  b. **`OPERATOR_ALIGNED_TASK_SCOPE`** — task objective, scope, exclusions, and success criteria formed by VC6 final requirement alignment (§4.1), subsequently referenced and solidified by the selected sub-mode, the operator-approved role-node-model assignment baseline, and the Work Order.
+
+The orchestrator's completion is evidenced by the coordinated run itself; it does **not** substitute for any other role's completion evidence.
 
 ### §4.9 Independence of Dual Tester / Dual Reviewer (FULL mode)
 
