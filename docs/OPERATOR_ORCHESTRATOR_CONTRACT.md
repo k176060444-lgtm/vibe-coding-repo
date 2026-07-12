@@ -1348,6 +1348,14 @@ Substantive candidate modification after Draft requires a new operator decision 
 
 Any pre-existing Ready / Merge authorisation is **automatically invalidated** by such a correction.
 
+**`POST_DRAFT_GIT_INTEGRATOR_BINDING`.** Each Post-Draft operation (Ready, Merge, Branch Deletion) requires its own executor binding:
+
+  - `OPERATOR_AUTHORIZED_DRAFT_TO_READY`, `OPERATOR_AUTHORIZED_MERGE`, and `OPERATOR_AUTHORIZED_BRANCH_DELETION` **must** each bind a `POST_DRAFT_GIT_INTEGRATOR_BINDING` (or equivalent field);
+  - at minimum: original `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE` ID / version / digest; git-integrator role identity; node; model; canonical provider; runtime provider; credential identity; permitted permissions; this operation's type (Ready / Merge / Branch Deletion);
+  - reuse of the original git-integrator assignment is permitted **only** when operator explicitly approves reuse and **all** of role identity / node / model / provider / credential identity / permissions are unchanged. The mere termination of the original Work Order **must not** be interpreted as automatic continuation of execution authority;
+  - any change to role / node / model / provider / credential identity / permission **immediately invalidates** the authorisation and forces **immediate STOP**; a new operator-approved binding is required;
+  - each Post-Draft operation **must** have a new `ROLE_ACTIVATION_READINESS`, a new attempt ID, a formal and attributable role invocation, and an independent completion evidence packet. The Draft delivery attempt and its report **must not** be reused.
+
 #### §4.16.15 Draft → Ready Approval Packet and Authorisation
 
 **Approval packet generation.** `vibedev` read-only generates a versioned `DRAFT_TO_READY_APPROVAL_PACKET` binding at minimum:
@@ -1391,10 +1399,12 @@ Historical verbal approval **must not** override version changes.
 
 ```
 OPERATOR_AUTHORIZED_DRAFT_TO_READY
+  (must bind POST_DRAFT_GIT_INTEGRATOR_BINDING)
   → git-integrator ROLE_ACTIVATION_READINESS (§4.10.2)
   → READY_FINAL_PREFLIGHT (§4.16.16)
   → GitHub status change
   → READY_DELIVERY_VERIFICATION (§4.16.16)
+  → READY_TRANSITION_COMPLETION_REPORT (§4.16.16)
   → PR_READY_VERIFIED → STOP
 ```
 
@@ -1430,9 +1440,24 @@ Default: Ready API max 2 attempts. Blind retry forbidden.
 
 Success: `PR_READY_VERIFIED`, then **immediate STOP**. Ready **never** includes merge authorisation.
 
+**`READY_TRANSITION_COMPLETION_REPORT`.** Must record at minimum:
+
+  - `OPERATOR_AUTHORIZED_DRAFT_TO_READY` ID / version / digest and `POST_DRAFT_GIT_INTEGRATOR_BINDING` ID / version / digest;
+  - git-integrator `ROLE_ACTIVATION_READINESS` result and attempt ID;
+  - `READY_FINAL_PREFLIGHT` result and version;
+  - Ready API attempts: count, each result, indeterminate-result state query, budget consumption;
+  - pre-change and post-change PR state / isDraft / head / base / body digest;
+  - confirmation: no commit, push, merge, branch deletion, or unknown side effect;
+  - `PUBLIC_SAFE_GIT_METADATA_CHECK` result;
+  - final completion claim.
+
+`vibedev` performs only cross-verification (§4.13); it **must not** execute the status change or fabricate evidence. A successful API return or single state query **must not** substitute for the completion report and cross-verification. Only after the report passes cross-verification is `PR_READY_VERIFIED` formed, followed by **immediate STOP**.
+
 #### §4.16.17 Merge Approval Packet, Authorisation, Execution, and Post-Merge
 
-**Post-Ready boundary.** After `PR_READY_VERIFIED`, runtime **must** wait for operator to re-review the latest Ready PR. The Ready authorisation **must not** be reused for merge. Ready success **must not** be interpreted as merge permission. The Merge Approval Packet (§4.16.17) may be generated read-only, but the merge execution **must** wait for a new independent operator authorisation.
+**Post-Ready boundary.** After `PR_READY_VERIFIED`, runtime **must** wait for operator to re-review the latest Ready PR. The Ready authorisation **must not** be reused for merge. Ready success **must not** be interpreted as merge permission.
+
+**Merge packet generation gate.** `vibedev` **must not** automatically generate `MERGE_APPROVAL_PACKET` after `PR_READY_VERIFIED`. The packet is generated **only** after operator explicitly requests merge assessment / packet preparation and is treated as a fresh, independent decision. Read-only packet generation is **not** an extension of the Ready authorisation and is **not** a merge authorisation. An operator request to generate the packet alone **does not** equal merge authorisation.
 
 **`MERGE_APPROVAL_PACKET`.** `vibedev` read-only generates, binding at minimum:
 
@@ -1460,13 +1485,15 @@ Runtime **must not** self-select method; `MERGE_COMMIT` may be recommended, but 
 
 ```
 OPERATOR_AUTHORIZED_MERGE
+  (must bind POST_DRAFT_GIT_INTEGRATOR_BINDING)
   → git-integrator ROLE_ACTIVATION_READINESS (§4.10.2)
   → MERGE_FINAL_PREFLIGHT (§4.16.17)
   → merge API
   → method-specific verification
   → MERGE_DELIVERY_VERIFIED
   → POST_MERGE_VERIFICATION
-  → STOP
+  → MERGE_COMPLETION_REPORT
+  → MERGE_OPERATION_ENDPOINT_REACHED → STOP
 ```
 
 **`MERGE_FINAL_PREFLIGHT` must confirm:**
@@ -1502,13 +1529,67 @@ Success:
 
   - `MERGE_DELIVERY_VERIFIED`
   - `POST_MERGE_VERIFICATION_PASS`
-  - `WORK_ORDER_MERGE_ENDPOINT_REACHED`
+  - `MERGE_OPERATION_ENDPOINT_REACHED`
 
 Then **immediate STOP**.
 
 Failure: `POST_MERGE_VERIFICATION_FAIL` and **immediate STOP**. Auto-revert, auto-fix, follow-up commit, or second merge is forbidden.
 
-**Branch deletion.** Source branch is **not** deleted by default. Deletion requires a separate `OPERATOR_AUTHORIZED_BRANCH_DELETION` binding repository, branch, PR number, merged head, merge commit, and verification.
+**`MERGE_COMPLETION_REPORT`.** Must record at minimum:
+
+  - `MERGE_APPROVAL_PACKET` ID / version / digest;
+  - `OPERATOR_AUTHORIZED_MERGE` ID / version / digest and `POST_DRAFT_GIT_INTEGRATOR_BINDING` ID / version / digest;
+  - git-integrator `ROLE_ACTIVATION_READINESS` result and attempt ID;
+  - `MERGE_FINAL_PREFLIGHT` result and version;
+  - merge method, merge API attempts: count, each result, indeterminate-result query, budget consumption;
+  - pre-merge base SHA and PR head SHA;
+  - merge commit SHA and target head SHA;
+  - method-specific verification (parent / tree / sequence, as applicable);
+  - final PR state = `MERGED`;
+  - candidate reached target;
+  - no extra files / unknown commits;
+  - `PUBLIC_SAFE_GIT_METADATA_CHECK` result;
+  - source branch retention state;
+  - operations **not** executed and final completion claim.
+
+`vibedev` performs only cross-verification (§4.13); it **must not** execute the merge or fabricate evidence. Only after the report passes cross-verification are `MERGE_DELIVERY_VERIFIED` and `POST_MERGE_VERIFICATION_PASS` formed, followed by `MERGE_OPERATION_ENDPOINT_REACHED` and **immediate STOP**.
+
+**Branch deletion — independent execution chain.**
+
+```
+OPERATOR_AUTHORIZED_BRANCH_DELETION
+  (must bind POST_DRAFT_GIT_INTEGRATOR_BINDING)
+  → ROLE_ACTIVATION_READINESS (§4.10.2)
+  → BRANCH_DELETION_FINAL_PREFLIGHT (§4.16.17)
+  → delete API
+  → independent verification
+  → BRANCH_DELETION_VERIFIED → STOP
+```
+
+The authorisation **must** bind at minimum: repository, source branch, PR number, merged PR head, merge commit / target head, `POST_DRAFT_GIT_INTEGRATOR_BINDING`, authorization time.
+
+**`BRANCH_DELETION_FINAL_PREFLIGHT` must verify:**
+
+  - PR is `MERGED` and merge / post-merge evidence is valid;
+  - source branch still points to the approved merged head;
+  - target / merge commit matches the authorisation;
+  - branch is not reused, advanced, or occupied by another task.
+
+**Branch deletion API retry.** Default max 2 attempts. On indeterminate result, first query the ref:
+
+  - source ref already gone (verified) → treat as success;
+  - still the verified old ref → one more approved retry permitted;
+  - other state, unknown, or unverifiable → **immediate STOP**.
+
+**Post-deletion verification.** Verify source ref does not exist, target unchanged, PR / merge record unchanged, no other branch side effects. Deletion of base / target branch is **forbidden**.
+
+**State names:**
+
+  - `BRANCH_DELETION_AUTHORIZATION_STALE` — authorisation no longer matches repo / branch / PR / merged head / merge commit / executor binding / time. **Immediate STOP.**
+  - `BRANCH_DELETION_TARGET_MISMATCH` — source branch target / merge commit drift. **Immediate STOP.**
+  - `UNVERIFIED_BRANCH_DELETION_RETRY` — retry without prior ref query. **Immediate STOP.**
+  - `BRANCH_DELETION_API_RECOVERY_BUDGET_EXHAUSTED` — 2-attempt budget exhausted or status unverifiable. **Immediate STOP.**
+  - Success: `BRANCH_DELETION_VERIFIED`, then **immediate STOP**.
 
 
 
@@ -1886,7 +1967,7 @@ The following items **remain** to be finalised by operator in the future operato
 - closeout schema;
 - complete `VIBECODING_MODE` state machine.
 
-Already confirmed and **not** subject to the "not yet finalised" label: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR (§4.1, §9.2); paused-and-revalidate path (§4.10.3); FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16); candidate plan source binding per sub-mode (§4.16.2); contradiction routing by root cause (§4.16.4); non-PASS gate paths (§4.16.4, §4.16.5); LIGHTWEIGHT actual role set principle with mode-scoped §4.15/§4.16 governance (§4.1.2, §4.15, §4.16); LIGHTWEIGHT `direct_to_implementer` provenance (§4.16.2); LIGHTWEIGHT `required_pre_git_gates` with non-empty requirement and independent verifier Gate (§4.16.7); verifier cross-Gate independence (§4.1.2); LIGHTWEIGHT no-Planner advance conditions (§4.15.3); mode-aware `PREMATURE_GIT_INTEGRATION` (§10.1); Git delivery pipeline with exact staging (approved new files permitted, manifest-external untracked forbidden, construction-specific paths not a universal constant), candidate–commit tree binding, two-phase evidence model (pre-commit `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT` → post-commit `DRAFT_PR_EVIDENCE_BODY`), bounded push/PR recovery, mode-specific Draft PR plan provenance, Draft PR evidence body, post-push independent verification, completion report, and Draft→Ready→Merge three-stage governance chain with independent approvals, exact binding, method-level verification, post-merge verification, and separate branch-deletion authorisation (§4.16.8–§4.16.17); drift signals (cccc)–(bbbbb) (§10.1).
+Already confirmed and **not** subject to the "not yet finalised" label: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR (§4.1, §9.2); paused-and-revalidate path (§4.10.3); FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16); candidate plan source binding per sub-mode (§4.16.2); contradiction routing by root cause (§4.16.4); non-PASS gate paths (§4.16.4, §4.16.5); LIGHTWEIGHT actual role set principle with mode-scoped §4.15/§4.16 governance (§4.1.2, §4.15, §4.16); LIGHTWEIGHT `direct_to_implementer` provenance (§4.16.2); LIGHTWEIGHT `required_pre_git_gates` with non-empty requirement and independent verifier Gate (§4.16.7); verifier cross-Gate independence (§4.1.2); LIGHTWEIGHT no-Planner advance conditions (§4.15.3); mode-aware `PREMATURE_GIT_INTEGRATION` (§10.1); Git delivery pipeline with exact staging (approved new files permitted, manifest-external untracked forbidden, construction-specific paths not a universal constant), candidate–commit tree binding, two-phase evidence model (pre-commit `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT` → post-commit `DRAFT_PR_EVIDENCE_BODY`), bounded push/PR recovery, mode-specific Draft PR plan provenance, Draft PR evidence body, post-push independent verification, completion report, three-stage Draft→Ready→Merge governance chain with `POST_DRAFT_GIT_INTEGRATOR_BINDING` per Post-Draft operation, exact-binding authorisations, independent completion reports (`READY_TRANSITION_COMPLETION_REPORT` / `MERGE_COMPLETION_REPORT`) and cross-verification, method-level verification, post-merge verification, separate branch-deletion authorisation with `BRANCH_DELETION_FINAL_PREFLIGHT` and `BRANCH_DELETION_VERIFIED`, and 2-attempt API budgets each with explicit exhaustion states (§4.16.8–§4.16.17); drift signals (cccc)–(qqqqq) (§10.1).
 
 Until the operational workflow is formally accepted and `OPERATIONAL_PHASE` cutover declared, no action may claim V2-compliant formal VibeCoding E2E or canonical pipeline `PASS`.
 
@@ -1964,7 +2045,7 @@ Operator **must** explicitly specify node + model for every actual non-orchestra
 
 ### §9.2 B. PR Workflow
 
-When a PR is needed, **default** to creating a **Draft PR** only. The Draft PR is the default auto endpoint of `LIGHTWEIGHT_OPERATION` and `FULL_9_ROLE_VIBECODING` runs (§4.1). After Draft PR creation or update, STOP and report URL, head SHA, changed files, applicable verification / review verdicts, role completion reports (§4.8, §4.13), risks, and open items. After Draft, original Work Order automatic authority terminates (§4.16.14). `Draft → Ready` requires `OPERATOR_AUTHORIZED_DRAFT_TO_READY` (§4.16.15) and the Ready execution chain (§4.16.16). Merge requires `OPERATOR_AUTHORIZED_MERGE` and the merge execution chain (§4.16.17). Branch deletion requires `OPERATOR_AUTHORIZED_BRANCH_DELETION` (§4.16.17). All three are **independent** operator authorisations; none is automatic.
+When a PR is needed, **default** to creating a **Draft PR** only. The Draft PR is the default auto endpoint of `LIGHTWEIGHT_OPERATION` and `FULL_9_ROLE_VIBECODING` runs (§4.1). After Draft PR creation or update, STOP and report URL, head SHA, changed files, applicable verification / review verdicts, role completion reports (§4.8, §4.13), risks, and open items. After Draft, original Work Order automatic authority terminates (§4.16.14); `vibedev` / `git-integrator` **must not** continue any action without new operator decision. `Draft → Ready` requires `OPERATOR_AUTHORIZED_DRAFT_TO_READY` (with `POST_DRAFT_GIT_INTEGRATOR_BINDING`) and the Ready execution chain (§4.16.16) — including `READY_TRANSITION_COMPLETION_REPORT` and cross-verification — terminating at `PR_READY_VERIFIED` STOP. Merge requires `OPERATOR_AUTHORIZED_MERGE` (with `POST_DRAFT_GIT_INTEGRATOR_BINDING`), `MERGE_APPROVAL_PACKET` generated only on explicit operator request, the merge execution chain (§4.16.17) including `MERGE_COMPLETION_REPORT` and cross-verification, terminating at `MERGE_OPERATION_ENDPOINT_REACHED` STOP. Branch deletion requires `OPERATOR_AUTHORIZED_BRANCH_DELETION` (with `POST_DRAFT_GIT_INTEGRATOR_BINDING`) and the branch deletion execution chain (§4.16.17). All three are **independent** operator authorisations; none is automatic.
 
   - `FULL_9_ROLE_VIBECODING`: report dual-tester / dual-reviewer verdicts.
   - `LIGHTWEIGHT_OPERATION`: report the operator-approved actual verifier / reviewer verdicts.
@@ -2118,6 +2199,19 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (bbbbb) `MERGE_AUTHORIZATION_STALE` — `OPERATOR_AUTHORIZED_MERGE` no longer matches PR / head / base / method / checks / Gate / evidence / blocker / remote (§4.16.17). **Immediate STOP.**
   - (ccccc) `POST_MERGE_AUTO_REPAIR_OR_REVERT` — auto-revert, auto-fix, follow-up commit, or second merge after `POST_MERGE_VERIFICATION_FAIL` (§4.16.17). **Immediate STOP.**
   - (ddddd) `UNAUTHORIZED_BRANCH_DELETION` — source branch deletion without `OPERATOR_AUTHORIZED_BRANCH_DELETION` (§4.16.17). **Immediate STOP.**
+  - (eeeee) `POST_DRAFT_EXECUTOR_BINDING_MISSING` — `OPERATOR_AUTHORIZED_DRAFT_TO_READY` / `OPERATOR_AUTHORIZED_MERGE` / `OPERATOR_AUTHORIZED_BRANCH_DELETION` lacks `POST_DRAFT_GIT_INTEGRATOR_BINDING` (§4.16.14). **Immediate STOP.**
+  - (fffff) `POST_DRAFT_ASSIGNMENT_REUSE_WITHOUT_AUTHORIZATION` — git-integrator reused original Draft assignment for Post-Draft operation without explicit operator-approved reuse binding (§4.16.14). **Immediate STOP.**
+  - (ggggg) `READY_COMPLETION_UNVERIFIED` — `PR_READY_VERIFIED` claimed without passing `READY_TRANSITION_COMPLETION_REPORT` cross-verification (§4.16.16). **Immediate STOP.**
+  - (hhhhh) `MERGE_PACKET_GENERATED_WITHOUT_OPERATOR_REQUEST` — `MERGE_APPROVAL_PACKET` generated without explicit operator request (§4.16.17). **Immediate STOP.**
+  - (iiiii) `MERGE_COMPLETION_UNVERIFIED` — merge endpoint state claimed without passing `MERGE_COMPLETION_REPORT` cross-verification (§4.16.17). **Immediate STOP.**
+  - (jjjjj) `MERGE_ENDPOINT_MISATTRIBUTED_TO_WORK_ORDER` — merge endpoint state named as `WORK_ORDER_*` (work-order misattribution); use `MERGE_OPERATION_ENDPOINT_REACHED` (§4.16.17). **Immediate STOP.**
+  - (kkkkk) `READY_API_RECOVERY_BUDGET_EXHAUSTED` — Ready API 2-attempt budget exhausted or status unverifiable (§4.16.16). **Immediate STOP.**
+  - (lllll) `MERGE_API_RECOVERY_BUDGET_EXHAUSTED` — merge API 2-attempt budget exhausted or status unverifiable (§4.16.17). **Immediate STOP.**
+  - (mmmmm) `BRANCH_DELETION_API_RECOVERY_BUDGET_EXHAUSTED` — branch deletion API 2-attempt budget exhausted or status unverifiable (§4.16.17). **Immediate STOP.**
+  - (nnnnn) `BRANCH_DELETION_AUTHORIZATION_STALE` — `OPERATOR_AUTHORIZED_BRANCH_DELETION` no longer matches repo / branch / PR / merged head / merge commit / executor binding / time (§4.16.17). **Immediate STOP.**
+  - (ooooo) `BRANCH_DELETION_TARGET_MISMATCH` — source branch target / merge commit drift during branch deletion (§4.16.17). **Immediate STOP.**
+  - (ppppp) `UNVERIFIED_BRANCH_DELETION_RETRY` — branch deletion retry attempted without prior ref query (§4.16.17). **Immediate STOP.**
+  - (qqqqq) `PR_METADATA_OR_HEAD_MISMATCH` — local HEAD / remote branch head / PR `headRefOid` / PR body 4-way inconsistency detected before any Git write (§4.16). **Immediate STOP.**
 
 ### §10.2 Drift Handling
 
@@ -2142,7 +2236,7 @@ V2 takes effect **only after** explicit operator acceptance. `vibedev` **must no
 
 - V2 enters force **only** when the operator explicitly accepts it in chat (e.g. "ACCEPT V2" or equivalent natural language). vibedev **must not** self-declare V2 as accepted, effective, or adopted.
 - The accepted body is applied to the existing contract file through an **operator-authorised PR update**. The current Draft PR (#365, or its successor) may serve as the landing PR **if and only if** its head content is **identical** to the operator-accepted text.
-- The landing PR proceeds through **three independent authorisations** (§4.16.14–§4.16.17): `Draft → Ready` (`OPERATOR_AUTHORIZED_DRAFT_TO_READY`), `merge` (`OPERATOR_AUTHORIZED_MERGE`), and `branch deletion` (`OPERATOR_AUTHORIZED_BRANCH_DELETION`). None is automatic. After Draft PR creation / update, original Work Order automatic authority terminates (§4.16.14); `vibedev` / `git-integrator` **must not** continue any action without new operator decision. Ready success **must not** be interpreted as merge permission. Merge success **must not** be interpreted as branch-deletion permission.
+- The landing PR proceeds through **three independent authorisations** (§4.16.14–§4.16.17): `Draft → Ready` (`OPERATOR_AUTHORIZED_DRAFT_TO_READY` + `POST_DRAFT_GIT_INTEGRATOR_BINDING`), `merge` (`OPERATOR_AUTHORIZED_MERGE` + `POST_DRAFT_GIT_INTEGRATOR_BINDING` + `MERGE_APPROVAL_PACKET` generated only on explicit operator request), and `branch deletion` (`OPERATOR_AUTHORIZED_BRANCH_DELETION` + `POST_DRAFT_GIT_INTEGRATOR_BINDING`). None is automatic. Each Post-Draft operation requires its own `READY_TRANSITION_COMPLETION_REPORT` / `MERGE_COMPLETION_REPORT` and `vibedev` cross-verification before forming the endpoint state. After Draft PR creation / update, original Work Order automatic authority terminates (§4.16.14); `vibedev` / `git-integrator` **must not** continue any action without new operator decision. Ready success **must not** be interpreted as merge permission. Merge success **must not** be interpreted as branch-deletion permission. The merge endpoint is named `MERGE_OPERATION_ENDPOINT_REACHED` (the legacy `WORK_ORDER_MERGE_ENDPOINT_REACHED` is forbidden and triggers `MERGE_ENDPOINT_MISATTRIBUTED_TO_WORK_ORDER`).
 - If the operator-accepted text differs semantically from the current Draft head, a new review cycle and renewed operator acceptance are required before landing.
 - **No** parallel V2 file is created.
 - **No** rewriting of PR #276's Git history.
@@ -2292,7 +2386,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | `V2 Effective Date` | [awaiting operator acceptance] |
 | `V2 Version` | `2.0` (DRAFT — awaiting acceptance) |
 | Historical reference | `v1.0` (PR #276, commits `9f7e8b1` + follow-up `8509a07`); preserved in Git history |
-| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role roster, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, workflow governance envelope, evidence levels, transfer-prompt delivery, drift handling, amendment procedure, Git delivery pipeline with candidate–commit tree binding, exact staging (approved new files permitted, manifest-external untracked forbidden, construction-specific paths not a universal constant), two-phase evidence model (pre-commit `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT` → post-commit `DRAFT_PR_EVIDENCE_BODY`), bounded push/PR recovery, mode-specific Draft PR plan provenance, Draft PR evidence body, post-push independent verification, completion report, and three-stage Draft→Ready→Merge governance chain with independent approvals, exact binding, method-level verification, post-merge verification, and separate branch-deletion authorisation (§4.16.8–§4.16.17). **Confirmed** in this contract: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); paused-and-revalidate path (§4.10.3); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR; FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16). **Still to be finalised by operator in future operator-approved operational workflow spec**: Work Order schema, task-specific role linear order / concurrency / handoff topology, task-specific test / review choreography, closeout schema, complete `VIBECODING_MODE` state machine. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
+| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role roster, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, workflow governance envelope, evidence levels, transfer-prompt delivery, drift handling, amendment procedure, Git delivery pipeline with candidate–commit tree binding, exact staging (approved new files permitted, manifest-external untracked forbidden, construction-specific paths not a universal constant), two-phase evidence model (pre-commit `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT` → post-commit `DRAFT_PR_EVIDENCE_BODY`), bounded push/PR recovery, mode-specific Draft PR plan provenance, Draft PR evidence body, post-push independent verification, completion report, and three-stage Draft→Ready→Merge governance chain with `POST_DRAFT_GIT_INTEGRATOR_BINDING` per Post-Draft operation, exact-binding authorisations, `READY_TRANSITION_COMPLETION_REPORT` / `MERGE_COMPLETION_REPORT` cross-verification, method-level verification, post-merge verification, separate branch-deletion authorisation with `BRANCH_DELETION_FINAL_PREFLIGHT` and `BRANCH_DELETION_VERIFIED`, and 2-attempt API budgets each with explicit exhaustion states (§4.16.8–§4.16.17). **Confirmed** in this contract: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); paused-and-revalidate path (§4.10.3); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR; FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16). **Still to be finalised by operator in future operator-approved operational workflow spec**: Work Order schema, task-specific role linear order / concurrency / handoff topology, task-specific test / review choreography, closeout schema, complete `VIBECODING_MODE` state machine. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
 
 ---
 
@@ -2315,7 +2409,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Non-orchestrator assignment | absent | FULL: 8 roles item-by-item approval; LIGHTWEIGHT: actual role set item-by-item approval; after VC8, before Work Order; forms `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`; VIBECODING_CONSULTATION_ONLY: no assignment, no baseline, consultation-only Work Order instead |
 | Dedicated governance gates | absent | HERMES_OPENCODE_VERSION_GOVERNANCE_GATE (§3.8) + CENTRAL_MODEL_POOL_GOVERNANCE_GATE (§6.9); do **not** enter VibeCoding modes; do **not** trigger 8-role / 9-role; outside VIBECODING_MODE (§4.2) |
 | Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.6–§6.9); dedicated governance gate (§6.9) |
-| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → `OPERATOR_APPROVED_WORK_ORDER` is job start → `GLOBAL_READINESS` → per-role `ROLE_ACTIVATION_READINESS` → role execution with `ROLE_COMPLETION_REPORT` + cross-verification (§4.13) → Explorer `ROLE_COMPLETION_REPORT` → `EXPLORER_VALIDATION` (§4.15.2) — **hard gate: planner must not activate before `EXPLORER_VALIDATION_PASS`** → Planner `ROLE_COMPLETION_REPORT` → `PLAN_VALIDATION` (§4.15.2) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (recoverable deficiency class only) → `FULL` default `IMPLEMENTATION_PLAN_APPROVAL_PACKET` → operator reviews / requests revision / approves / rejects → `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` → implementer activation (§4.15.3) → `IMPLEMENTATION_CANDIDATE` → `CANDIDATE_FROZEN_FOR_TEST` (§4.16.2) → tester-a || tester-b (§4.16.3) → `TEST_EVIDENCE_PACKET` → `TEST_GATE_PASS` (§4.16.4) → `REVIEW_INPUT_PACKET` (§4.16.5) → reviewer-a || reviewer-b (§4.16.5) → `REVIEW_GATE_PASS` (§4.16.5) → git-integrator ROLE_ACTIVATION_READINESS / `GIT_INTEGRATION_INPUT_FROZEN` (§4.16.9) → exact-stage / preflight (§4.16.10) → `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT` → `COMMIT_MESSAGE_EVIDENCE_CONSISTENCY_CHECK` → ordinary commit → `COMMIT_TREE_MATCHES_FROZEN_CANDIDATE` (§4.16.10) → push / remote verification (§4.16.11) → Draft PR create-or-update with `DRAFT_PR_EVIDENCE_BODY` (§4.16.12) → post-push re-verification → `DRAFT_PR_DELIVERY_VERIFIED` (§4.16.12) → `WORK_ORDER_AUTOMATIC_ENDPOINT_REACHED` → STOP (§4.16.13). After Draft, original Work Order authority terminates (§4.16.14); `Draft → Ready` requires `OPERATOR_AUTHORIZED_DRAFT_TO_READY` and `READY_FINAL_PREFLIGHT` (§4.16.15, §4.16.16) → `PR_READY_VERIFIED` → STOP. `merge` requires `OPERATOR_AUTHORIZED_MERGE` and `MERGE_FINAL_PREFLIGHT` (§4.16.17) → `MERGE_DELIVERY_VERIFIED` + `POST_MERGE_VERIFICATION_PASS` → STOP. Branch deletion requires `OPERATOR_AUTHORIZED_BRANCH_DELETION` (§4.16.17). All three authorisations are **independent**; none is automatic. Dual-layer readiness by `vibedev` / orchestrator (§4.10) with hard-failure STOP code set + bounded pause-and-revalidate path (§4.10.3); §4.12 bounded loop addresses recoverable completion deficiency only and **must not** be used to patch over missing / fabricated invocation, empty output, fabricated evidence, or evidence infrastructure failure; §4.15 prohibits orchestrator role substitution and artifact mutation by validator — faithful traceable summarisation in validation reports / approval packets referencing source artifact ID/version/digest does **not** constitute substitution; operator substantive plan revision must return to planner for new attempt and re-validation. Validation reports and approval packets carry provenance binding (artifact ID/version/digest); new source version auto-invalidates old reports/packets. §4.16 establishes FULL default mid-to-late-stage topology: candidate freeze, dual tester with strict isolation and complementary charter, `TEST_EVIDENCE_PACKET` / `TEST_GATE_PASS` (no majority vote; `TEST_CONTRADICTION_PACKET` on conflict), dual reviewer with blind parallel review, `REVIEW_INPUT_PACKET` / `REVIEW_GATE_PASS` (no majority vote; `REVIEW_CONTRADICTION_PACKET` on conflict), and git-integrator hard gate (both gates valid before any formal Git write). `LIGHTWEIGHT` applies same independence, freeze, gate, and invalidation principles to its actual role set but **must not** auto-upgrade to dual tester / dual reviewer. §4.16.6 codifies invalidation and re-run propagation. Drift signals (ooo)–(ttt) in §10.1 enforce these boundaries. Detailed workflow still to be finalised: Work Order schema; task-specific command details, workspace implementation, packet/schema fields; closeout schema; complete `VIBECODING_MODE` state machine. Bounded corrective loop budgets (§4.12) recommended by `vibedev`, approved by operator in Work Order |
+| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → `OPERATOR_APPROVED_WORK_ORDER` is job start → `GLOBAL_READINESS` → per-role `ROLE_ACTIVATION_READINESS` → role execution with `ROLE_COMPLETION_REPORT` + cross-verification (§4.13) → Explorer `ROLE_COMPLETION_REPORT` → `EXPLORER_VALIDATION` (§4.15.2) — **hard gate: planner must not activate before `EXPLORER_VALIDATION_PASS`** → Planner `ROLE_COMPLETION_REPORT` → `PLAN_VALIDATION` (§4.15.2) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (recoverable deficiency class only) → `FULL` default `IMPLEMENTATION_PLAN_APPROVAL_PACKET` → operator reviews / requests revision / approves / rejects → `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` → implementer activation (§4.15.3) → `IMPLEMENTATION_CANDIDATE` → `CANDIDATE_FROZEN_FOR_TEST` (§4.16.2) → tester-a || tester-b (§4.16.3) → `TEST_EVIDENCE_PACKET` → `TEST_GATE_PASS` (§4.16.4) → `REVIEW_INPUT_PACKET` (§4.16.5) → reviewer-a || reviewer-b (§4.16.5) → `REVIEW_GATE_PASS` (§4.16.5) → git-integrator ROLE_ACTIVATION_READINESS / `GIT_INTEGRATION_INPUT_FROZEN` (§4.16.9) → exact-stage / preflight (§4.16.10) → `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT` → `COMMIT_MESSAGE_EVIDENCE_CONSISTENCY_CHECK` → ordinary commit → `COMMIT_TREE_MATCHES_FROZEN_CANDIDATE` (§4.16.10) → push / remote verification (§4.16.11) → Draft PR create-or-update with `DRAFT_PR_EVIDENCE_BODY` (§4.16.12) → post-push re-verification → `DRAFT_PR_DELIVERY_VERIFIED` (§4.16.12) → `WORK_ORDER_AUTOMATIC_ENDPOINT_REACHED` → STOP (§4.16.13). After Draft, original Work Order authority terminates (§4.16.14). `Draft → Ready` requires `OPERATOR_AUTHORIZED_DRAFT_TO_READY` + `POST_DRAFT_GIT_INTEGRATOR_BINDING` + `READY_FINAL_PREFLIGHT` + `READY_TRANSITION_COMPLETION_REPORT` (§4.16.15, §4.16.16) → `PR_READY_VERIFIED` → STOP. `merge` requires operator-requested `MERGE_APPROVAL_PACKET` + `OPERATOR_AUTHORIZED_MERGE` + `POST_DRAFT_GIT_INTEGRATOR_BINDING` + `MERGE_FINAL_PREFLIGHT` + `MERGE_COMPLETION_REPORT` (§4.16.17) → `MERGE_DELIVERY_VERIFIED` + `POST_MERGE_VERIFICATION_PASS` + `MERGE_OPERATION_ENDPOINT_REACHED` → STOP (legacy `WORK_ORDER_MERGE_ENDPOINT_REACHED` forbidden). Branch deletion requires `OPERATOR_AUTHORIZED_BRANCH_DELETION` + `POST_DRAFT_GIT_INTEGRATOR_BINDING` + `BRANCH_DELETION_FINAL_PREFLIGHT` + `BRANCH_DELETION_VERIFIED` (§4.16.17). All three authorisations are **independent**; none is automatic. Each API has a 2-attempt budget with explicit exhaustion STOP state. Dual-layer readiness by `vibedev` / orchestrator (§4.10) with hard-failure STOP code set + bounded pause-and-revalidate path (§4.10.3); §4.12 bounded loop addresses recoverable completion deficiency only and **must not** be used to patch over missing / fabricated invocation, empty output, fabricated evidence, or evidence infrastructure failure; §4.15 prohibits orchestrator role substitution and artifact mutation by validator — faithful traceable summarisation in validation reports / approval packets referencing source artifact ID/version/digest does **not** constitute substitution; operator substantive plan revision must return to planner for new attempt and re-validation. Validation reports and approval packets carry provenance binding (artifact ID/version/digest); new source version auto-invalidates old reports/packets. §4.16 establishes FULL default mid-to-late-stage topology: candidate freeze, dual tester with strict isolation and complementary charter, `TEST_EVIDENCE_PACKET` / `TEST_GATE_PASS` (no majority vote; `TEST_CONTRADICTION_PACKET` on conflict), dual reviewer with blind parallel review, `REVIEW_INPUT_PACKET` / `REVIEW_GATE_PASS` (no majority vote; `REVIEW_CONTRADICTION_PACKET` on conflict), and git-integrator hard gate (both gates valid before any formal Git write). `LIGHTWEIGHT` applies same independence, freeze, gate, and invalidation principles to its actual role set but **must not** auto-upgrade to dual tester / dual reviewer. §4.16.6 codifies invalidation and re-run propagation. Drift signals (ooo)–(ttt) in §10.1 enforce these boundaries. Detailed workflow still to be finalised: Work Order schema; task-specific command details, workspace implementation, packet/schema fields; closeout schema; complete `VIBECODING_MODE` state machine. Bounded corrective loop budgets (§4.12) recommended by `vibedev`, approved by operator in Work Order |
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
