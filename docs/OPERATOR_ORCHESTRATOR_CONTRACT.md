@@ -356,11 +356,11 @@ Execute only the operator-approved scope. **Must not** expand to other nodes, pr
 
 #### §3.8.8 V7 — Qualification
 
-Verify: binary integrity, capability, configuration, provider, model, CMP sync, wrapper, bounded model call, gate, receipt, evidence, secret boundary, rollback feasibility, drift. All must PASS.
+Verify: binary integrity, capability, configuration, provider, model, CMP sync, wrapper, bounded model call, gate, receipt, evidence, secret boundary, rollback feasibility, drift. All applicable checks must PASS. Non-applicable items must carry explicit `NOT_APPLICABLE` with reason; they **must not** be reported as PASS.
 
 #### §3.8.9 V8 — Closeout
 
-Report: result, version matrix, evidence, and residual risks. Failure triggers immediate STOP. **No** auto-rollback, auto-alternative-version, or auto-scope-expansion unless the operator has pre-approved an atomic rollback plan.
+Report: result, version matrix, evidence, and residual risks. Failure triggers immediate STOP. **No** auto-rollback, auto-alternative-version, or auto-scope-expansion unless the operator has pre-approved an atomic rollback plan; such rollback must be executed within the approved scope with full evidence logging.
 
 #### §3.8.10 Decoupling principle
 
@@ -390,7 +390,7 @@ Version compatibility layers **must not** alter the following governance semanti
 
 ### §4.1 Classification
 
-Before any task execution, the orchestrator **must** classify the task into one of three execution modes. Operator makes the final mode decision.
+Before any task execution, the orchestrator **must** classify the task. Ordinary VibeCoding / business tasks are classified into one of three execution modes below. `Hermes` / `OpenCode` version governance enters the dedicated gate (§3.8). Central Model Pool governance enters the dedicated gate (§6.9). Operator makes the final mode / gate decision.
 
 #### §4.1.1 CONSULTATION_ONLY
 
@@ -430,7 +430,7 @@ Any of the following **requires** the orchestrator to recommend the complete 9-r
 
 ### §4.2 Operator Final Decision
 
-Operator is the **sole** classifier. If operator explicitly approves an exception, the orchestrator records the scope and reason. If risk escalates or a FULL condition is triggered during LIGHTWEIGHT, the orchestrator **must** immediately STOP and re-request classification.
+Operator is the **sole** classifier. Operator selects the applicable entry from the five parallel entries (three VibeCoding execution modes + two dedicated governance gates). A dedicated governance gate **must not** be re-classified as `CONSULTATION_ONLY`, `LIGHTWEIGHT_OPERATION`, or `FULL_9_ROLE_VIBECODING`. If operator explicitly approves an exception, the orchestrator records the scope and reason. If risk escalates or a FULL condition is triggered during LIGHTWEIGHT, the orchestrator **must** immediately STOP and re-request classification.
 
 ### §4.3 Full 9-Role Pipeline (FULL_9_ROLE_VIBECODING)
 
@@ -642,11 +642,11 @@ Execute only the operator-approved scope. **Must not** expand to other models, n
 
 #### §6.9.8 C7 — Post-Apply Qualification
 
-Verify: rendered config, alias / endpoint / provider, credential presence, declared / synced / runtime-visible / env-loaded / wrapper-valid / model-call-verified / operator-approved, drift. All must PASS.
+Verify: rendered config, alias / endpoint / provider, credential presence, declared / synced / runtime-visible / env-loaded / wrapper-valid / model-call-verified / operator-approved, drift. All applicable checks must PASS. Non-applicable items must carry explicit `NOT_APPLICABLE` with reason; they **must not** be reported as PASS.
 
 #### §6.9.9 C8 — Closeout
 
-Report: result, model matrix, evidence, and residual risks. Failure triggers immediate STOP. **No** auto-model-change, auto-node-expansion, auto-rollback, auto-credential-replacement, or auto-loop of source-of-truth modification.
+Report: result, model matrix, evidence, and residual risks. Failure triggers immediate STOP. **No** auto-model-change, auto-node-expansion, auto-credential-replacement, or auto-loop of source-of-truth modification. **No** automatic rollback unless operator has pre-approved an atomic failure rollback plan; such rollback must be executed within the approved scope with full evidence logging.
 
 ### §6.10 Route-Chain Integration Boundary
 
@@ -685,16 +685,20 @@ Local-exec and control-plane failures go directly to §3.6.4 / §3.6.7.
 - Preserve current durable evidence, receipts, traces, logs, state snapshot.
 - **Must not** unilaterally clean up, compensate, recover, retry, or roll back.
 - If the operator-approved action **explicitly** contained a pre-approved atomic-failure-rollback mechanism, that mechanism **alone** may execute to avoid data corruption, with full logging.
-- Other rollback / recovery / compensation actions require a new explicit operator decision.
-- Secrets **must not** appear in reports or logs.
+- Other rollback / recovery / compensation actions require new operator authorisation.
+- **Secrets**: Failure STOP report **must not** unnecessarily print secrets. Public / external / uncontrolled reports or logs **must not** contain plaintext secrets. Private operator-controlled scope follows §6.6; internal occurrence does **not** trigger automatic STOP or rotation.
 
 ### §7.4 Report Content (at minimum)
 
-- failing role;
-- designated node;
-- designated model;
-- failed stage (which of F1–F10);
-- error summary — quoting error codes / key log lines; **not** printing secrets / tokens / keys;
+Report content depends on the applicable entry:
+
+  - `FULL_9_ROLE_VIBECODING` / `LIGHTWEIGHT_OPERATION`: failing role, designated node, designated model, failed stage;
+  - `HERMES_OPENCODE_VERSION_GOVERNANCE_GATE` (§3.8): V-stage, component, node / profile;
+  - `CENTRAL_MODEL_POOL_GOVERNANCE_GATE` (§6.9): C-stage, target delta, affected node;
+  - `CONSULTATION_ONLY` or non-applicable fields: `NOT_APPLICABLE`.
+
+All entries additionally report:
+- error summary — quoting error codes / key log lines; **not** unnecessarily printing secrets / tokens / keys (per §7.3);
 - actions completed;
 - actions not completed;
 - current Git / task / receipt state (HEAD SHA, current PR if any, list of produced receipts);
@@ -759,7 +763,7 @@ Orchestrator submits fact, risk, and options only — **does not** choose. Runti
 
 ### §8.1 Real F1–F10 Evaluation
 
-`intake → classify → plan/recommend → operator approval → role-node-model assignment → readiness → public-PR permission → execute → evidence/report → closeout`. Listing the 9-role in an assignment **does not** equal real execution completion. Non-applicable gates **must** emit a `NOT_APPLICABLE` verdict / artifact; they **must not** be skipped.
+`intake → classify → plan/recommend → operator approval → role-node-model assignment → readiness → public-PR permission → execute → evidence/report → closeout`. Listing the 9-role in an assignment **does not** equal real execution completion. Non-applicable gates **must** emit a `NOT_APPLICABLE` verdict / artifact; they **must not** be skipped. Dedicated governance gates (§3.8, §6.9) **must not** be forced into role-node-model assignment; their non-applicable pipeline steps carry `NOT_APPLICABLE`.
 
 ### §8.2 Non-Canonical Paths
 
@@ -877,7 +881,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
 ### §10.1 Drift Signals
 
   - (a) treating a profile as a node;
-  - (b) role trimming;
+  - (b) role trimming — trimming the roles / gates required by the operator-selected entry constitutes drift. `FULL_9_ROLE_VIBECODING`: complete 9-role must not be trimmed. `LIGHTWEIGHT_OPERATION`: executes operator-approved actual role set;
   - (c) substituting simulation for real execution;
   - (d) historical evidence treated as current;
   - (e) agent self-claim treated as operator acceptance;
@@ -918,7 +922,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (nn) continuing VibeCoding tasks while `21bao` is unavailable;
   - (oo) mis-interpreting `21bao`'s network route failover as control-plane failover;
   - (pp) re-opening `21bao` VibeCoding dispatch before every item in §3.6.7 passes (§3.6.7);
-  - (qq) credential discovery that prints a value-bearing environment map, or outputs secret-derived fragments into public / external / uncontrolled scope, or private operator-controlled output without operator permission (§6.6);
+  - (qq) credential discovery that prints a value-bearing environment map, or outputs secret-derived fragments into public / external / uncontrolled scope, or private operator-controlled output beyond the operator-approved operational scope (§6.6);
   - (rr) treating a public-format token prefix marker as the credential value (§6.6);
   - (ss) auto-rotating, auto-replacing, or auto-invalidating a credential without explicit operator authorisation (§6.6).
 
@@ -929,7 +933,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
 ### §10.3 Efficiency ≠ Skip
 
 - No skipping roles / gates / evidence required by the operator-selected execution mode for efficiency. In `FULL_9_ROLE_VIBECODING`, the complete 9-role pipeline and dual-tester / dual-reviewer independence **must** be maintained. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set is executed.
-- Dual-tester / dual-reviewer independence **must not** be relaxed for "saving time".
+- Dual-tester / dual-reviewer independence applies **only** in `FULL_9_ROLE_VIBECODING` or when operator explicitly selects dual tester / dual reviewer. It **must not** be implied for `LIGHTWEIGHT_OPERATION` or dedicated governance gates.
 - High-risk authorisation boundaries **must not** be merged or hidden.
 - Any proposal to bypass §9 checkpoints or §7 STOP in the name of efficiency is itself drift.
 
@@ -1080,7 +1084,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | `V2 Effective Date` | [awaiting operator acceptance] |
 | `V2 Version` | `2.0` (DRAFT — awaiting acceptance) |
 | Historical reference | `v1.0` (PR #276, commits `9f7e8b1` + follow-up `8509a07`); preserved in Git history |
-| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), complete 9-role, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, canonical pipeline, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
+| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, canonical pipeline, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
 
 ---
 
