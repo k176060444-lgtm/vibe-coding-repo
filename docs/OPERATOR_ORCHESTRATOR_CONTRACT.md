@@ -460,9 +460,11 @@ After VC8, the path depends on the selected sub-mode:
 
 The Work Order **must not** add, delete, replace, or default-assign unapproved roles / nodes / models, and **must not** present recommendations as approvals.
 
+**Work Order approval checkpoint.** After `vibedev` generates the Work Order (consultation-only or assignment-based), the operator **must** review, modify, approve, or reject it. Only after the operator explicitly forms `OPERATOR_APPROVED_WORK_ORDER` may `vibedev` proceed to readiness, role execution, tool calls, writes, or any other execution stage. `vibedev` **must not** treat Work Order generation, self-review, or absence of objection as operator approval. Assignment baseline approval (`OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`) is **not** equivalent to Work Order approval.
+
 #### §4.1.1 VIBECODING_CONSULTATION_ONLY
 
-Inside `VIBECODING_MODE`, consultation-only discussion, planning, explanation, or research. Does **not** write to the repo, SSH, call workers, or change state. **Does not** enter 8-role assignment. After VC8, `vibedev` generates a consultation-only Work Order (recording objective, scope / exclusions, permitted read range, forbidden execution boundary, expected output, orchestrator binding, and budget) without forming `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`. `vibedev` may proceed with operator's go-ahead after classification.
+Inside `VIBECODING_MODE`, consultation-only discussion, planning, explanation, or research. Does **not** write to the repo, SSH, call workers, or change state. **Does not** enter 8-role assignment. After VC8, `vibedev` generates a consultation-only Work Order (recording objective, scope / exclusions, permitted read range, forbidden execution boundary, expected output, orchestrator binding, and budget) without forming `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`. The operator **must** review, modify, approve, or reject the Work Order. VC8 sub-mode selection or "go-ahead after classification" does **not** substitute for Work Order approval. Only after `OPERATOR_APPROVED_WORK_ORDER` is formed may `vibedev` proceed.
 
 This sub-mode does **not** include operator↔ChatGPT construction-phase discussion. VC0–VC8 (§4.1) are the shared pre-stage for all three sub-modes; `VIBECODING_CONSULTATION_ONLY` does **not** re-enter VC0–VC8. However, VC1 requirement discussion occurs inside `VIBECODING_MODE` and is **not** "outside" the mode.
 
@@ -481,7 +483,7 @@ Recommended minimum roles for LIGHTWEIGHT:
   - one independent verifier / reviewer;
   - git-integrator (if Git write is involved).
 
-After VC8, `vibedev` recommends the actual non-orchestrator role set and each role's node, canonical provider, runtime provider, model, responsibilities, independence requirements, budget, and fallback boundaries. Operator approves item by item, forming `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`. Only then does `vibedev` generate the Work Order. The Work Order **must not** add, delete, replace, or default-assign unapproved roles / nodes / models, and **must not** present recommendations as approvals.
+After VC8, `vibedev` recommends the actual non-orchestrator role set and each role's node, canonical provider, runtime provider, model, responsibilities, independence requirements, budget, and fallback boundaries. Operator approves item by item, forming `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`. Only then does `vibedev` generate the Work Order. The Work Order **must not** add, delete, replace, or default-assign unapproved roles / nodes / models, and **must not** present recommendations as approvals. The operator **must** then review, modify, approve, or reject the Work Order. Assignment baseline approval (`OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`) is **not** equivalent to Work Order approval. Only after `OPERATOR_APPROVED_WORK_ORDER` is formed may `vibedev` proceed to readiness, role execution, or any execution stage.
 
 In `LIGHTWEIGHT_OPERATION`, each operator-approved role **must** also produce a distinct, attributable, meaningful model invocation using its assigned model. Deterministic steps (scripts, `pytest`, Git, SSH, static analysis) **may** serve as internal tool steps for a role but **must not** substitute for that role's own model invocation.
 
@@ -498,7 +500,14 @@ Any of the following **requires** `vibedev` to recommend the complete 9-role ros
   - failure / drift / incident recovery or high-uncertainty task;
   - operator explicitly requires FULL.
 
-**Hermes / OpenCode version or service changes** and **CMP / provider / model / alias / routing changes** are **not** automatic FULL triggers. They enter the dedicated governance gates (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE, §6.9 CENTRAL_MODEL_POOL_GOVERNANCE_GATE). If the task simultaneously changes business runtime logic or contains other FULL-scope items, `vibedev` must split the scope or the operator decides FULL.
+**Hermes / OpenCode version or service changes** and **CMP / provider / model / alias / routing changes** are **not** automatic FULL triggers. They enter the dedicated governance gates (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE, §6.9 CENTRAL_MODEL_POOL_GOVERNANCE_GATE).
+
+If the task simultaneously changes business runtime logic (or contains other FULL-scope items) **and** involves Hermes/OpenCode VERSION or CMP/provider/model governance items, the scope **must** be split:
+
+  - The business part may be classified by operator as `FULL_9_ROLE_VIBECODING` at VC8.
+  - The VERSION part **must** independently enter `HERMES_OPENCODE_VERSION_GOVERNANCE_GATE`.
+  - The CMP part **must** independently enter `CENTRAL_MODEL_POOL_GOVERNANCE_GATE`.
+  - Operator's choice of FULL for the business part does **not** absorb the governance parts into the same FULL Work Order, authorisation, or operation. Governance parts retain independent scope, independent authorisation records, and independent operations.
 
 ### §4.2 Operator Decision
 
@@ -534,7 +543,7 @@ When operator selects `FULL_9_ROLE_VIBECODING`, the complete 9-role roster appli
 
 The enumeration order above defines the **roster**, not execution order, concurrency, handoff, role re-entry, loop, checkpoint, or completion order. The detailed topology is defined by the future operator-approved operational workflow spec or the task-specific workflow plan; it may be sequential, controlled-parallel, or bounded-loop, but **must not** delete, merge, skip, or substitute any FULL mandatory role. `vibedev` (orchestrator) coordinates throughout the entire run but **must not** substitute for any other role's responsibilities.
 
-In `FULL_9_ROLE_VIBECODING`, the 8 non-orchestrator roles (items 2–9 above) enter the per-role assignment process (§5). The orchestrator is **not** re-recommended or re-approved during assignment.
+In `FULL_9_ROLE_VIBECODING`, the 8 non-orchestrator roles (items 2–9 above) enter the per-role assignment process (§5). The orchestrator is **not** re-recommended or re-approved during assignment. After assignment baseline approval and Work Order generation, the operator **must** review, modify, approve, or reject the Work Order. Assignment baseline approval (`OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`) is **not** equivalent to Work Order approval. Only after `OPERATOR_APPROVED_WORK_ORDER` is formed may `vibedev` proceed to readiness, role execution, or any execution stage.
 
 ### §4.4 Forbidden Role-Execution Patterns (FULL and LIGHTWEIGHT modes)
 
@@ -995,7 +1004,7 @@ Orchestrator submits fact, risk, and options only — **does not** choose. Runti
 
 The following entry skeleton is confirmed:
 
-> operator explicitly enters `VIBECODING_MODE` → VC0–VC8 pre-stage (§4.1) → operator selects sub-mode → where applicable, `vibedev` recommends non-orchestrator role assignments → operator approves item by item forming `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE` → `vibedev` generates Work Order (consultation-only Work Order without baseline for `VIBECODING_CONSULTATION_ONLY`).
+> operator explicitly enters `VIBECODING_MODE` → VC0–VC8 pre-stage (§4.1) → operator selects sub-mode → where applicable, `vibedev` recommends non-orchestrator role assignments → operator approves item by item forming `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE` → `vibedev` generates Work Order (consultation-only Work Order without baseline for `VIBECODING_CONSULTATION_ONLY`) → operator reviews, modifies, approves, or rejects the Work Order → only after `OPERATOR_APPROVED_WORK_ORDER` may `vibedev` proceed to readiness, role execution, or any execution stage.
 
 The following items are **not yet finalised** by operator and remain for future V2 amendment or operator-approved operational workflow spec:
 
@@ -1079,7 +1088,7 @@ Operator **must** explicitly specify node + model for every actual non-orchestra
 
   - `FULL_9_ROLE_VIBECODING`: operator approves the 8 non-orchestrator roles item by item, forming `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`.
   - `LIGHTWEIGHT_OPERATION`: operator approves the actual non-orchestrator role set item by item, forming `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`.
-  - `VIBECODING_CONSULTATION_ONLY` and the two dedicated governance gates (§3.8, §6.9): do **not** enter role assignment; a consultation-only Work Order is generated without a baseline.
+  - `VIBECODING_CONSULTATION_ONLY` and the two dedicated governance gates (§3.8, §6.9): do **not** enter role assignment; a consultation-only Work Order is generated without a baseline. The operator **must** review, modify, approve, or reject the Work Order. VC8 sub-mode selection does **not** substitute for Work Order approval.
 
 ### §9.2 B. PR Workflow
 
@@ -1374,7 +1383,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Non-orchestrator assignment | absent | FULL: 8 roles item-by-item approval; LIGHTWEIGHT: actual role set item-by-item approval; after VC8, before Work Order; forms `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`; VIBECODING_CONSULTATION_ONLY: no assignment, no baseline, consultation-only Work Order instead |
 | Dedicated governance gates | absent | HERMES_OPENCODE_VERSION_GOVERNANCE_GATE (§3.8) + CENTRAL_MODEL_POOL_GOVERNANCE_GATE (§6.9); do **not** enter VibeCoding modes; do **not** trigger 8-role / 9-role; outside VIBECODING_MODE (§4.2) |
 | Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.6–§6.9); dedicated governance gate (§6.9) |
-| Workflow governance envelope | absent | confirmed entry skeleton (§8.1); detailed workflow (intake, plan checkpoint, readiness, role execution order, test/review, Git/PR, closeout, state machine) **not yet finalised** — pending operator approval |
+| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → only `OPERATOR_APPROVED_WORK_ORDER` unlocks execution; detailed workflow (intake, plan checkpoint, readiness, role execution order, test/review, Git/PR, closeout, state machine) **not yet finalised** — pending operator approval |
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
