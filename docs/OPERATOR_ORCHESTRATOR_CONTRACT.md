@@ -500,18 +500,20 @@ When operator selects `FULL_9_ROLE_VIBECODING`, the complete 9-role roster appli
 
 The enumeration order above defines the **roster**, not execution order, concurrency, handoff, role re-entry, loop, checkpoint, or completion order. The detailed topology is defined by the future operator-approved operational workflow spec or the task-specific workflow plan; it may be sequential, controlled-parallel, or bounded-loop, but **must not** delete, merge, skip, or substitute any FULL mandatory role. `vibedev` (orchestrator) coordinates throughout the entire run but **must not** substitute for any other role's responsibilities.
 
-### §4.4 Forbidden Patterns (FULL mode)
+### §4.4 Forbidden Role-Execution Patterns (FULL and LIGHTWEIGHT modes)
 
-- role trimming / merging / fast path / simple-bypass / low-risk-bypass;
+- role trimming / merging / fast path / simple-bypass / low-risk-bypass — the "complete 9-role must not be trimmed" rule applies only to `FULL_9_ROLE_VIBECODING`; `LIGHTWEIGHT_OPERATION` executes the operator-approved actual role set;
 - named-but-not-executed (named without execution);
 - merging into another role;
 - substituting simulation for real execution;
-- claiming a role is completed **merely** by running generic commands such as `pytest`, `fixture`, `lint`, static analysis, deterministic scripts or simulation. Deterministic tools **may** serve as a role's internal execution steps, data sources, and evidence, but **must not** be the sole basis for role completion. In both `FULL_9_ROLE_VIBECODING` and `LIGHTWEIGHT_OPERATION`, each actual role must sequentially possess its distinct meaningful model invocation (§4.5), role-specific work product, and completion evidence (§4.8). Generic commands, scripts, or test results alone **cannot** prove a role is complete;
+- claiming a role is completed **merely** by running generic commands such as `pytest`, `fixture`, `lint`, static analysis, deterministic scripts or simulation. Deterministic tools **may** serve as a role's internal execution steps, data sources, and evidence, but **must not** be the sole basis for role completion. In both `FULL_9_ROLE_VIBECODING` and `LIGHTWEIGHT_OPERATION`, each actual role must satisfy all of the following: its distinct meaningful model invocation (§4.5), role-specific work product, and completion evidence (§4.8). Generic commands, scripts, or test results alone **cannot** prove a role is complete. The roster enumeration (§4.3) defines the role set, not execution order, concurrency, handoff, re-entry, loop, checkpoint, or completion order;
 - "workload is small → skip this role".
 
-### §4.5 Distinct Model Invocation Requirement (FULL mode)
+### §4.5 Distinct Model Invocation Requirement (FULL and LIGHTWEIGHT modes)
 
 In an operator-approved `FULL_9_ROLE_VIBECODING` run, each of the nine roles **must** execute at least one distinct, attributable, meaningful, evidence-bearing model invocation using the operator-assigned model for that role.
+
+In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set **must** satisfy the same distinct model invocation requirement. `VIBECODING_CONSULTATION_ONLY` does **not** trigger additional execution roles and therefore does **not** require per-role model invocation.
 
 Deterministic tools, scripts, `pytest`, Git, SSH, file reads, and static analysis **may** assist a role's work but **must not** substitute for that role's own model invocation.
 
@@ -523,7 +525,7 @@ The following are **forbidden**:
 - ACK-only, empty, template-placeholder, or no-substantive-task invocations;
 - executing a generic command and claiming the role is complete.
 
-### §4.6 Empty-Placeholder Prohibition (FULL mode)
+### §4.6 Empty-Placeholder and Constant-Verdict Prohibition (FULL and LIGHTWEIGHT modes)
 
 Empty placeholders (no input + no output + no evidence) are **forbidden**. Permitted output constants: `NO_CHANGE_REQUIRED`, `NOT_APPLICABLE`, `NO_GIT_WRITE_REQUIRED`.
 
@@ -534,7 +536,7 @@ These constants **may only** appear as a verdict after a substantive model invoc
 - evidence references;
 - applicable boundary.
 
-A constant alone does **not** satisfy the substantive work product or role completion requirement (§4.8). `NOT_APPLICABLE` **must not** be used to exempt a FULL mandatory role from execution entirely. For `git-integrator` when no Git write is involved, the role **must** still execute a distinct model invocation, produce a no-git-write eligibility check with repo / baseline / diff evidence, and deliver a reasoned verdict.
+A constant alone does **not** satisfy the substantive work product or role completion requirement (§4.8). This applies to both `FULL_9_ROLE_VIBECODING` (all nine roles) and `LIGHTWEIGHT_OPERATION` (operator-approved actual role set). `NOT_APPLICABLE` **must not** be used to exempt a FULL mandatory role from execution entirely. In `LIGHTWEIGHT_OPERATION`, there are no "default roles" beyond the operator-approved set; constants **must not** be used to fabricate execution of an unapproved role. For `git-integrator` when no Git write is involved, the role **must** still execute a distinct model invocation, produce a no-git-write eligibility check with repo / baseline / diff evidence, and deliver a reasoned verdict.
 
 ### §4.7 Model Invocation Evidence (FULL and LIGHTWEIGHT modes)
 
@@ -584,9 +586,13 @@ Different node or different model remains a **recommended** enhancement (not req
 
 If independence cannot be achieved, runtime **must** STOP, explain the cause and risk, await operator decision, and **must not** automatically degrade.
 
-### §4.10 Conflict Escalation (FULL mode)
+### §4.10 Conflict Escalation (FULL and LIGHTWEIGHT modes)
 
-When a tester or reviewer raises a valid change demand, the current candidate **must not** enter PASS, Git integration, or closeout. `vibedev` **must** record the disagreement, affected scope, and evidence.
+This section applies to:
+- in `FULL_9_ROLE_VIBECODING`: tester-a, tester-b, reviewer-a, reviewer-b;
+- in `LIGHTWEIGHT_OPERATION`: any operator-approved verifier, tester, or reviewer role.
+
+When such a role raises a valid change demand, the current candidate **must not** enter PASS, Git integration, or closeout. `vibedev` **must** record the disagreement, affected scope, and evidence.
 
 Which role to return to, which steps to re-run, and whether a new checkpoint is required are determined by the future operator-approved operational workflow spec or the current task-specific workflow plan. If the existing approved plan does not define a recovery path, or the disagreement cannot be resolved, runtime **must** STOP and await operator decision. `vibedev` **must not** unilaterally compromise, ignore a change demand, or invent an unapproved loop.
 
@@ -1095,7 +1101,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (w) `CLUSTER_CONSTRUCTION_OPERATION` used to bypass the 9-role / gates / evidence / checkpoints that apply after operator accepts the canonical runtime/workflow and declares `OPERATIONAL_PHASE` cutover (§8.9);
   - (x) binding the cluster to a single fixed `Hermes` / `OpenCode` version without qualification (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
   - (y) claiming compatibility without verification / reusing stale qualification evidence / auto-expanding scope after single-node canary (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
-  - (z) using a dedicated governance gate (§3.8, §6.9) to downgrade a business task, bypass operator, bypass Failure STOP, bypass evidence requirements, bypass public secret boundary, or convert a business task into a governance-only operation (§4.4);
+  - (z) using a dedicated governance gate (§3.8, §6.9) to downgrade a business task, bypass operator, bypass Failure STOP, bypass evidence requirements, bypass public secret boundary, or convert a business task into a governance-only operation (§4.2);
   - (aa) continuing assignments after a node-verification failure without operator approval;
   - (bb) bare constant verdict — using `NO_CHANGE_REQUIRED`, `NOT_APPLICABLE`, or `NO_GIT_WRITE_REQUIRED` without a prior substantive model invocation, evidence analysis, reason, scope, and evidence references (§4.6);
   - (cc) tool-only completion — claiming a role is complete based solely on deterministic tools, scripts, `pytest`, Git, SSH, file reads, or static analysis, without the role's own distinct model invocation (§4.4, §4.5);
@@ -1305,7 +1311,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Area | V1 (PR #276) | V2 (this document) |
 |---|---|---|
 | 3000-character rule | "each segment < 3000 characters" (hard) | per-segment split threshold: ≤3000 single segment, >3000 split with each segment ≤3000; total prompt may exceed 3000; must not delete content to reduce segment count (§11.5) |
-| 9-role roster | five mixed roles | FULL_9_ROLE_VIBECODING: fully enumerated 9-role roster (§4.3); roster enumeration does **not** define execution order, concurrency, or workflow; LIGHTWEIGHT: minimum recommended roles (§4.1.2); VIBECODING_CONSULTATION_ONLY: no 8-role assignment (§4.1.1); FULL nine roles each require distinct meaningful model invocation (§4.5); tools cannot substitute for a role's own model call |
+| 9-role roster | five mixed roles | FULL_9_ROLE_VIBECODING: fully enumerated 9-role roster (§4.3); roster enumeration does **not** define execution order, concurrency, or workflow; LIGHTWEIGHT: minimum recommended roles (§4.1.2); VIBECODING_CONSULTATION_ONLY: no 8-role assignment (§4.1.1); FULL nine roles and LIGHTWEIGHT actual roles each require distinct meaningful model invocation (§4.5); tools cannot substitute for a role's own model call |
 | Model invocation evidence | absent | FULL nine roles + LIGHTWEIGHT actual roles each require evidence: task/run ID, role, node, model, providers, invocation ID, timestamps, input/output digests, token usage (§4.7); orchestrator evidence via mode-entry model specification |
 | Role completion criteria | absent | FULL nine roles + LIGHTWEIGHT actual roles: 6 conditions (assignment, input, model invocation, work product, acceptance criteria, evidence); invocation alone ≠ completion; failure/empty/missing → §7 STOP (§4.8) |
 | Role trimming | not explicitly forbidden | FULL mode only: explicit no-trim / no-skip / no "named-but-not-executed" (§4.5); LIGHTWEIGHT executes operator-approved actual role set; named-but-not-executed, no distinct model invocation, shared invocation, multi-role response reuse, generic-command-only, tool-only completion, and bare constant verdict are all drift (§10.1) |
