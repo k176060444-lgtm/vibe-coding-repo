@@ -439,7 +439,7 @@ Once the operator explicitly enters `VIBECODING_MODE`, the following pre-stage (
 - **VC0** — Operator explicitly enters `VIBECODING_MODE`.
 - **VC1** — Operator ↔ `vibedev` requirement discussion and preliminary alignment.
 - **VC2** — `vibedev` proposes a bounded read-only Intake plan.
-- **VC3** — Operator approves Intake scope, tools, `vibedev`'s current model, node, budget, and any exceptions.
+- **VC3** — Operator approves Intake scope, tools, budget, read-only boundary, and explicit exceptions. `vibedev`'s orchestrator model and node are already operator-preselected in the current `vibedev` session and inherited by the `VIBECODING_MODE` run; VC3 records and references this binding but does **not** re-recommend or re-approve it. If the operator actively changes the orchestrator model, or a quota / provider / qualification anomaly occurs, runtime **must** STOP and await operator re-selection; `vibedev` **must not** self-replace.
 - **VC4** — `vibedev` executes the approved read-only Intake.
 - **VC5** — `vibedev` submits the Intake report.
 - **VC6** — Operator ↔ `vibedev` final requirement alignment based on the Intake report, forming `ALIGNED_REQUIREMENT_SCOPE`, exclusions, and success criteria.
@@ -456,7 +456,7 @@ After VC8, `vibedev` recommends non-orchestrator role assignments (§4.3, §5). 
 
 Inside `VIBECODING_MODE`, consultation-only discussion, planning, explanation, or research. Does **not** write to the repo, SSH, call workers, or change state. **Does not** enter 8-role assignment. `vibedev` may proceed with operator's go-ahead after classification.
 
-This sub-mode does **not** include ordinary operator↔`vibedev` discussion (which is outside `VIBECODING_MODE`) and does **not** include operator↔ChatGPT construction-phase discussion.
+This sub-mode does **not** include operator↔ChatGPT construction-phase discussion. VC0–VC8 (§4.1) are the shared pre-stage for all three sub-modes; `VIBECODING_CONSULTATION_ONLY` does **not** re-enter VC0–VC8. However, VC1 requirement discussion occurs inside `VIBECODING_MODE` and is **not** "outside" the mode.
 
 #### §4.1.2 LIGHTWEIGHT_OPERATION
 
@@ -504,7 +504,7 @@ Ordinary discussion, `VIBECODING_CONSULTATION_ONLY`, or a dedicated governance g
 
 When operator selects `FULL_9_ROLE_VIBECODING`, the complete 9-role roster applies:
 
-  1. `orchestrator` — fixed to be `vibedev` on `21bao`. The orchestrator's model is operator-specified at VibeCoding-mode entry and is **not** part of the per-task 8-role assignment. The orchestrator is recorded in the Work Order as `OPERATOR_PRESELECTED_SESSION_BINDING` (node `21bao`, current model, provider mapping). `vibedev` **must not** self-replace the orchestrator model. If the operator actively changes it, or a quota / provider / qualification anomaly occurs, runtime **must** STOP and await operator re-selection.
+  1. `orchestrator` — fixed to be `vibedev` on `21bao`. The orchestrator's model is operator-preselected in the current `vibedev` session and inherited by the `VIBECODING_MODE` run (assignment_source=`OPERATOR_PRESELECTED_SESSION_BINDING`). The orchestrator is **not** part of the per-task 8-role assignment. The Work Order records the binding (node `21bao`, current model, provider mapping) as an audit fact; recording does **not** constitute a new recommendation or approval. `vibedev` **must not** self-replace the orchestrator model. If the operator actively changes it, or a quota / provider / qualification anomaly occurs, runtime **must** STOP and await operator re-selection.
   2. `explorer`.
   3. `planner`.
   4. `implementer`.
@@ -571,7 +571,7 @@ Each role's model invocation evidence **must** associate at least:
 
 In `FULL_9_ROLE_VIBECODING`, all nine roles **must** satisfy this evidence requirement. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set **must** satisfy it. `VIBECODING_CONSULTATION_ONLY` does **not** trigger 8-role assignment and therefore does **not** require per-role invocation evidence.
 
-For the orchestrator role, the operator-approved assignment is satisfied by the operator-specified orchestrator model and scope at VIBECODING-MODE entry (§4.1). The orchestrator's model invocation evidence follows the same schema; its completion evidence is the coordinated run itself, not a substitute for any other role's evidence.
+For the orchestrator role, the operator-approved assignment is satisfied by the operator-preselected orchestrator model and scope inherited from the current `vibedev` session (assignment_source=`OPERATOR_PRESELECTED_SESSION_BINDING`, §4.3). The orchestrator's model invocation evidence follows the same schema; its completion evidence is the coordinated run itself and does **not** substitute for any other role's evidence.
 
 ### §4.8 Role Completion Criteria (FULL and LIGHTWEIGHT modes)
 
@@ -588,7 +588,7 @@ Model invocation failure, quota exhaustion, empty or unparseable output, or miss
 
 In `FULL_9_ROLE_VIBECODING`, all nine roles **must** satisfy these criteria. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set **must** satisfy them. `VIBECODING_CONSULTATION_ONLY` does **not** trigger 8-role assignment.
 
-For the orchestrator role, criterion 1 (operator-approved assignment) is satisfied by the operator-specified orchestrator model and scope at VIBECODING-MODE entry (§4.1). The orchestrator's completion is evidenced by the coordinated run itself; it does **not** substitute for any other role's completion criteria.
+For the orchestrator role, criterion 1 (operator-approved assignment) is satisfied by the operator-preselected orchestrator model and scope inherited from the current `vibedev` session (assignment_source=`OPERATOR_PRESELECTED_SESSION_BINDING`, §4.3). The orchestrator's completion is evidenced by the coordinated run itself; it does **not** substitute for any other role's completion evidence.
 
 ### §4.9 Independence of Dual Tester / Dual Reviewer (FULL mode)
 
@@ -1331,7 +1331,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 |---|---|---|
 | 3000-character rule | "each segment < 3000 characters" (hard) | per-segment split threshold: ≤3000 single segment, >3000 split with each segment ≤3000; total prompt may exceed 3000; must not delete content to reduce segment count (§11.5) |
 | 9-role roster | five mixed roles | FULL_9_ROLE_VIBECODING: fully enumerated 9-role roster (§4.3); roster enumeration does **not** define execution order, concurrency, or workflow; LIGHTWEIGHT: minimum recommended roles (§4.1.2); VIBECODING_CONSULTATION_ONLY: no 8-role assignment (§4.1.1); FULL nine roles and LIGHTWEIGHT actual roles each require distinct meaningful model invocation (§4.5); tools cannot substitute for a role's own model call |
-| Model invocation evidence | absent | FULL nine roles + LIGHTWEIGHT actual roles each require evidence: task/run ID, role, node, model, providers, invocation ID, timestamps, input/output digests, token usage (§4.7); orchestrator evidence via mode-entry model specification |
+| Model invocation evidence | absent | FULL nine roles + LIGHTWEIGHT actual roles each require evidence: task/run ID, role, node, model, providers, invocation ID, timestamps, input/output digests, token usage (§4.7); orchestrator evidence via current-session preselected binding (`OPERATOR_PRESELECTED_SESSION_BINDING`, §4.3) |
 | Role completion criteria | absent | FULL nine roles + LIGHTWEIGHT actual roles: 6 conditions (assignment, input, model invocation, work product, acceptance criteria, evidence); invocation alone ≠ completion; failure/empty/missing → §7 STOP (§4.8) |
 | Role trimming | not explicitly forbidden | FULL mode only: explicit no-trim / no-skip / no "named-but-not-executed" (§4.5); LIGHTWEIGHT executes operator-approved actual role set; named-but-not-executed, no distinct model invocation, shared invocation, multi-role response reuse, generic-command-only, tool-only completion, and bare constant verdict are all drift (§10.1) |
 | Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; different role invocation IDs; no shared model call; **recommended** different node + model (§4.9) |
