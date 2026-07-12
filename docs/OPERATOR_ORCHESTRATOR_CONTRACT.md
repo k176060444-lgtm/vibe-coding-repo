@@ -529,7 +529,7 @@ If the same requirement simultaneously involves business tasks and version / CMP
 
 Ordinary discussion, `VIBECODING_CONSULTATION_ONLY`, or a dedicated governance gate **must not** be used to bypass the applicable LIGHTWEIGHT / FULL sub-mode, operator assignment, or high-risk checkpoint.
 
-**LIGHTWEIGHT risk escalation STOP.** `LIGHTWEIGHT_OPERATION` is valid only while all conditions in §4.1.2 continuously hold. If at any stage after VC8 a FULL trigger item appears, risk escalates, scope expands, or the original classification basis no longer holds, `vibedev` **must** immediately STOP and preserve all evidence produced so far. `vibedev` **must not** auto-escalate to FULL, auto-add roles, rewrite assignments, or continue execution. `vibedev` reports the triggering facts, affected scope, and current state; operator decides whether to return to VC6 for re-alignment, re-classify via VC7/VC8, or terminate. The detailed recovery sequence, readiness, and role execution topology are not specified in this round.
+**LIGHTWEIGHT risk escalation STOP.** `LIGHTWEIGHT_OPERATION` is valid only while all conditions in §4.1.2 continuously hold. If at any stage after VC8 a FULL trigger item appears, risk escalates, scope expands, or the original classification basis no longer holds, `vibedev` **must** immediately STOP and preserve all evidence produced so far. `vibedev` **must not** auto-escalate to FULL, auto-add roles, rewrite assignments, or continue execution. `vibedev` reports the triggering facts, affected scope, and current state; operator decides whether to return to VC6 for re-alignment, re-classify via VC7/VC8, or terminate.
 
 ### §4.3 Full 9-Role Roster (FULL_9_ROLE_VIBECODING)
 
@@ -653,7 +653,7 @@ If independence cannot be achieved, runtime **must** STOP, explain the cause and
 
 #### §4.10.1 `GLOBAL_READINESS`
 
-Executed **once** immediately after `OPERATOR_APPROVED_WORK_ORDER` is formed, and again whenever an invalidation condition holds. `vibedev` does **not** introduce a separate validator role and does **not** re-confirm with operator; the operator-approved Work Order is the start signal.
+Executed **once** immediately after `OPERATOR_APPROVED_WORK_ORDER` is formed, and again whenever an invalidation condition holds. `vibedev` does **not** introduce a separate validator role and does **not** re-confirm with operator; the operator-approved Work Order is the start signal. No sub-mode requires an additional operator "start" confirmation.
 
 At minimum, `GLOBAL_READINESS` checks:
 
@@ -669,17 +669,19 @@ At minimum, `GLOBAL_READINESS` checks:
 
 Primary outcomes:
 
-  - `GLOBAL_READINESS_PASS` → `vibedev` automatically proceeds to the first applicable non-orchestrator role's `ROLE_ACTIVATION_READINESS`.
+  - `GLOBAL_READINESS_PASS`:
+    - `VIBECODING_CONSULTATION_ONLY`: `vibedev` / orchestrator directly executes the operator-approved consultation Work Order, produces the consultation deliverable and report. **No** non-orchestrator `ROLE_ACTIVATION_READINESS`, no `ROLE_COMPLETION_REPORT`.
+    - `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING`: `vibedev` automatically proceeds to the first applicable non-orchestrator role's `ROLE_ACTIVATION_READINESS`.
   - `GLOBAL_READINESS_STOP` → STOP and report. Warnings **must not** silently downgrade to PASS.
 
 A readiness probe verifies callability; it does **not** count as a business role's distinct model invocation and does **not** satisfy any role's work product or completion criterion.
 
-Invalidation conditions (require re-running `GLOBAL_READINESS` or STOP):
+Invalidation conditions:
 
   - Work Order, VC6 scope, sub-mode, assignment, repo baseline, control plane, node identity, transport, CMP / provider / credential, toolchain, or evidence mechanism undergoes a substantive change;
   - any role's `ROLE_ACTIVATION_READINESS` reveals a global invariant shift.
 
-When invalidated, mark `GLOBAL_READINESS_INVALIDATED` and either re-run `GLOBAL_READINESS` or STOP. Re-running does **not** require operator re-approval as long as the original `OPERATOR_APPROVED_WORK_ORDER` and binding remain in force.
+When invalidated, mark `GLOBAL_READINESS_INVALIDATED` and either re-run `GLOBAL_READINESS` or STOP.
 
 #### §4.10.2 `ROLE_ACTIVATION_READINESS`
 
@@ -702,7 +704,17 @@ Primary outcomes:
 
 Activation checks and probes **must not** count as the target role's execution, distinct model invocation, work product, or completion evidence (§4.5, §4.7, §4.8).
 
-### §4.11 Conflict Escalation (FULL and LIGHTWEIGHT modes)
+#### §4.10.3 Readiness Failure, Invalidation, and Revalidation Policy
+
+The following policy unifies §4.10.1, §4.10.2, §7.1, §7.3, §7.6 and §4.14 and resolves earlier "readiness invalid → STOP" ambiguity:
+
+  - `GLOBAL_READINESS_STOP` or `ROLE_ACTIVATION_READINESS_FAIL` → immediate STOP.
+  - Pause-and-revalidate path: when only a dynamic state has drifted (transient transport blip, fresh probe needed, transient credential / quota refresh, transient control-plane transient unavailability) **and** Work Order, VC6 scope, sub-mode, assignment, node / model / provider identity, and permissions are unchanged, `vibedev` may pause dispatch, re-run `GLOBAL_READINESS` (and the affected `ROLE_ACTIVATION_READINESS`), and resume. Operator re-approval is **not** required.
+  - STOP-back-to-operator path: when Work Order, VC6 scope, sub-mode, assignment, node / model / provider / credential identity, or permissions change, `vibedev` **must** STOP and return to operator; revalidation alone does **not** authorise continuation.
+  - Repo baseline progression that is normal, authorised, and within the Work Order (e.g. expected candidate / artifact version advance on the working branch) is **not** repo baseline drift. It is handled by the §4.14 dependency-invalidation rules. Only unexpected, external, or out-of-Work-Order changes to branch / base / HEAD / working tree trigger `GLOBAL_READINESS_INVALIDATED` or STOP.
+  - `GLOBAL_READINESS_INVALIDATED` and re-running are recorded in evidence; the result is either `GLOBAL_READINESS_PASS` (continue) or `GLOBAL_READINESS_STOP` (STOP).
+
+#### §4.11 Conflict Escalation (FULL and LIGHTWEIGHT modes)
 
 This section applies to:
 - in `FULL_9_ROLE_VIBECODING`: tester-a, tester-b, reviewer-a, reviewer-b;
@@ -760,11 +772,19 @@ Before returning to a role, re-run its `ROLE_ACTIVATION_READINESS` (§4.10). If 
 
 ### §4.13 `ROLE_COMPLETION_REPORT` and Cross-Verification
 
-Each non-orchestrator role **must** submit a structured `ROLE_COMPLETION_REPORT` at the end of its formal model invocation. The report **must** include at minimum:
+Each non-orchestrator role **must** submit one `ROLE_COMPLETION_REPORT` at the end of each **role execution attempt / activation cycle**. A single attempt may comprise one or more formal, independent, attributable model invocations and authorised tool interactions performed under the same activation; the report aggregates **all** invocations, tools, artifacts, and evidence produced within that attempt.
 
-  - task / run ID, role, node, operator-specified model, canonical / runtime provider, formal invocation ID, and assignment reference;
+  - Each role execution attempt carries a distinct `attempt_id` and produces exactly one `ROLE_COMPLETION_REPORT` for that attempt.
+  - Readiness probes **must not** be counted into any attempt and **must not** appear inside the report.
+  - When a bounded corrective loop (§4.12) reactivates a role, that reactivation creates a **new attempt** with a new `attempt_id` and a new `ROLE_COMPLETION_REPORT`. The previous report remains in evidence but **must not** count toward the new attempt's PASS.
+  - Nothing in this section requires or implies that a role may invoke the model only once. The "one model call per role" rule is **not** a contract rule; the rules are distinct model invocation (§4.5) and 6-condition completion (§4.8). An attempt may include multiple formal invocations; only the **final** attempt's complete aggregated report is the completion report for that attempt.
+  - Intermediate call outputs **must not** impersonate the final completion report.
+
+The report **must** include at minimum:
+
+  - `attempt_id`, task / run ID, role, node, operator-specified model, canonical / runtime provider, formal invocation ID(s), and assignment reference;
   - actual input, scope / exclusions, and prerequisite artifact / version references;
-  - distinct meaningful model invocation evidence (§4.5, §4.7);
+  - distinct meaningful model invocation evidence (§4.5, §4.7) for each invocation in the attempt;
   - tools / commands, return code, outputs, artifacts, and side-effect evidence;
   - role-specific work product;
   - acceptance criteria, each marked `PASS` / `FAIL` / evidence-backed `NOT_APPLICABLE`;
@@ -1030,11 +1050,13 @@ Any of the following immediately triggers STOP:
 
 - designated node unavailable;
 - node health = `UNKNOWN`;
-- readiness invalid;
+- readiness STOP per §4.10.1 / §4.10.2 / §4.10.3 (`GLOBAL_READINESS_STOP` or `ROLE_ACTIVATION_READINESS_FAIL` not eligible for the pause-and-revalidate path);
 - SSH / local-exec failure;
 - model call failure;
 - `MODEL_QUOTA_EXHAUSTED` (§3.5.13);
 - provider / credential / endpoint / alias / wrapper anomaly.
+
+`GLOBAL_READINESS_INVALIDATED` itself does **not** always equal STOP — it may trigger revalidation under §4.10.3.
 
 ### §7.2 Precedence of §3.5 over §7
 
@@ -1121,6 +1143,8 @@ Once §7 has fired (the **Failure STOP**), the §3.5 route-switching state is **
   - per-path or global budget exhausts;
   - `LOOP_STAGNATION_DETECTED` (§4.12) fires.
 
+Revalidation under §4.10.3 (pause-and-revalidate path) is **not** a retry; it is a readiness refresh. It does not require a new operator authorisation when the pause-and-revalidate conditions hold (§4.10.3).
+
 ### §7.7 Continuation Conditions
 
 Continuation is permitted only after operator's new explicit decision. Operator may decide any of:
@@ -1160,15 +1184,16 @@ The following entry skeleton is confirmed:
 
 > operator explicitly enters `VIBECODING_MODE` → VC0–VC8 pre-stage (§4.1) → operator selects sub-mode → where applicable, `vibedev` recommends non-orchestrator role assignments → operator approves item by item forming `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE` → `vibedev` generates Work Order (consultation-only Work Order without baseline for `VIBECODING_CONSULTATION_ONLY`) → operator reviews, modifies, approves, or rejects the Work Order → only after `OPERATOR_APPROVED_WORK_ORDER` may `vibedev` proceed → `GLOBAL_READINESS` (§4.10) → per-role `ROLE_ACTIVATION_READINESS` (§4.10) → role execution with `ROLE_COMPLETION_REPORT` and cross-verification (§4.13) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (if applicable) → test / review → git-integrator → commit / push → create or update **Draft PR** → STOP and report. `Draft → Ready` and merge each require separate independent operator authorisation (§9.2, §10.6).
 
-The following items are **not yet finalised** by operator and remain for future V2 amendment or operator-approved operational workflow spec:
+The following items **remain** to be finalised by operator in the future operator-approved operational workflow spec (these do **not** affect Round-22 readiness / completion / loop governance):
 
-- Work Order format;
-- readiness order and scope;
-- role execution order (task-specific topology);
-- test / review sequence;
-- Git / PR workflow order;
-- closeout procedure;
-- state machine for `VIBECODING_MODE`.
+- Work Order schema (specific fields and record format);
+- task-specific role linear order, concurrency, and handoff topology;
+- task-specific test / review choreography;
+- Git command-level order;
+- closeout schema;
+- complete `VIBECODING_MODE` state machine.
+
+Already confirmed and **not** subject to the "not yet finalised" label: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR (§4.1, §9.2); paused-and-revalidate path (§4.10.3).
 
 Until the operational workflow is formally accepted and `OPERATIONAL_PHASE` cutover declared, no action may claim V2-compliant formal VibeCoding E2E or canonical pipeline `PASS`.
 
@@ -1522,7 +1547,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | `V2 Effective Date` | [awaiting operator acceptance] |
 | `V2 Version` | `2.0` (DRAFT — awaiting acceptance) |
 | Historical reference | `v1.0` (PR #276, commits `9f7e8b1` + follow-up `8509a07`); preserved in Git history |
-| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role roster, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, workflow governance envelope, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. **Detailed VIBECODING_MODE workflow (intake, plan checkpoint, readiness, role execution order, test/review, Git/PR, closeout, state machine) is not yet finalised and remains for future V2 amendment or operator-approved operational workflow spec.** Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
+| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role roster, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, workflow governance envelope, evidence levels, transfer-prompt delivery, drift handling, and amendment procedure. **Confirmed** in this contract: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); paused-and-revalidate path (§4.10.3); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR. **Still to be finalised by operator in future operator-approved operational workflow spec**: Work Order schema, task-specific role linear order / concurrency / handoff topology, task-specific test / review choreography, Git command-level order, closeout schema, complete `VIBECODING_MODE` state machine. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
 
 ---
 
@@ -1545,7 +1570,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Non-orchestrator assignment | absent | FULL: 8 roles item-by-item approval; LIGHTWEIGHT: actual role set item-by-item approval; after VC8, before Work Order; forms `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`; VIBECODING_CONSULTATION_ONLY: no assignment, no baseline, consultation-only Work Order instead |
 | Dedicated governance gates | absent | HERMES_OPENCODE_VERSION_GOVERNANCE_GATE (§3.8) + CENTRAL_MODEL_POOL_GOVERNANCE_GATE (§6.9); do **not** enter VibeCoding modes; do **not** trigger 8-role / 9-role; outside VIBECODING_MODE (§4.2) |
 | Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.6–§6.9); dedicated governance gate (§6.9) |
-| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → `OPERATOR_APPROVED_WORK_ORDER` is job start → `GLOBAL_READINESS` → per-role `ROLE_ACTIVATION_READINESS` → role execution with `ROLE_COMPLETION_REPORT` + cross-verification (§4.13) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (if applicable) → test / review → git-integrator → commit / push → create or update **Draft PR** → STOP and report. `Draft → Ready` and merge require separate operator authorisation (§9.2, §10.6). Dual-layer readiness by `vibedev` / orchestrator (§4.10). Detailed workflow (intake, plan checkpoint, role linear order, state machine) **not yet finalised** — pending operator approval; bounded corrective loop budgets (§4.12) recommended by `vibedev`, approved by operator in Work Order |
+| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → `OPERATOR_APPROVED_WORK_ORDER` is job start → `GLOBAL_READINESS` → per-role `ROLE_ACTIVATION_READINESS` → role execution with `ROLE_COMPLETION_REPORT` + cross-verification (§4.13) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (if applicable) → test / review → git-integrator → commit / push → create or update **Draft PR** → STOP and report. `Draft → Ready` and merge require separate operator authorisation (§9.2, §10.6). Dual-layer readiness by `vibedev` / orchestrator (§4.10) with paused-and-revalidate path (§4.10.3). Detailed workflow still to be finalised: Work Order schema; task-specific role linear order, concurrency, handoff topology; task-specific test / review choreography; Git command-level order; closeout schema; complete `VIBECODING_MODE` state machine. Bounded corrective loop budgets (§4.12) recommended by `vibedev`, approved by operator in Work Order |
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
