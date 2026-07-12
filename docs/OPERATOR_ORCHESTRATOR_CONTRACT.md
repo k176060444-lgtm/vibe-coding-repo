@@ -495,7 +495,7 @@ If the task produces a tracked diff, the actual role set **must** include:
   - at least one independent tester / verifier / reviewer role, separate from the content-author role;
   - git-integrator (if Git write is involved).
 
-Explorer, tester, reviewer, verifier, and git-integrator **must not** write business content. A role operator-approved as content-author must execute under its own distinct assignment and invocation; the same role identity **must not** simultaneously serve as verifier / reviewer for its own output.
+Explorer, tester, reviewer, verifier, and git-integrator **must not** write business content. A role operator-approved as content-author must execute under its own distinct assignment and invocation; the same role identity **must not** simultaneously serve as tester, verifier, or reviewer for its own output. Even when independent Gate roles also exist, content-author self-test invocations, reports, or outputs **must not** be counted into any required Gate. Implementer may perform implementation self-check, but only as implementer evidence — such self-check **must not** form `TEST_GATE`, verification Gate, or review Gate. The FULL fixed-role separation requirement is unchanged; `LIGHTWEIGHT_OPERATION` applies the same boundary.
 
 **Verifier cross-Gate independence.** If the same verifier role is operator-approved to serve multiple required Gates, each Gate **must** use an independent `ROLE_ACTIVATION_READINESS`, independent attempt, independent formal invocation, independent charter, independent `ROLE_COMPLETION_REPORT`, and independent evidence packet. The same invocation, report, or output **must not** satisfy multiple Gates.
 
@@ -1220,8 +1220,10 @@ Auto-rebase, merge, reset, or force-push are **forbidden**.
   - push: max 3 attempts;
   - Draft PR create / update API: max 3 attempts;
   - same remote, branch, commit, credential identity only;
-  - one per-command `-c http.proxy=""` bypass permitted;
+  - **proxy bypass budget: across the entire Git delivery operation, at most one command-level `-c http.proxy=""` bypass attempt is permitted.** This single budget is shared by push and all PR-API-related Git / HTTP delivery actions and is **not** renewed per retry;
   - **no** persistent proxy modification, token / account / remote switch, or credential identity change.
+
+The bypass attempt, when used, **must** be recorded: attempt, command class (push / PR API), and result. Budget exhaustion followed by another failure is **immediate STOP**.
 
 On push timeout, TLS disconnect, or indeterminate result, **first** read the remote head:
 
@@ -1244,6 +1246,8 @@ States:
   - `PUSH_DELIVERY_VERIFIED`
   - `PUSH_RECOVERY_BUDGET_EXHAUSTED`
   - `UNVERIFIED_PR_API_RETRY`
+  - `PR_API_RECOVERY_BUDGET_EXHAUSTED` — PR create / update API retry budget (max 3 attempts) exhausted. **Immediate STOP**. No fourth attempt permitted. Distinct from `UNVERIFIED_PR_API_RETRY`, which is retry without prior state query.
+  - `PROXY_BYPASS_BUDGET_EXCEEDED` — additional `-c http.proxy=""` bypass attempt beyond the single shared budget for the entire Git delivery operation. **Immediate STOP.**
 
 #### §4.16.12 Draft PR Identification, Public Evidence Body, and Delivery Verification
 
@@ -1265,7 +1269,18 @@ States:
   - risks, limitations, rollback, and open items;
   - explicit statements: `PR remains DRAFT`, `Draft-to-Ready is not authorised`, `Merge is not authorised`.
 
-**Public safety.** The body **must not** contain: credentials or derived features, tokens / cookies / headers, full private logs, unapproved IP / username / host details, local absolute paths, sensitive env values, internal model raw prompts, or private data. `vibedev` may verify projection fidelity but **must not** fabricate technical conclusions.
+**Public safety.**
+
+**`PUBLIC_SAFE_GIT_METADATA_CHECK`.** All public-facing Git metadata **must** pass a public-safety check **before** the action that would make it public:
+
+  - branch name — before creation or first public exposure;
+  - commit message — before commit;
+  - PR title and the pre-commit `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT` — before PR create / update API call;
+  - final `DRAFT_PR_EVIDENCE_BODY` — before API submit and re-verified after submit.
+
+The check covers at minimum: credentials or derived features, tokens / cookies / headers, sensitive env values, internal model prompts, private logs, unapproved public host / IP / username details, local absolute paths, and private data. Any public metadata failing the check **must** trigger **immediate STOP** before the public action; cleaning after commit / push / create / update is **forbidden**. `git-integrator` and `vibedev` **must not** alter technical facts to pass the check.
+
+The PR body **must not** contain: credentials or derived features, tokens / cookies / headers, full private logs, unapproved IP / username / host details, local absolute paths, sensitive env values, internal model raw prompts, or private data. `vibedev` may verify projection fidelity but **must not** fabricate technical conclusions.
 
 **Post-push independent verification.** `git-integrator` **must not** rely on push rc=0 or API success alone. At minimum verify:
 
@@ -1880,7 +1895,8 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (yyy) `LIGHTWEIGHT_UNAPPROVED_ROLE_IMPLIED` — §4.15 or §4.16 governance implicitly requiring a role not in the operator-approved actual role set (§4.1.2, §4.15, §4.16). **Immediate STOP.**
   - (zzz) `LIGHTWEIGHT_DIRECT_IMPLEMENTATION_PROVENANCE_MISSING` — LIGHTWEIGHT without Planner / Plan checkpoint but candidate missing `OPERATOR_APPROVED_WORK_ORDER` binding or `direct_to_implementer=true` approval field (§4.16.2). **Immediate STOP.**
   - (aaaa) `LIGHTWEIGHT_REQUIRED_GATE_SET_MISMATCH` — LIGHTWEIGHT pre-Git gate set does not match Work Order `required_pre_git_gates` (§4.16.7). If unresolvable within pre-approved budget, STOP.
-  - (bbbb) `UNAUTHORISED_CONTENT_AUTHOR_ROLE` — explorer, tester, reviewer, verifier, or git-integrator writing business content. Content-author roles must be independently operator-approved as such; the same role identity **must not** simultaneously serve as verifier / reviewer for its own output. **Immediate STOP.**
+  - (bbbb) `UNAUTHORISED_CONTENT_AUTHOR_ROLE` — explorer, tester, reviewer, verifier, or git-integrator writing business content. Content-author roles must be independently operator-approved as such; the same role identity **must not** simultaneously serve as tester, verifier, or reviewer for its own output. **Immediate STOP.**
+  - (tttt) `CONTENT_AUTHOR_SELF_VALIDATION_COUNTED` — content-author role's self-test invocation, report, or output counted into a required Gate, or implementer self-check used to form `TEST_GATE` / verification Gate / review Gate (§4.1.2). **Immediate STOP.**
   - (cccc) `GIT_INTEGRATION_INPUT_INVALID` — `GIT_INTEGRATION_INPUT_PACKET` source artifact invalidated, scope/assignment drifted, or packet content changed before Git write (§4.16.9). **Immediate STOP.**
   - (dddd) `BROAD_STAGE_OPERATION_DETECTED` — `git add .`, `git add -A`, or `git commit -am` used instead of exact staging per candidate manifest (§4.16.10). **Immediate STOP.**
   - (eeee) `CANDIDATE_COMMIT_TREE_MISMATCH` — final commit tree does not match frozen candidate content tree (§4.16.10). **Immediate STOP.**
@@ -1889,8 +1905,10 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (hhhh) `REMOTE_TARGET_HEAD_DRIFT` — remote target head SHA changed from expected value (§4.16.11). **Immediate STOP.**
   - (iiii) `UNVERIFIED_PUSH_RETRY` — push retry attempted without first reading remote head to verify delivery state (§4.16.11). **Immediate STOP.**
   - (ssss) `UNVERIFIED_PR_API_RETRY` — Draft PR create / update API retry attempted without first querying the PR by repository / head / base / Work Order identity to verify actual state (§4.16.11). **Immediate STOP.**
+  - (vvvv) `PROXY_BYPASS_BUDGET_EXCEEDED` — additional `-c http.proxy=""` bypass attempt beyond the single shared budget for the entire Git delivery operation (§4.16.11). **Immediate STOP.**
   - (jjjj) `DUPLICATE_OR_WRONG_PR_TARGET` — multiple PR matches, already Ready/closed/merged, base mismatch, or PR occupied by another task (§4.16.12). **Immediate STOP.**
-  - (kkkk) `PUBLIC_EVIDENCE_SECRET_LEAK` — PR body contains credentials, tokens, private logs, unapproved host details, absolute paths, sensitive env values, or internal model prompts (§4.16.12). **Immediate STOP.**
+  - (kkkk) `PUBLIC_EVIDENCE_SECRET_LEAK` — any public-facing Git metadata (branch name, commit message, PR title, `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT`, final `DRAFT_PR_EVIDENCE_BODY`, or other public artefact) contains credentials, tokens, private logs, unapproved host / IP / username details, absolute paths, sensitive env values, or internal model prompts (§4.16.12). **Immediate STOP.**
+  - (uuuu) `PUBLIC_GIT_METADATA_SAFETY_CHECK_MISSING` — public-facing Git metadata committed / pushed / created / updated without a `PUBLIC_SAFE_GIT_METADATA_CHECK` run before the public action (§4.16.12). **Immediate STOP.**
   - (llll) `DRAFT_PR_DELIVERY_UNVERIFIED` — post-push independent verification incomplete or failed (§4.16.12). **Immediate STOP.**
   - (mmmm) `READY_OR_MERGE_WITHOUT_AUTHORIZATION` — Draft→Ready or merge attempted without operator authorisation, or authorisation invalidated by head/body/evidence change (§4.16.13). **Immediate STOP.**
   - (nnnn) `APPROVED_NEW_FILE_OMITTED_FROM_STAGE` — candidate manifest includes approved new paths but `git-integrator` omitted them from staging (§4.16.10). **Immediate STOP.**
