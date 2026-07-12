@@ -834,6 +834,79 @@ Default rules (Work Order may tighten but **must not** loosen the safety bounds;
 
 Artifact status taxonomy: `ARTIFACT_VALID`, `ARTIFACT_INVALIDATED`, `ARTIFACT_SUPERSEDED`, `ARTIFACT_REVALIDATION_REQUIRED`. Each artifact record carries: ID, version, producer, input IDs, candidate SHA / digest, and status. Before a loop begins, an explicit invalidation manifest **must** be generated. Old evidence is retained for audit but **must not** count toward current PASS.
 
+### §4.15 Explorer / Planner Independence, Validation, and Plan Checkpoint
+
+This section hardens the role boundaries, validation gate, and the `IMPLEMENTATION_PLAN_APPROVAL_PACKET` operator checkpoint. It does **not** fix the task-specific linear order beyond the dependencies named here, nor does it fix tester / reviewer concurrency, Git command order, closeout schema, or the complete `VIBECODING_MODE` state machine.
+
+#### §4.15.1 Explorer and Planner as Independent Roles
+
+`explorer` and `planner` are independent roles. Each **must** independently hold:
+
+  - operator-approved assignment entry in `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`;
+  - its own `ROLE_ACTIVATION_READINESS` (§4.10.2);
+  - at least one distinct meaningful model invocation on the operator-assigned model (§4.5, §4.13);
+  - its own `ROLE_COMPLETION_REPORT` (§4.13);
+  - attributable artifact / evidence, versioned per §4.14.
+
+Responsibility split (operator-approved Work Order may tighten but **must not** loosen the boundary):
+
+  - `explorer` — fact investigation: findings, root-cause candidates, coverage matrix, alternative hypotheses, unknowns. Output is the **fact base** and **evidence map**.
+  - `planner` — requirement traceability, implementation steps, file / module scope, test / review plan, risk register, rollback plan, Draft PR closeout plan. Output is the **plan**, traceable back to `explorer` evidence.
+
+`vibedev` / orchestrator calls, analysis, or summaries **must not** count as `explorer` or `planner` execution. Shared or reused role output across `explorer` and `planner` is forbidden (drift signal `SHARED_OR_REUSED_ROLE_OUTPUT_DETECTED`).
+
+#### §4.15.2 `EXPLORER_VALIDATION` and `PLAN_VALIDATION`
+
+After the respective role's `ROLE_COMPLETION_REPORT` passes §4.13 cross-verification, `vibedev` (orchestrator) executes the corresponding **independent validation** and produces a separate validation report. Validations do **not** substitute for later `tester` / `reviewer` business duties.
+
+`EXPLORER_VALIDATION` produces an `EXPLORER_VALIDATION_REPORT` checking, at minimum:
+
+  - fact ↔ evidence mapping for each finding (file / symbol / SHA / command / log / artifact);
+  - distinction of `OBSERVED_FACT` / `SUPPORTED_INFERENCE` / `ASSUMPTION` / `UNKNOWN`;
+  - coverage matrix, alternative hypotheses, and counter-evidence;
+  - whether facts materially affecting scope or technical route are backed by sufficient and, where possible, **independent dual sources**;
+  - consistency with VC6 scope, `OPERATOR_APPROVED_WORK_ORDER`, sub-mode, and governance boundaries.
+
+Verdict: `EXPLORER_VALIDATION_PASS` / `INCOMPLETE` / `REJECTED`.
+
+`PLAN_VALIDATION` produces a `PLAN_VALIDATION_REPORT` checking, at minimum:
+
+  - every VC6 requirement is covered by a plan item;
+  - every plan item references Explorer evidence;
+  - scope closure, implementation feasibility, test and dual-review coverage, risk register, rollback plan, and Draft PR closeout plan are complete;
+  - no `TBD`, no auto-select, no unapproved assignment / permission change, no VERSION / CMP item sneaked in.
+
+Verdict: `PLAN_VALIDATION_PASS` / `INCOMPLETE` / `REJECTED`.
+
+On `INCOMPLETE` / `REJECTED`, return to the originating role per the Work Order's pre-approved §4.12 path. On scope / sub-mode / assignment / permission drift, STOP and return to operator.
+
+#### §4.15.3 `IMPLEMENTATION_PLAN_APPROVAL_PACKET` and `OPERATOR_APPROVED_IMPLEMENTATION_PLAN`
+
+`FULL_9_ROLE_VIBECODING` **default** pipeline:
+
+```
+EXPLORER_VALIDATION_PASS
+  → PLAN_VALIDATION_PASS
+  → IMPLEMENTATION_PLAN_APPROVAL_PACKET
+  → operator reviews / modifies / approves / rejects
+  → OPERATOR_APPROVED_IMPLEMENTATION_PLAN
+  → implementer ROLE_ACTIVATION_READINESS
+```
+
+`FULL_9_ROLE_VIBECODING` implementer **must not** start until `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` is formed. `LIGHTWEIGHT_OPERATION` may enable this checkpoint; if enabled by the Work Order, it follows the same flow. If not enabled by the Work Order, `PLAN_VALIDATION_PASS` allows `LIGHTWEIGHT_OPERATION` to auto-advance to implementer per the Work Order. `VIBECODING_CONSULTATION_ONLY` does **not** apply.
+
+The `IMPLEMENTATION_PLAN_APPROVAL_PACKET` **must** faithfully aggregate:
+
+  - objective, success criteria;
+  - Explorer key facts and evidence (with `EXPLORER_VALIDATION_REPORT` verdict);
+  - Planner plan items: target files / modules, expected behaviour change;
+  - test / review arrangement, risk register, rollback plan, loop budgets, exclusions;
+  - `PLAN_VALIDATION_REPORT` verdict and whether the packet is fully consistent with `OPERATOR_APPROVED_WORK_ORDER`.
+
+Operator's Plan approval **only** approves "how to implement". It **must not** expand Work Order scope, permissions, sub-mode, assignment, node / model / provider, or governance boundaries. Any of those changes requires STOP and a return to VC6 / VC7 / VC8, assignment, or Work Order approval.
+
+After Plan approval, the cluster auto-continues under existing authorisations to the Draft PR (§4.1, §9.2). `Draft → Ready` and merge still each require independent operator authorisation.
+
 
 
 ---
@@ -1393,6 +1466,14 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (ddd) `LOOP_STAGNATION_DETECTED` (§4.12) continued without STOP;
   - (eee) role self-announcing "verified" / "final" without orchestrator cross-verification (§4.13);
   - (fff) ignoring artifact invalidation, using superseded or invalidated artifacts as current PASS evidence, or omitting the invalidation manifest (§4.14).
+  - (ggg) `ORCHESTRATOR_ROLE_SUBSTITUTION_DETECTED` — orchestrator analysis, summary, or call counted as `explorer` or `planner` execution (§4.15.1);
+  - (hhh) `ORCHESTRATOR_AUTHORED_EXPLORER_FINDING` — orchestrator produced, paraphrased, or completed any `explorer` fact base item (§4.15.1);
+  - (iii) `ORCHESTRATOR_AUTHORED_PLAN_ITEM` — orchestrator added or rewrote `planner` implementation steps, file scope, test plan, risk, or rollback (§4.15.1);
+  - (jjj) `ROLE_ARTIFACT_MUTATED_BY_VALIDATOR` — validator (or any party outside the originating role's own reattempt) modified the original Explorer / Planner artifact (§4.15.2);
+  - (kkk) `VALIDATION_PROVENANCE_VIOLATION` — `EXPLORER_VALIDATION_REPORT` / `PLAN_VALIDATION_REPORT` / `ROLE_COMPLETION_REPORT` / `IMPLEMENTATION_PLAN_APPROVAL_PACKET` referencing an artifact version that does not match the originating role's recorded version (§4.13, §4.15.2, §4.15.3);
+  - (lll) `SHARED_OR_REUSED_ROLE_OUTPUT_DETECTED` — single model invocation, response, or summary counted as multiple roles' distinct invocation, or output reused across `explorer` and `planner` (§4.5, §4.15.1);
+  - (mmm) `IMPLEMENTATION_PLAN_APPROVAL_PACKET` expanding Work Order scope, permissions, sub-mode, assignment, node / model / provider, or governance boundary (§4.15.3);
+  - (nnn) `FULL_9_ROLE_VIBECODING` `implementer` activation before `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` (§4.15.3).
 
 ### §10.2 Drift Handling
 
@@ -1590,7 +1671,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Non-orchestrator assignment | absent | FULL: 8 roles item-by-item approval; LIGHTWEIGHT: actual role set item-by-item approval; after VC8, before Work Order; forms `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`; VIBECODING_CONSULTATION_ONLY: no assignment, no baseline, consultation-only Work Order instead |
 | Dedicated governance gates | absent | HERMES_OPENCODE_VERSION_GOVERNANCE_GATE (§3.8) + CENTRAL_MODEL_POOL_GOVERNANCE_GATE (§6.9); do **not** enter VibeCoding modes; do **not** trigger 8-role / 9-role; outside VIBECODING_MODE (§4.2) |
 | Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.6–§6.9); dedicated governance gate (§6.9) |
-| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → `OPERATOR_APPROVED_WORK_ORDER` is job start → `GLOBAL_READINESS` → per-role `ROLE_ACTIVATION_READINESS` → role execution with `ROLE_COMPLETION_REPORT` + cross-verification (§4.13) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (recoverable deficiency class only) → test / review → git-integrator → commit / push → create or update **Draft PR** → STOP and report. `Draft → Ready` and merge require separate operator authorisation (§9.2, §10.6). Dual-layer readiness by `vibedev` / orchestrator (§4.10) with hard-failure STOP code set + bounded pause-and-revalidate path (§4.10.3); §4.12 bounded loop addresses recoverable completion deficiency only and **must not** be used to patch over missing / fabricated invocation, empty output, fabricated evidence, or evidence infrastructure failure. Detailed workflow still to be finalised: Work Order schema; task-specific role linear order, concurrency, handoff topology; task-specific test / review choreography; Git command-level order; closeout schema; complete `VIBECODING_MODE` state machine. Bounded corrective loop budgets (§4.12) recommended by `vibedev`, approved by operator in Work Order |
+| Workflow governance envelope | absent | confirmed entry skeleton (§8.1): VC0–VC8 → sub-mode → assignment (where applicable) → Work Order generation → **operator reviews, modifies, approves, or rejects Work Order** → `OPERATOR_APPROVED_WORK_ORDER` is job start → `GLOBAL_READINESS` → per-role `ROLE_ACTIVATION_READINESS` → role execution with `ROLE_COMPLETION_REPORT` + cross-verification (§4.13) → Explorer / Planner `ROLE_COMPLETION_REPORT` → independent `EXPLORER_VALIDATION` and `PLAN_VALIDATION` (§4.15.2) → §4.12 pre-approved bounded corrective loop on `INCOMPLETE` / `REJECTED` (recoverable deficiency class only) → `FULL` default `IMPLEMENTATION_PLAN_APPROVAL_PACKET` → operator reviews/approves → `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` → implementer activation (§4.15.3) → test / review → git-integrator → commit / push → create or update **Draft PR** → STOP and report. `Draft → Ready` and merge require separate operator authorisation (§9.2, §10.6). Dual-layer readiness by `vibedev` / orchestrator (§4.10) with hard-failure STOP code set + bounded pause-and-revalidate path (§4.10.3); §4.12 bounded loop addresses recoverable completion deficiency only and **must not** be used to patch over missing / fabricated invocation, empty output, fabricated evidence, or evidence infrastructure failure; §4.15 prohibits orchestrator role substitution and artifact mutation by validator. Detailed workflow still to be finalised: Work Order schema; task-specific role linear order beyond the §4.15 dependencies; test / review choreography; Git command-level order; closeout schema; complete `VIBECODING_MODE` state machine. Bounded corrective loop budgets (§4.12) recommended by `vibedev`, approved by operator in Work Order |
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
