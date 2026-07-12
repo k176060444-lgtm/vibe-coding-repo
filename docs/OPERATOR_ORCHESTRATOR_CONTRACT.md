@@ -459,9 +459,11 @@ Recommended minimum roles for LIGHTWEIGHT:
 
 `vibedev` **must** recommend actual roles, nodes, models, and reasons. Operator **must** explicitly specify and approve before execution.
 
+In `LIGHTWEIGHT_OPERATION`, each operator-approved role **must** also produce a distinct, attributable, meaningful model invocation using its assigned model. Deterministic steps (scripts, `pytest`, Git, SSH, static analysis) **may** serve as internal tool steps for a role but **must not** substitute for that role's own model invocation.
+
 #### §4.1.3 FULL_9_ROLE_VIBECODING
 
-Any of the following **requires** `vibedev` to recommend the complete 9-role pipeline (§4.3):
+Any of the following **requires** `vibedev` to recommend the complete 9-role roster (§4.3):
 
   - executable code / runtime / wrapper / executor / gate / receipt / evidence logic changes;
   - contract / governance / policy / authorisation boundary semantic changes;
@@ -482,9 +484,9 @@ A dedicated governance gate **must not** be re-classified as `VIBECODING_CONSULT
 
 Ordinary discussion, `VIBECODING_CONSULTATION_ONLY`, or a dedicated governance gate **must not** be used to bypass the applicable LIGHTWEIGHT / FULL sub-mode, operator assignment, or high-risk checkpoint.
 
-### §4.3 Full 9-Role Pipeline (FULL_9_ROLE_VIBECODING)
+### §4.3 Full 9-Role Roster (FULL_9_ROLE_VIBECODING)
 
-When operator selects FULL_9_ROLE_VIBECODING, the complete 9-role pipeline applies:
+When operator selects `FULL_9_ROLE_VIBECODING`, the complete 9-role roster applies:
 
   1. `orchestrator` — fixed to be `vibedev` on `21bao`. The orchestrator's model is operator-specified at VibeCoding-mode entry and is **not** part of the per-task 8-role assignment. Runtime **must not** auto-swap the orchestrator model within the task.
   2. `explorer`.
@@ -496,6 +498,8 @@ When operator selects FULL_9_ROLE_VIBECODING, the complete 9-role pipeline appli
   8. `reviewer-b`.
   9. `git-integrator` — if the task has no Git-write sub-task, the role **must still exist** with an explicit "no git write" sub-task note, and evidence must carry `no_git_write=true`.
 
+The enumeration order above defines the **roster**, not execution order, concurrency, handoff, role re-entry, loop, checkpoint, or completion order. The detailed topology is defined by the future operator-approved operational workflow spec or the task-specific workflow plan; it may be sequential, controlled-parallel, or bounded-loop, but **must not** delete, merge, skip, or substitute any FULL mandatory role. `vibedev` (orchestrator) coordinates throughout the entire run but **must not** substitute for any other role's responsibilities.
+
 ### §4.4 Forbidden Patterns (FULL mode)
 
 - role trimming / merging / fast path / simple-bypass / low-risk-bypass;
@@ -505,22 +509,65 @@ When operator selects FULL_9_ROLE_VIBECODING, the complete 9-role pipeline appli
 - claiming a role is completed **merely** by running generic commands such as `pytest`, `fixture`, `lint`, static analysis, deterministic scripts or simulation. Such tools **may serve** as a role's real execution means, **only** when the role carries role-specific `assignment`, `input`, `execution`, `output`, and `evidence`. `simulation` / `fixture` / `unit-test` evidence **must not** impersonate real production execution or canonical E2E evidence;
 - "workload is small → skip this role".
 
-### §4.5 Four-Attribute Requirement (FULL mode)
+### §4.5 Distinct Model Invocation Requirement (FULL mode)
 
-- **independent input** — role-specific input;
-- **real execution** — may be read-only analysis, deterministic-tool invocation, local / remote execution, model call, integration assessment, or the execution-side tools in §4.4 — **not every role must call a model, SSH, or write a file**;
-- **independent output** — role-specific output;
-- **auditable evidence** — role-specific receipt / trace / verdict / closeout artifact.
+In an operator-approved `FULL_9_ROLE_VIBECODING` run, each of the nine roles **must** execute at least one distinct, attributable, meaningful, evidence-bearing model invocation using the operator-assigned model for that role.
+
+Deterministic tools, scripts, `pytest`, Git, SSH, file reads, and static analysis **may** assist a role's work but **must not** substitute for that role's own model invocation.
+
+The following are **forbidden**:
+
+- a single model call counted toward multiple roles;
+- the orchestrator writing output on behalf of another role;
+- copying or splitting a single response to impersonate multiple roles;
+- ACK-only, empty, template-placeholder, or no-substantive-task invocations;
+- executing a generic command and claiming the role is complete.
 
 ### §4.6 Empty-Placeholder Prohibition (FULL mode)
 
 Empty placeholders (no input + no output + no evidence) are **forbidden**. Permitted output constants: `NO_CHANGE_REQUIRED`, `NOT_APPLICABLE`, `NO_GIT_WRITE_REQUIRED`.
 
-### §4.7 Independence of Dual Tester / Dual Reviewer (FULL mode)
+### §4.7 Model Invocation Evidence (FULL mode)
 
-`tester-a` / `tester-b` and `reviewer-a` / `reviewer-b` **must** be independent across `assignment` / `context` / `prompt` / `execution batch` / `output` / `evidence`. Neither side **may** read the other's output before submitting its own conclusion. **Recommended** (not required) to prefer different node and different model. If independence cannot be achieved, runtime **must** STOP, explain the cause and risk, await operator decision, and **must not** automatically degrade.
+Each role's model invocation evidence **must** associate at least:
 
-### §4.8 Conflict Escalation (FULL mode)
+- task / run ID, role, node, operator-assigned model;
+- canonical provider, runtime provider;
+- role invocation ID; provider request ID if available;
+- start / end time, success / failure;
+- role-specific input summary or prompt digest;
+- output summary, response digest, or controlled artifact reference;
+- usage / token count if provider provides; otherwise `NOT_AVAILABLE`;
+- tool executions, produced artifacts, and verdict references.
+
+### §4.8 Role Completion Criteria (FULL mode)
+
+A successful model invocation alone does **not** equal role completion. A role is complete only when all of the following are satisfied:
+
+1. operator-approved assignment exists;
+2. role-specific input and responsibility defined;
+3. at least one distinct model invocation as per §4.5;
+4. substantive work product produced;
+5. acceptance criteria result available;
+6. associable evidence with completion status.
+
+Model invocation failure, quota exhaustion, empty or unparseable output, or missing evidence means the role is **not** complete and triggers §7 STOP. Scripts, other roles, or the orchestrator **must not** substitute for the failed role's output.
+
+### §4.9 Independence of Dual Tester / Dual Reviewer (FULL mode)
+
+`tester-a` / `tester-b` and `reviewer-a` / `reviewer-b` **must** be independent across `assignment` / `context` / `prompt` / `execution batch` / `output` / `evidence`:
+
+- tester-a and tester-b **must** use different role invocation IDs, independent prompts / contexts, independent outputs, and independent evidence;
+- reviewer-a and reviewer-b **must** use different role invocation IDs, independent prompts / contexts, independent outputs, and independent evidence;
+- neither side **may** share a single model call;
+- the later role **must not** merely restate the earlier role's conclusion;
+- blind review records allowed reads and forbidden reads.
+
+Different node or different model remains a **recommended** enhancement (not required) unless operator explicitly mandates it, and is **not** the sole independence criterion.
+
+If independence cannot be achieved, runtime **must** STOP, explain the cause and risk, await operator decision, and **must not** automatically degrade.
+
+### §4.10 Conflict Escalation (FULL mode)
 
 If any tester / reviewer demands changes, return to `implementer` and rerun the affected steps. Unresolvable conflict escalates to operator. `vibedev` **must not** unilaterally compromise.
 
@@ -897,7 +944,7 @@ Until the operational workflow is formally accepted and `OPERATIONAL_PHASE` cuto
 
 ### §8.3 Execution Kind and Role Tools
 
-`simulation` / `dry-run` / `unit test` / `fixture` / `historical receipt` / `real execution` must carry explicit `kind:` labels and may not impersonate each other. `pytest` / `fixture` / static analysis / `lint` / deterministic scripts **may** serve as a role's real execution means (subject to §4.5–§4.8 and §8.3); merely running a generic command without role-specific `assignment` / `input` / `output` / `evidence` does **not** count as a role's execution.
+`simulation` / `dry-run` / `unit test` / `fixture` / `historical receipt` / `real execution` must carry explicit `kind:` labels and may not impersonate each other. `pytest` / `fixture` / static analysis / `lint` / deterministic scripts **may** serve as a role's real execution means (subject to §4.5 distinct model invocation, §4.8 role completion criteria, and §8.3); merely running a generic command without role-specific `assignment` / `input` / `output` / `evidence` does **not** count as a role's execution.
 
 ### §8.4 Receipt Linkage
 
@@ -1005,7 +1052,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
 ### §10.1 Drift Signals
 
   - (a) treating a profile as a node;
-  - (b) role trimming — trimming the roles / gates required by the operator-selected entry constitutes drift. `FULL_9_ROLE_VIBECODING`: complete 9-role must not be trimmed. `LIGHTWEIGHT_OPERATION`: executes operator-approved actual role set;
+  - (b) role trimming — trimming the roles / gates required by the operator-selected entry constitutes drift. `FULL_9_ROLE_VIBECODING`: complete 9-role must not be trimmed. `LIGHTWEIGHT_OPERATION`: executes operator-approved actual role set. Named-but-not-executed, no distinct model invocation, shared invocation across roles, multi-role response reuse, and generic-command-only role completion are all drift;
   - (c) substituting simulation for real execution;
   - (d) historical evidence treated as current;
   - (e) agent self-claim treated as operator acceptance;
@@ -1024,8 +1071,8 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (r) runtime auto-swapping the orchestrator model (§4.3);
   - (s) continuing on orchestrator-model unavailability without STOP;
   - (t) bounded authorisation packages pre-including automatic retry (§7.6, §9.4);
-  - (u) test or fixture evidence cited as V2 E2E PASS (§8.3, §4.5–§4.8);
-  - (v) merely running a generic command counted as a role execution (§4.5–§4.8);
+  - (u) test or fixture evidence cited as V2 E2E PASS (§8.3, §4.5 distinct model invocation, §4.8 role completion criteria);
+  - (v) merely running a generic command counted as a role execution (§4.5 distinct model invocation, §4.8 role completion criteria);
   - (w) `CLUSTER_CONSTRUCTION_OPERATION` used to bypass the 9-role / gates / evidence / checkpoints that apply after operator accepts the canonical runtime/workflow and declares `OPERATIONAL_PHASE` cutover (§8.9);
   - (x) binding the cluster to a single fixed `Hermes` / `OpenCode` version without qualification (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
   - (y) claiming compatibility without verification / reusing stale qualification evidence / auto-expanding scope after single-node canary (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
@@ -1061,7 +1108,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
 
 ### §10.3 Efficiency ≠ Skip
 
-- No skipping roles / gates / evidence required by the operator-selected execution mode for efficiency. In `FULL_9_ROLE_VIBECODING`, the complete 9-role pipeline and dual-tester / dual-reviewer independence **must** be maintained. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set is executed.
+- No skipping roles / gates / evidence required by the operator-selected execution mode for efficiency. In `FULL_9_ROLE_VIBECODING`, the complete 9-role roster and dual-tester / dual-reviewer independence **must** be maintained. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set is executed.
 - Dual-tester / dual-reviewer independence applies **only** in `FULL_9_ROLE_VIBECODING` or when operator explicitly selects dual tester / dual reviewer. It **must not** be implied for `LIGHTWEIGHT_OPERATION` or dedicated governance gates.
 - High-risk authorisation boundaries **must not** be merged or hidden.
 - Any proposal to bypass §9 checkpoints or §7 STOP in the name of efficiency is itself drift.
@@ -1237,9 +1284,9 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Area | V1 (PR #276) | V2 (this document) |
 |---|---|---|
 | 3000-character rule | "each segment < 3000 characters" (hard) | per-segment split threshold: ≤3000 single segment, >3000 split with each segment ≤3000; total prompt may exceed 3000; must not delete content to reduce segment count (§11.5) |
-| 9-role roster | five mixed roles | FULL_9_ROLE_VIBECODING: fully enumerated 9-role (§4.3); LIGHTWEIGHT: minimum recommended roles (§4.1.2); VIBECODING_CONSULTATION_ONLY: no 8-role assignment (§4.1.1) |
+| 9-role roster | five mixed roles | FULL_9_ROLE_VIBECODING: fully enumerated 9-role roster (§4.3); roster enumeration does **not** define execution order, concurrency, or workflow; LIGHTWEIGHT: minimum recommended roles (§4.1.2); VIBECODING_CONSULTATION_ONLY: no 8-role assignment (§4.1.1); FULL nine roles each require distinct meaningful model invocation (§4.5); tools cannot substitute for a role's own model call |
 | Role trimming | not explicitly forbidden | FULL mode only: explicit no-trim / no-skip / no "named-but-not-executed" (§4.5); LIGHTWEIGHT executes operator-approved actual role set |
-| Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; **recommended** different node + model (§4.8) |
+| Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; different role invocation IDs; no shared model call; **recommended** different node + model (§4.9) |
 | 8-role assignment pre-brief | absent | FULL mode only: required; 4-column matrix; no `alternative` (§5.1, §5.5) |
 | Assignment strictness | absent | strict per operator spec; failure follows §7 (§5.8, §5.9) |
 | Failure STOP | implicit | explicit triggers, preserved evidence, enumerated prohibitions, retry rules; §3.5.5 transport-path failure first enters §3.5 failover; STOP fires on §3.5.6 disallowed trigger, §3.5.8 post-condition failure, §3.5.9 chain exhaustion, §3.5.2 / §3.5.11 invariant violation, or no approved+qualified same-node route chain (§3.4.2, §7.2, §7.8, §13 all share the same exhaustive 5-condition set); §3.5.11 itself is not a failure class |
