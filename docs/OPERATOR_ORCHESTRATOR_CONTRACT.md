@@ -770,7 +770,7 @@ When the error class is `MODEL_QUOTA_EXHAUSTED`, the report must additionally in
 - last successful checkpoint;
 - partial output / evidence status;
 - whether other assignments sharing the same provider / account may be affected;
-- operator recovery options (A–E per §5.10).
+- operator recovery options (A–E per §5.12).
 
 ### §7.5 Strictly Forbidden (assignment-level only)
 
@@ -852,6 +852,8 @@ This contract **does not** fix receipt counts. Each applicable gate produces an 
 ### §8.5 Evidence Levels
 
 `VERIFIED_CURRENT` / `VERIFIED_HISTORICAL` / `IMPLEMENTED_UNVERIFIED` / `PARTIAL` / `UNKNOWN` / `BLOCKED` / `MISSING` / `OUTPUT_COMPLETE_BUT_UNVERIFIED`.
+
+`OUTPUT_COMPLETE_BUT_UNVERIFIED`: the current role or step has produced output, but due to model quota exhaustion, subsequent verification not yet executed, or another recorded STOP reason, a verified / `PASS` conclusion cannot yet be formed. This status **must not** be interpreted as `PASS`, `VERIFIED_CURRENT`, or task completion. When verification is completed after recovery, the status must be updated through new evidence linked to the original run / checkpoint.
 
 ### §8.6 Anti-Extrapolation
 
@@ -1176,7 +1178,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Dedicated governance gates | absent | HERMES_OPENCODE_VERSION_GOVERNANCE_GATE (§3.8) + CENTRAL_MODEL_POOL_GOVERNANCE_GATE (§6.9); do **not** enter VibeCoding modes; do **not** trigger 8-role / 9-role; parallel entry points (§4.4) |
 | Central Model Pool | 7-state concept only | single write flow, sync direction, sync-after verification, secret isolation, node calling boundary, credential discovery boundary; public hard + private single-user boundary (§6.6–§6.9); dedicated governance gate (§6.9) |
 | Canonical pipeline | F1–F10 not detailed | F1–F10 real evaluation; non-canonical path requires operator authorisation and `execution_path: non_canonical`; non-canonical must not become assignment-level automatic fallback (§8.1, §8.2) |
-| Evidence levels | absent | 7 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
+| Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
 | Drift signals | 7 | expanded to (a)–(xx) |
