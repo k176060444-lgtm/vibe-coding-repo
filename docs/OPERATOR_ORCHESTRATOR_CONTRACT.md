@@ -251,6 +251,12 @@ Transport-route failover is **not** an assignment-level fallback. It does not ch
 
 Contract-level minimum report contents for any switch are the minimum information categories listed in §3.5.7. Schema, field names, file names (such as `routes.yaml`-style names), script names, receipt / ledger structures, and executor / wrapper internals are out of contract scope and live in the runtime / node-registry / evidence spec.
 
+#### §3.5.13 MODEL_QUOTA_EXHAUSTED — error class
+
+`MODEL_QUOTA_EXHAUSTED` is a **model-level failure** class. It includes any provider / account / model response indicating: quota exhausted, usage limit reached, credit exhausted, billing hard limit, daily / monthly allowance exhausted, or any other explicit result that the currently designated model cannot be invoked due to quota reasons.
+
+`MODEL_QUOTA_EXHAUSTED` is **not** a transport-path failure (§3.5.5) and **must not** trigger §3.5 route fallback. It enters §7 Failure STOP directly.
+
 ### §3.6 21bao as the Unique Control Plane
 
 #### §3.6.1 Identity
@@ -537,14 +543,60 @@ Once operator specifies the assignment, the system **must** execute exactly that
 - no adjustment of node or model for efficiency / fault tolerance / task-continuity reasons;
 - orchestrator **must not** unilaterally reinterpret the assignment;
 - every designated role's input, context, prompt, execution batch, output, and evidence lands as specified, until operator issues a **new decision**.
+- **Model quota exhaustion** (§3.5.13) does **not** authorise automatic model / node / provider / credential substitution. The assignment is **blocked**; only operator may specify a new assignment.
 
 ### §5.9 Failure Cross-Reference
 
 If any designated node or model fails the §7.1 triggers before or during execution, immediately follow §7. This does **not** override §5.8.
 
-### §5.10 Execution Pipeline Acknowledgement
+### §5.10 MODEL_QUOTA_EXHAUSTED — Mandatory Behaviour
+
+When a designated model is confirmed as quota-exhausted before or during a task:
+
+1. **Immediately STOP** the current role and the current task.
+2. **Preserve** the last successful checkpoint, partial output, and error evidence.
+3. **Mark** the current state as `BLOCKED`, `PARTIAL`, or `OUTPUT_COMPLETE_BUT_UNVERIFIED` (whichever applies); **must not** mark as `PASS`.
+4. **Report** to operator and wait for a new decision.
+
+**Strictly forbidden:**
+
+- automatic retry;
+- automatic wait for quota recovery and continue;
+- automatic route switch;
+- automatic model / node / provider / credential / account substitution;
+- automatic continuation of subsequent roles;
+- automatic scope reduction;
+- treating the same model name, another model under the same provider, or a model on another node as fallback.
+
+### §5.11 Orchestrator Model Quota Exhaustion
+
+If `21bao`'s current orchestrator model experiences `MODEL_QUOTA_EXHAUSTED`:
+
+- The **entire current task** immediately STOPs.
+- Workers, reviewers, or other business roles **must not** take over the orchestrator.
+- `vibedev` may use only deterministic capabilities that do **not** depend on the exhausted model to compile a blocking report.
+- Operator must re-specify the orchestrator model before recovery. Recovery proceeds from the operator-specified checkpoint.
+- If the new orchestrator model has not completed CMP qualification, it must first enter the `CENTRAL_MODEL_POOL_GOVERNANCE_GATE` (§6.9).
+
+### §5.12 Operator Recovery Options
+
+Only the operator may choose a recovery path. Orchestrator may recommend but **must not** self-select. Available options:
+
+- **A**: Wait for quota recovery, retry from specified checkpoint with the original role / node / model.
+- **B**: Re-specify role / node / model and recovery checkpoint.
+- **C**: If the new model has not completed CMP registration, sync, qualification, and operator-approved status, first enter `CENTRAL_MODEL_POOL_GOVERNANCE_GATE` (§6.9), then re-assign.
+- **D**: Modify scope and form a new explicit authorisation or new run.
+- **E**: Terminate the task and preserve `BLOCKED` / `PARTIAL` evidence.
+
+### §5.13 Execution Pipeline Acknowledgement
 
 Transport-route failover (§3.5) does **not** relax §5 strictness. A route failover must keep every field in §5.8 invariant.
+
+### §5.14 Readiness and Quota Boundary
+
+Readiness checks **may** verify: model enabled, credential presence, provider response, bounded smoke call. A readiness `PASS` proves only that the model was callable at check time; it does **not** constitute a remaining-quota guarantee. Quota status unknown **must not** be reported as quota sufficient.
+
+All recovery model calls **must** establish evidence linkage to the original run / checkpoint. Quota exhaustion **must not** be classified as a network, DNS, SSH, or transport fallback event.
 
 ---
 
@@ -665,6 +717,7 @@ Any of the following immediately triggers STOP:
 - readiness invalid;
 - SSH / local-exec failure;
 - model call failure;
+- `MODEL_QUOTA_EXHAUSTED` (§3.5.13);
 - provider / credential / endpoint / alias / wrapper anomaly.
 
 ### §7.2 Precedence of §3.5 over §7
@@ -703,6 +756,21 @@ All entries additionally report:
 - actions not completed;
 - current Git / task / receipt state (HEAD SHA, current PR if any, list of produced receipts);
 - items requiring operator decision — statement of fact + options + their respective risks; orchestrator **does not** choose.
+
+When the error class is `MODEL_QUOTA_EXHAUSTED`, the report must additionally include:
+- error class = `MODEL_QUOTA_EXHAUSTED`;
+- task / run;
+- execution mode or dedicated gate;
+- current role;
+- designated node;
+- designated model;
+- canonical provider and runtime provider;
+- credential reference name or presence state; **must not** output secret value;
+- quota impact scope: model-level / provider-level / account-level or `UNKNOWN`;
+- last successful checkpoint;
+- partial output / evidence status;
+- whether other assignments sharing the same provider / account may be affected;
+- operator recovery options (A–E per §5.10).
 
 ### §7.5 Strictly Forbidden (assignment-level only)
 
@@ -783,7 +851,7 @@ This contract **does not** fix receipt counts. Each applicable gate produces an 
 
 ### §8.5 Evidence Levels
 
-`VERIFIED_CURRENT` / `VERIFIED_HISTORICAL` / `IMPLEMENTED_UNVERIFIED` / `PARTIAL` / `UNKNOWN` / `BLOCKED` / `MISSING`.
+`VERIFIED_CURRENT` / `VERIFIED_HISTORICAL` / `IMPLEMENTED_UNVERIFIED` / `PARTIAL` / `UNKNOWN` / `BLOCKED` / `MISSING` / `OUTPUT_COMPLETE_BUT_UNVERIFIED`.
 
 ### §8.6 Anti-Extrapolation
 
@@ -924,7 +992,12 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (pp) re-opening `21bao` VibeCoding dispatch before every item in §3.6.7 passes (§3.6.7);
   - (qq) credential discovery that prints a value-bearing environment map, or outputs secret-derived fragments into public / external / uncontrolled scope, or private operator-controlled output beyond the operator-approved operational scope (§6.6);
   - (rr) treating a public-format token prefix marker as the credential value (§6.6);
-  - (ss) auto-rotating, auto-replacing, or auto-invalidating a credential without explicit operator authorisation (§6.6).
+  - (ss) auto-rotating, auto-replacing, or auto-invalidating a credential without explicit operator authorisation (§6.6);
+  - (tt) treating `MODEL_QUOTA_EXHAUSTED` as a transport-path failure and triggering route fallback (§3.5.13);
+  - (uu) automatic model / node / provider / credential / account substitution upon quota exhaustion (§5.10);
+  - (vv) automatic retry, wait, or scope reduction upon quota exhaustion (§5.10);
+  - (ww) continuing subsequent roles after a role's model is quota-exhausted (§5.10);
+  - (xx) orchestrator model quota exhaustion handled by worker / reviewer takeover (§5.11).
 
 ### §10.2 Drift Handling
 
@@ -1106,13 +1179,14 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Evidence levels | absent | 7 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
-| Drift signals | 7 | expanded to (a)–(ss) |
+| Drift signals | 7 | expanded to (a)–(xx) |
 | High-risk checkpoints | §4 vague | §9 explicit 4 categories (A/B/C/D), 12+ high-risk items, including `Hermes` / `OpenCode` install / update / downgrade / migration / restart / switch (§9.3) |
 | Top-line governance | role authority scattered | §1 GP-1 / GP-2 / GP-3 single page; recommend → assign → execute locked |
 | Effect mechanism | §10 "signing" (later corrected to Working Agreement) | effective only on operator explicit chat acceptance; on acceptance update existing file with `Version: 2.0` + `Supersedes: V1 / PR #276` + `Historical source retained in Git history` |
 | Transport-route failover | absent | §3.5 same-node transport-route failover with operator-approved chain, standing authorization, per-switch no-permission-needed; successful fallback continues the original task (no mid-task interrupt), standalone Transport Fallback Report after task completion; wrong / unqualified / non-SAME-NODE routes forbidden; chain change needs operator approval; matching §3.5.5 transport-path failure first enters §3.5 failover; after the 5 termination conditions (§3.5.6 / §3.5.8 / §3.5.9 / §3.5.2 or §3.5.11 invariant / no approved chain) fire, enters §7 Failure STOP; §3.5.11 itself is not a failure class |
 | `21bao` as control plane | not labelled | §3.6 `ALWAYS_ON_CONTROL_PLANE` is design + SLA target; on unavailability enter `CONTROL_PLANE_UNAVAILABLE / VIBECODING_UNAVAILABLE`; no worker take-over, no orchestrator self-election, no auto-migration, no transport-route-failover → control-plane interpretation; §3.6.7 recovery gate |
 | `Hermes` / `OpenCode` version handling | absent | §3.8 dedicated governance gate (V0–V8), decoupling, qualification, mixed-version rules, operator-driven changes only, no auto-upgrade, qualification failure = STOP |
+| `MODEL_QUOTA_EXHAUSTED` | absent | model-level failure class (§3.5.13); not transport-path failure, no §3.5 route fallback; immediate STOP, preserve checkpoint, mark BLOCKED/PARTIAL/OUTPUT_COMPLETE_BUT_UNVERIFIED; no auto-retry/substitution/continuation; operator-only recovery (A–E); orchestrator model exhaustion → entire task STOP (§5.10–§5.12, §7.1, §7.4, §10.1(tt)–(xx)) |
 | Historical PR / report handling | unspecified | `PRE_V2_HISTORICAL_EVIDENCE` rules; historical files untouched |
 
 ---
