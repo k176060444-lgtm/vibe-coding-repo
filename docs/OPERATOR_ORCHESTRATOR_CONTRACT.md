@@ -489,9 +489,17 @@ Recommended minimum roles for LIGHTWEIGHT:
 
 **Actual role set principle.** Explorer, Planner, and Implementer execute **only** if each is operator-approved in the actual role set (`OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`). The Work Order **must not** auto-add roles not in the baseline. §4.15 and §4.16 governance rules apply **only** to the actual approved roles; they do **not** imply that unapproved roles must exist.
 
-If the task produces a tracked diff, the actual role set **must** include a content-author role (default: implementer) operator-approved to produce the diff. Explorer, tester, reviewer, and git-integrator **must not** write business content.
+If the task produces a tracked diff, the actual role set **must** include:
 
-After VC8, `vibedev` recommends the actual non-orchestrator role set and each role's node,
+  - a content-author role (default: implementer) operator-approved to produce the diff;
+  - at least one independent tester / verifier / reviewer role, separate from the content-author role;
+  - git-integrator (if Git write is involved).
+
+Explorer, tester, reviewer, verifier, and git-integrator **must not** write business content. A role operator-approved as content-author must execute under its own distinct assignment and invocation; the same role identity **must not** simultaneously serve as verifier / reviewer for its own output.
+
+**Verifier cross-Gate independence.** If the same verifier role is operator-approved to serve multiple required Gates, each Gate **must** use an independent `ROLE_ACTIVATION_READINESS`, independent attempt, independent formal invocation, independent charter, independent `ROLE_COMPLETION_REPORT`, and independent evidence packet. The same invocation, report, or output **must not** satisfy multiple Gates.
+
+After VC8, `vibedev` recommends the actual non-orchestrator role set and each role's node, canonical provider, runtime provider, model, responsibilities, independence requirements, budget, and fallback boundaries. Operator approves item by item, forming `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`. Only then does `vibedev` generate the Work Order. The Work Order **must not** add, delete, replace, or default-assign unapproved roles / nodes / models, and **must not** present recommendations as approvals. The operator **must** then review, modify, approve, or reject the Work Order. Assignment baseline approval (`OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`) is **not** equivalent to Work Order approval. Only after `OPERATOR_APPROVED_WORK_ORDER` is formed may `vibedev` proceed to readiness, role execution, or any execution stage.
 
 In `LIGHTWEIGHT_OPERATION`, each operator-approved role **must** also produce a distinct, attributable, meaningful model invocation using its assigned model. Deterministic steps (scripts, `pytest`, Git, SSH, static analysis) **may** serve as internal tool steps for a role but **must not** substitute for that role's own model invocation.
 
@@ -844,7 +852,7 @@ Artifact status taxonomy: `ARTIFACT_VALID`, `ARTIFACT_INVALIDATED`, `ARTIFACT_SU
 
 **Mode scope.** `FULL_9_ROLE_VIBECODING`: Explorer, Planner, Implementer, and the complete §4.15 validation / checkpoint chain are **mandatory**. `LIGHTWEIGHT_OPERATION`: Explorer, Planner, and Implementer execute **only** if each is operator-approved in the actual role set. §4.15 rules apply to each actually existing role; they do **not** imply that unapproved roles must exist. If LIGHTWEIGHT enables the Plan checkpoint (per Work Order), the actual role set **must** include both Explorer and Planner before the checkpoint, and the full `EXPLORER_VALIDATION_PASS → PLAN_VALIDATION_PASS → operator Plan checkpoint` chain executes. `VIBECODING_CONSULTATION_ONLY`: does **not** apply.
 
-This section hardens the role boundaries, validation gate, and the `IMPLEMENTATION_PLAN_APPROVAL_PACKET` operator checkpoint. It does **not** fix the task-specific linear order beyond the dependencies named here, nor does it
+This section hardens the role boundaries, validation gate, and the `IMPLEMENTATION_PLAN_APPROVAL_PACKET` operator checkpoint. It does **not** fix the task-specific linear order beyond the dependencies named here, nor does it fix tester / reviewer concurrency, Git command order, closeout schema, or the complete `VIBECODING_MODE` state machine.
 
 #### §4.15.1 Explorer and Planner as Independent Roles
 
@@ -909,7 +917,12 @@ EXPLORER_VALIDATION_PASS
   → implementer ROLE_ACTIVATION_READINESS
 ```
 
-`FULL_9_ROLE_VIBECODING` implementer **must not** start until `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` is formed. `LIGHTWEIGHT_OPERATION` may enable this checkpoint; if enabled by the Work Order, it follows the same flow. If not enabled by the Work Order, `PLAN_VALIDATION_PASS` allows `LIGHTWEIGHT_OPERATION` to auto-advance to implementer per the Work Order; in this case the candidate plan source binding follows §4.16.2 (`LIGHTWEIGHT` without Plan checkpoint). `VIBECODING_CONSULTATION_ONLY` does **not** apply.
+`FULL_9_ROLE_VIBECODING` implementer **must not** start until `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` is formed. `LIGHTWEIGHT_OPERATION` may enable this checkpoint; if enabled by the Work Order, it follows the same flow. If not enabled by the Work Order:
+
+  - **Planner in actual role set**: `PLAN_VALIDATION_PASS` must be reached before implementer activation; candidate plan source binding follows §4.16.2 (`LIGHTWEIGHT` without Plan checkpoint, Planner in actual role set).
+  - **Planner not in actual role set**: `PLAN_VALIDATION_PASS` **must not** be required. Implementer may advance only when the Work Order explicitly records `direct_to_implementer=true`, the objective / modification boundary / acceptance criteria / test-review requirements / rollback / exclusions are complete, and §4.16.2 provenance is valid.
+
+`VIBECODING_CONSULTATION_ONLY` does **not** apply.
 
 The `IMPLEMENTATION_PLAN_APPROVAL_PACKET` **must** faithfully aggregate:
 
@@ -1069,7 +1082,7 @@ The following rules supplement §4.12 and §4.14:
 
 #### §4.16.7 Git-Integrator Hard Gate
 
-**Mode scope.** `FULL_9_ROLE_VIBECODING`: `TEST_GATE_PASS` and `REVIEW_GATE_PASS` must both be valid for the current candidate before formal Git write. `LIGHTWEIGHT_OPERATION`: all `required_pre_git_gates` listed in the Work Order must be valid; the Work Order **must** explicitly list `required_pre_git_gates` and each Gate's actual role members. A missing unapproved Gate is **not** a failure, but a Work Order-required Gate **must not** be skipped. `VIBECODING_CONSULTATION_ONLY`: does **not** apply.
+**Mode scope.** `FULL_9_ROLE_VIBECODING`: `TEST_GATE_PASS` and `REVIEW_GATE_PASS` must both be valid for the current candidate before formal Git write. `LIGHTWEIGHT_OPERATION`: all `required_pre_git_gates` listed in the Work Order must be valid; the Work Order **must** explicitly list `required_pre_git_gates` and each Gate's actual role members. For any task producing a tracked diff, `required_pre_git_gates` **must not** be empty, and at least one required Gate **must** be formed and `PASS` by an independent tester / verifier / reviewer role separate from the content-author role. A missing unapproved Gate is **not** a failure, but a Work Order-required Gate **must not** be skipped. `VIBECODING_CONSULTATION_ONLY`: does **not** apply.
 
 `git-integrator` **must not** perform any formal Git write (commit, push, Draft PR create / update) until **all** of the following hold:
 
@@ -1459,7 +1472,7 @@ The following items **remain** to be finalised by operator in the future operato
 - closeout schema;
 - complete `VIBECODING_MODE` state machine.
 
-Already confirmed and **not** subject to the "not yet finalised" label: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR (§4.1, §9.2); paused-and-revalidate path (§4.10.3); FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16); candidate plan source binding per sub-mode (§4.16.2); contradiction routing by root cause (§4.16.4); non-PASS gate paths (§4.16.4, §4.16.5); LIGHTWEIGHT actual role set principle with mode-scoped §4.15/§4.16 governance (§4.1.2, §4.15, §4.16); LIGHTWEIGHT `direct_to_implementer` provenance (§4.16.2); LIGHTWEIGHT `required_pre_git_gates` (§4.16.7); drift signals (yyy)–(bbbb) (§10.1).
+Already confirmed and **not** subject to the "not yet finalised" label: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR (§4.1, §9.2); paused-and-revalidate path (§4.10.3); FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16); candidate plan source binding per sub-mode (§4.16.2); contradiction routing by root cause (§4.16.4); non-PASS gate paths (§4.16.4, §4.16.5); LIGHTWEIGHT actual role set principle with mode-scoped §4.15/§4.16 governance (§4.1.2, §4.15, §4.16); LIGHTWEIGHT `direct_to_implementer` provenance (§4.16.2); LIGHTWEIGHT `required_pre_git_gates` with non-empty requirement and independent verifier Gate (§4.16.7); verifier cross-Gate independence (§4.1.2); LIGHTWEIGHT no-Planner advance conditions (§4.15.3); mode-aware `PREMATURE_GIT_INTEGRATION` (§10.1); drift signals (yyy)–(bbbb) (§10.1).
 
 Until the operational workflow is formally accepted and `OPERATIONAL_PHASE` cutover declared, no action may claim V2-compliant formal VibeCoding E2E or canonical pipeline `PASS`.
 
@@ -1652,7 +1665,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (qqq) `DUAL_REVIEWER_INDEPENDENCE_VIOLATION` — reviewer-a and reviewer-b sharing session, context, prompt, invocation, output, or evidence, or one reading the other's intermediate work before its own first report is frozen (§4.16.5);
   - (rrr) `GATE_MAJORITY_VOTE_BYPASS` — treating a tester or reviewer `FAIL` as overridden by majority vote, compromise, or orchestrator override (§4.16.4, §4.16.5);
   - (sss) `ORCHESTRATOR_TEST_OR_REVIEW_SUBSTITUTION_DETECTED` — `vibedev` performing testing, supplementing business conclusions, choosing to believe one tester/reviewer over the other, performing review, or overriding an evidence-backed blocking opinion (§4.16.4, §4.16.5);
-  - (ttt) `PREMATURE_GIT_INTEGRATION` — `git-integrator` performing formal Git write before `TEST_GATE_PASS` and `REVIEW_GATE_PASS` are both valid for the current candidate (§4.16.7).
+  - (ttt) `PREMATURE_GIT_INTEGRATION` — `git-integrator` performing formal Git write before the mode-appropriate pre-Git gates are all valid for the current candidate (§4.16.7): FULL without both `TEST_GATE_PASS` and `REVIEW_GATE_PASS`; LIGHTWEIGHT without all Work Order `required_pre_git_gates` valid, with any Gate member empty, without at least one independent verifier Gate `PASS`, or with any source artifact invalidated.
   - (uuu) `CANDIDATE_PLAN_PROVENANCE_MISSING` — `IMPLEMENTATION_CANDIDATE` missing required plan source binding per sub-mode (§4.16.2). **Immediate STOP.**
   - (vvv) `OPERATOR_PLAN_APPROVAL_BYPASSED` — candidate formed without valid operator approval evidence where required (§4.16.2). **Immediate STOP.**
   - (www) `LIGHTWEIGHT_PLAN_SOURCE_MISMATCH` — `LIGHTWEIGHT` candidate plan source does not match the Work Order's Plan checkpoint setting (§4.16.2). Return to correct binding; if unresolvable within pre-approved budget, STOP.
@@ -1660,7 +1673,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (yyy) `LIGHTWEIGHT_UNAPPROVED_ROLE_IMPLIED` — §4.15 or §4.16 governance implicitly requiring a role not in the operator-approved actual role set (§4.1.2, §4.15, §4.16). **Immediate STOP.**
   - (zzz) `LIGHTWEIGHT_DIRECT_IMPLEMENTATION_PROVENANCE_MISSING` — LIGHTWEIGHT without Planner / Plan checkpoint but candidate missing `OPERATOR_APPROVED_WORK_ORDER` binding or `direct_to_implementer=true` approval field (§4.16.2). **Immediate STOP.**
   - (aaaa) `LIGHTWEIGHT_REQUIRED_GATE_SET_MISMATCH` — LIGHTWEIGHT pre-Git gate set does not match Work Order `required_pre_git_gates` (§4.16.7). If unresolvable within pre-approved budget, STOP.
-  - (bbbb) `UNAUTHORISED_CONTENT_AUTHOR_ROLE` — explorer, tester, reviewer, or git-integrator writing business content without operator approval as content-author role (§4.1.2). **Immediate STOP.**
+  - (bbbb) `UNAUTHORISED_CONTENT_AUTHOR_ROLE` — explorer, tester, reviewer, verifier, or git-integrator writing business content. Content-author roles must be independently operator-approved as such; the same role identity **must not** simultaneously serve as verifier / reviewer for its own output. **Immediate STOP.**
 
 ### §10.2 Drift Handling
 
