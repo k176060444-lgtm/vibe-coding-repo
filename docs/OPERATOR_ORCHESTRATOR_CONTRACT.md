@@ -506,7 +506,7 @@ The enumeration order above defines the **roster**, not execution order, concurr
 - named-but-not-executed (named without execution);
 - merging into another role;
 - substituting simulation for real execution;
-- claiming a role is completed **merely** by running generic commands such as `pytest`, `fixture`, `lint`, static analysis, deterministic scripts or simulation. Such tools **may serve** as a role's real execution means, **only** when the role carries role-specific `assignment`, `input`, `execution`, `output`, and `evidence`. `simulation` / `fixture` / `unit-test` evidence **must not** impersonate real production execution or canonical E2E evidence;
+- claiming a role is completed **merely** by running generic commands such as `pytest`, `fixture`, `lint`, static analysis, deterministic scripts or simulation. Deterministic tools **may** serve as a role's internal execution steps, data sources, and evidence, but **must not** be the sole basis for role completion. In both `FULL_9_ROLE_VIBECODING` and `LIGHTWEIGHT_OPERATION`, each actual role must sequentially possess its distinct meaningful model invocation (§4.5), role-specific work product, and completion evidence (§4.8). Generic commands, scripts, or test results alone **cannot** prove a role is complete;
 - "workload is small → skip this role".
 
 ### §4.5 Distinct Model Invocation Requirement (FULL mode)
@@ -527,7 +527,16 @@ The following are **forbidden**:
 
 Empty placeholders (no input + no output + no evidence) are **forbidden**. Permitted output constants: `NO_CHANGE_REQUIRED`, `NOT_APPLICABLE`, `NO_GIT_WRITE_REQUIRED`.
 
-### §4.7 Model Invocation Evidence (FULL mode)
+These constants **may only** appear as a verdict after a substantive model invocation and evidence analysis. Each constant usage **must** be accompanied by:
+
+- reason;
+- inspection scope;
+- evidence references;
+- applicable boundary.
+
+A constant alone does **not** satisfy the substantive work product or role completion requirement (§4.8). `NOT_APPLICABLE` **must not** be used to exempt a FULL mandatory role from execution entirely. For `git-integrator` when no Git write is involved, the role **must** still execute a distinct model invocation, produce a no-git-write eligibility check with repo / baseline / diff evidence, and deliver a reasoned verdict.
+
+### §4.7 Model Invocation Evidence (FULL and LIGHTWEIGHT modes)
 
 Each role's model invocation evidence **must** associate at least:
 
@@ -540,7 +549,11 @@ Each role's model invocation evidence **must** associate at least:
 - usage / token count if provider provides; otherwise `NOT_AVAILABLE`;
 - tool executions, produced artifacts, and verdict references.
 
-### §4.8 Role Completion Criteria (FULL mode)
+In `FULL_9_ROLE_VIBECODING`, all nine roles **must** satisfy this evidence requirement. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set **must** satisfy it. `VIBECODING_CONSULTATION_ONLY` does **not** trigger 8-role assignment and therefore does **not** require per-role invocation evidence.
+
+For the orchestrator role, the operator-approved assignment is satisfied by the operator-specified orchestrator model and scope at VIBECODING-MODE entry (§4.1). The orchestrator's model invocation evidence follows the same schema; its completion evidence is the coordinated run itself, not a substitute for any other role's evidence.
+
+### §4.8 Role Completion Criteria (FULL and LIGHTWEIGHT modes)
 
 A successful model invocation alone does **not** equal role completion. A role is complete only when all of the following are satisfied:
 
@@ -552,6 +565,10 @@ A successful model invocation alone does **not** equal role completion. A role i
 6. associable evidence with completion status.
 
 Model invocation failure, quota exhaustion, empty or unparseable output, or missing evidence means the role is **not** complete and triggers §7 STOP. Scripts, other roles, or the orchestrator **must not** substitute for the failed role's output.
+
+In `FULL_9_ROLE_VIBECODING`, all nine roles **must** satisfy these criteria. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set **must** satisfy them. `VIBECODING_CONSULTATION_ONLY` does **not** trigger 8-role assignment.
+
+For the orchestrator role, criterion 1 (operator-approved assignment) is satisfied by the operator-specified orchestrator model and scope at VIBECODING-MODE entry (§4.1). The orchestrator's completion is evidenced by the coordinated run itself; it does **not** substitute for any other role's completion criteria.
 
 ### §4.9 Independence of Dual Tester / Dual Reviewer (FULL mode)
 
@@ -569,7 +586,9 @@ If independence cannot be achieved, runtime **must** STOP, explain the cause and
 
 ### §4.10 Conflict Escalation (FULL mode)
 
-If any tester / reviewer demands changes, return to `implementer` and rerun the affected steps. Unresolvable conflict escalates to operator. `vibedev` **must not** unilaterally compromise.
+When a tester or reviewer raises a valid change demand, the current candidate **must not** enter PASS, Git integration, or closeout. `vibedev` **must** record the disagreement, affected scope, and evidence.
+
+Which role to return to, which steps to re-run, and whether a new checkpoint is required are determined by the future operator-approved operational workflow spec or the current task-specific workflow plan. If the existing approved plan does not define a recovery path, or the disagreement cannot be resolved, runtime **must** STOP and await operator decision. `vibedev` **must not** unilaterally compromise, ignore a change demand, or invent an unapproved loop.
 
 ---
 
@@ -1077,30 +1096,32 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (x) binding the cluster to a single fixed `Hermes` / `OpenCode` version without qualification (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
   - (y) claiming compatibility without verification / reusing stale qualification evidence / auto-expanding scope after single-node canary (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
   - (z) using a dedicated governance gate (§3.8, §6.9) to downgrade a business task, bypass operator, bypass Failure STOP, bypass evidence requirements, bypass public secret boundary, or convert a business task into a governance-only operation (§4.4);
-  - (aa) continuing assignments after a node-version change without re-qualification, or different node versions producing governance-semantic divergence while claiming E2E PASS (§3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE);
-  - (bb) using `Hermes` / `OpenCode` version switching to evade Failure STOP or operator checkpoints (§3.8.12);
-  - (cc) hardcoding a single version / CLI / path / schema in core governance or runtime without adaptation (§3.8.11);
-  - (dd) using a non-registered or unqualified route in §3.5 transport-route failover;
-  - (ee) mis-classifying an auth / identity / application error as transport-path failure (§3.5.6) and switching routes anyway;
-  - (ff) §3.5 route switch that changes node / model / role / assignment / credential / scope (§3.5.11);
-  - (gg) §3.5 switch into another node's route;
-  - (hh) restoring a `SUSPENDED` / `OFFLINE` / `NOT_ASSIGNABLE` / unqualified node to `ACTIVE` via route failover or any other automatic channel;
-  - (ii) continuing to try routes after the chain is exhausted (§3.5.9);
-  - (jj) modifying the route chain without operator approval (§3.5.10);
-  - (kk) interpreting §3.5 transport-route failover as a license for assignment-level fallback;
-  - (ll) `5bao` / `9bao` taking over `21bao` control plane;
-  - (mm) automatic orchestrator migration;
-  - (nn) continuing VibeCoding tasks while `21bao` is unavailable;
-  - (oo) mis-interpreting `21bao`'s network route failover as control-plane failover;
-  - (pp) re-opening `21bao` VibeCoding dispatch before every item in §3.6.7 passes (§3.6.7);
-  - (qq) credential discovery that prints a value-bearing environment map, or outputs secret-derived fragments into public / external / uncontrolled scope, or private operator-controlled output beyond the operator-approved operational scope (§6.6);
-  - (rr) treating a public-format token prefix marker as the credential value (§6.6);
-  - (ss) auto-rotating, auto-replacing, or auto-invalidating a credential without explicit operator authorisation (§6.6);
-  - (tt) treating `MODEL_QUOTA_EXHAUSTED` as a transport-path failure and triggering route fallback (§3.5.13);
-  - (uu) automatic model / node / provider / credential / account substitution upon quota exhaustion (§5.10);
-  - (vv) automatic retry, wait, or scope reduction upon quota exhaustion (§5.10);
-  - (ww) continuing subsequent roles after a role's model is quota-exhausted (§5.10);
-  - (xx) orchestrator model quota exhaustion handled by worker / reviewer takeover (§5.11).
+  - (aa) continuing assignments after a node-verification failure without operator approval;
+  - (bb) bare constant verdict — using `NO_CHANGE_REQUIRED`, `NOT_APPLICABLE`, or `NO_GIT_WRITE_REQUIRED` without a prior substantive model invocation, evidence analysis, reason, scope, and evidence references (§4.6);
+  - (cc) tool-only completion — claiming a role is complete based solely on deterministic tools, scripts, `pytest`, Git, SSH, file reads, or static analysis, without the role's own distinct model invocation (§4.4, §4.5);
+  - (dd) using `Hermes` / `OpenCode` version switching to evade Failure STOP or operator checkpoints (§3.8.12);
+  - (ee) hardcoding a single version / CLI / path / schema in core governance or runtime without adaptation (§3.8.11);
+  - (ff) using a non-registered or unqualified route in §3.5 transport-route failover;
+  - (gg) mis-classifying an auth / identity / application error as transport-path failure (§3.5.6) and switching routes anyway;
+  - (hh) §3.5 route switch that changes node / model / role / assignment / credential / scope (§3.5.11);
+  - (ii) §3.5 switch into another node's route;
+  - (jj) restoring a `SUSPENDED` / `OFFLINE` / `NOT_ASSIGNABLE` / unqualified node to `ACTIVE` via route failover or any other automatic channel;
+  - (kk) continuing to try routes after the chain is exhausted (§3.5.9);
+  - (ll) modifying the route chain without operator approval (§3.5.10);
+  - (mm) interpreting §3.5 transport-route failover as covering node / model / role / assignment / credential / scope changes;
+  - (nn) `5bao` / `9bao` taking over `21bao` control plane;
+  - (oo) automatic orchestrator migration;
+  - (pp) continuing VibeCoding tasks while `21bao` is unavailable;
+  - (qq) mis-interpreting `21bao`'s network route failover as control-plane failover;
+  - (rr) re-opening `21bao` VibeCoding dispatch before every item in §3.6.7 passes (§3.6.7);
+  - (ss) credential discovery that prints a value-bearing environment map, or outputs secret-derived fragments into public / external / uncontrolled scope, or private operator-controlled output beyond the operator-approved operational scope (§6.6);
+  - (tt) treating a public-format token prefix marker as the credential value (§6.6);
+  - (uu) auto-rotating, auto-replacing, or auto-invalidating a credential without explicit operator authorisation (§6.6);
+  - (vv) treating `MODEL_QUOTA_EXHAUSTED` as a transport-path failure and triggering route fallback (§3.5.13);
+  - (ww) automatic model / node / provider / credential / account substitution upon quota exhaustion (§5.10);
+  - (xx) automatic retry, wait, or scope reduction upon quota exhaustion (§5.10);
+  - (yy) continuing subsequent roles after a role's model is quota-exhausted (§5.10);
+  - (zz) orchestrator model quota exhaustion handled by worker / reviewer takeover (§5.11).
 
 ### §10.2 Drift Handling
 
@@ -1285,7 +1306,9 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 |---|---|---|
 | 3000-character rule | "each segment < 3000 characters" (hard) | per-segment split threshold: ≤3000 single segment, >3000 split with each segment ≤3000; total prompt may exceed 3000; must not delete content to reduce segment count (§11.5) |
 | 9-role roster | five mixed roles | FULL_9_ROLE_VIBECODING: fully enumerated 9-role roster (§4.3); roster enumeration does **not** define execution order, concurrency, or workflow; LIGHTWEIGHT: minimum recommended roles (§4.1.2); VIBECODING_CONSULTATION_ONLY: no 8-role assignment (§4.1.1); FULL nine roles each require distinct meaningful model invocation (§4.5); tools cannot substitute for a role's own model call |
-| Role trimming | not explicitly forbidden | FULL mode only: explicit no-trim / no-skip / no "named-but-not-executed" (§4.5); LIGHTWEIGHT executes operator-approved actual role set |
+| Model invocation evidence | absent | FULL nine roles + LIGHTWEIGHT actual roles each require evidence: task/run ID, role, node, model, providers, invocation ID, timestamps, input/output digests, token usage (§4.7); orchestrator evidence via mode-entry model specification |
+| Role completion criteria | absent | FULL nine roles + LIGHTWEIGHT actual roles: 6 conditions (assignment, input, model invocation, work product, acceptance criteria, evidence); invocation alone ≠ completion; failure/empty/missing → §7 STOP (§4.8) |
+| Role trimming | not explicitly forbidden | FULL mode only: explicit no-trim / no-skip / no "named-but-not-executed" (§4.5); LIGHTWEIGHT executes operator-approved actual role set; named-but-not-executed, no distinct model invocation, shared invocation, multi-role response reuse, generic-command-only, tool-only completion, and bare constant verdict are all drift (§10.1) |
 | Dual tester / dual reviewer | absent | independent across assignment / context / prompt / batch / output / evidence; different role invocation IDs; no shared model call; **recommended** different node + model (§4.9) |
 | 8-role assignment pre-brief | absent | FULL mode only: required; 4-column matrix; no `alternative` (§5.1, §5.5) |
 | Assignment strictness | absent | strict per operator spec; failure follows §7 (§5.8, §5.9) |
@@ -1297,7 +1320,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in §10.1(p) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
-| Drift signals | 7 | expanded to (a)–(xx) |
+| Drift signals | 7 | expanded to (a)–(zz) |
 | High-risk checkpoints | §4 vague | §9 explicit 4 categories (A/B/C/D), 12+ high-risk items, including `Hermes` / `OpenCode` install / update / downgrade / migration / restart / switch (§9.3) |
 | Top-line governance | role authority scattered | §1 GP-1 / GP-2 / GP-3 single page; recommend → assign → execute locked |
 | Effect mechanism | §10 "signing" (later corrected to Working Agreement) | effective only on operator explicit chat acceptance; on acceptance update existing file with `Version: 2.0` + `Supersedes: V1 / PR #276` + `Historical source retained in Git history` |
