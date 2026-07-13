@@ -3593,7 +3593,11 @@ If multiple user-level sources are explicitly declared as canonical, classify as
 5. The loader **must not** report the token value, partial value, reversible encoding, or hash fingerprint that could identify the secret.
 6. Report only the classification string and the non-secret evidence items listed in **§14.7**.
 
-**§14.2.4 Multiple source ambiguity.** If more than one candidate variable is non-empty and the values differ, the loader must fail closed and STOP. It must not auto-select or heuristically choose between them.
+**§14.2.4 Canonical source boundary.** The sole canonical GitHub credential source is the Windows current-user environment variable `GH_TOKEN`. The current-process value of `GH_TOKEN` is a non-canonical cache only — it may be stale, absent, or match the canonical value.
+
+- If the current-process value differs from the canonical user-level value, this is `PROCESS_ENV_STALE_MISMATCH` (§14.2.2 #3). The process value must be discarded; only the canonical user-level value is used after re-injection and re-authentication.
+- `GITHUB_TOKEN` and any other variable not explicitly declared as canonical by the operator shall not participate in source-ambiguity comparison and shall not be automatically used.
+- `TOKEN_SOURCE_AMBIGUOUS` applies only when two or more explicitly operator-declared canonical user-level sources have conflicting non-empty values. The current contract declares only one canonical source (user-level `GH_TOKEN`). The loader must not discover, promote, or select a new canonical source on its own.
 
 **§14.2.5 Temporary askpass.** The loader must create a temporary askpass script that:
 
@@ -3653,23 +3657,32 @@ If any check fails:
 
 CONSULTATION_ONLY mode has no Git endpoint; Level 1 Git Delivery Readiness does not apply.
 
-**§14.3.2 Level 2 — git-integrator Activation Re-verification.** Immediately before a git-integrator model invocation starts Git write operations, the same credential loader and network path must re-verify:
+**§14.3.2 Level 2 — git-integrator Activation Re-verification (per operation).** Immediately before any Git write operation, the same credential loader and network path must re-verify using the complete §14.2.2 five-state truth table. Level 2 must execute separately for each of:
 
-1. `USER_ENV_TOKEN_PRESENT` (re-read from user env).
-2. Child process token loaded (re-inject if necessary).
-3. Authenticated GitHub identity matches expected identity.
-4. Repository push permission.
-5. Remote branch current SHA.
-6. Authenticated `git ls-remote` succeeds.
-7. Target refspec is available for push.
-8. Proxy path is available.
+1. Draft PR delivery (within the original Work Order).
+2. Draft → Ready (independent Post-Draft operation).
+3. Merge (independent Post-Draft operation).
+4. Branch Deletion (independent Post-Draft operation, optional per Work Order).
 
-If Level 2 re-verification fails:
+Each operation must produce its own `credential_readiness_evidence_id`. No operation may reuse the Global Readiness (Level 1) evidence, the Draft PR delivery evidence, or any other Post-Draft operation's evidence.
 
-- The git-integrator must not execute Git write operations.
+Each Level 2 verification must:
+
+1. Re-read the canonical user-level token and classify against the five-state truth table (§14.2.2).
+2. Re-inject the canonical value into a controlled subprocess if any recoverable condition is found.
+3. Perform authenticated identity verification.
+4. Verify repository push permission.
+5. Read remote branch current SHA.
+6. Execute authenticated `git ls-remote` using the same HTTPS URL, credential injection method, and proxy path as the intended push.
+7. Confirm target refspec is available.
+
+If Level 2 verification fails:
+
+- The current-stage Git/API write must not start.
+- No commit or state for this stage may be created.
 - The orchestrator must not take over Git writing.
-- No new commit may be created.
-- Resumption evidence must be returned and the process must STOP.
+- No push or API write budget may be consumed.
+- Resumption evidence must be output and the process must STOP.
 
 ### §14.4 Git Write Capability Control
 
@@ -3736,38 +3749,54 @@ Ready, Merge, and Branch Deletion must each use their own credential-readiness e
 
 ### §14.6 Failure Classification & Retry
 
-**§14.6.1 Failure classes.** All Git runtime failures must be classified into exactly one of:
+**§14.6.1 Failure classes — consistent with §14.2.2 five-state truth table.** All Git runtime results must be classified into exactly one of the following. The classification set is divided into three groups by semantic category.
 
+**A. Observation / recoverable (not failures):**
 | Class | Meaning |
 |---|---|
-| `PROCESS_ENV_STALE` | User-level token exists; parent process missing; child injection recovers |
-| `TOKEN_SOURCE_MISSING` | No token at user level or any canonical source |
-| `TOKEN_SOURCE_AMBIGUOUS` | Multiple non-empty sources with conflicting values |
-| `TOKEN_AUTH_FAILURE` | Token present but GitHub authentication fails |
-| `AUTHENTICATED_IDENTITY_MISMATCH` | Authenticated user does not match expected repository collaborator |
-| `REPO_PUSH_PERMISSION_FAILURE` | Authenticated identity lacks push permission |
-| `PROXY_PATH_FAILURE` | Configured proxy path fails; direct path may be tested |
-| `NETWORK_PATH_FAILURE` | Both proxy and direct HTTPS paths fail |
-| `REMOTE_PARENT_MISMATCH` | Remote ref does not point at expected parent commit |
-| `NON_FAST_FORWARD` | Local commit not a descendant of remote ref |
-| `REMOTE_ALREADY_UPDATED` | Push not needed; remote already at target SHA |
+| `PROCESS_ENV_STALE_ABSENT` | Canonical user-level token exists; current process has not inherited it. Recoverable via child-process injection (§14.2.3). |
+| `PROCESS_ENV_STALE_MISMATCH` | Canonical user-level and current-process values differ. Process value discarded; canonical value re-injected; re-auth required (§14.2.2 #3). |
+
+**B. Ready / success / no-op (not failures):**
+| Class | Meaning |
+|---|---|
+| `USER_ENV_TOKEN_READY` | Canonical user-level token present; current-process value present and equal. Ready for use. |
+| `CREDENTIAL_RECOVERY_READY` | Recoverable condition (#2 or #3) was resolved via user-level read, child injection, re-authentication, and ls-remote. Ready for use. |
+| `REMOTE_ALREADY_UPDATED` | Push not needed; remote already at target SHA. Success/no-op outcome. |
+| `DELIVERY_VERIFIED` | Push completed; local, remote, and PR head SHA match. Success outcome. |
+
+**C. Terminal failure (STOP):**
+| Class | Meaning |
+|---|---|
+| `TOKEN_SOURCE_MISSING` | No canonical source found at user level or in any operator-declared canonical location. |
+| `UNTRUSTED_PROCESS_ONLY_TOKEN` | User-level canonical source absent; only a non-canonical process residue exists. STOP, do not use. |
+| `TOKEN_SOURCE_AMBIGUOUS` | Two or more operator-declared canonical user-level sources have conflicting values. §14.2.4 applies. |
+| `PROCESS_ENV_RECOVERY_FAILED` | A recoverable condition (#2 or #3) was attempted but recovery failed (child injection, re-auth, or ls-remote failed). |
+| `TOKEN_AUTH_FAILURE` | Token present but GitHub authentication rejects it. |
+| `AUTHENTICATED_IDENTITY_MISMATCH` | Authenticated user does not match the expected repository collaborator for this Work Order. |
+| `REPO_PUSH_PERMISSION_FAILURE` | Authenticated identity lacks push permission on the target repository. |
+| `PROXY_PATH_FAILURE` | Configured proxy path fails; direct HTTPS path may be tested as alternate. |
+| `NETWORK_PATH_FAILURE` | Both proxy and direct HTTPS paths fail. |
+| `REMOTE_PARENT_MISMATCH` | Remote ref does not point at the expected parent commit. |
+| `NON_FAST_FORWARD` | Local commit is not a descendant of the remote ref; fast-forward push is not possible without force. |
 
 **§14.6.2 Classification priority (to avoid double-classification).** When multiple conditions could apply to the same observation, the following priority order decides the single classification:
 
 1. `REMOTE_ALREADY_UPDATED` — check first; if remote is at target SHA, no further classification needed.
-2. `TOKEN_SOURCE_AMBIGUOUS` — conflicting canonical sources.
-3. `TOKEN_SOURCE_MISSING` / `UNTRUSTED_PROCESS_ONLY_TOKEN` — no valid canonical token.
-4. `PROCESS_ENV_STALE_MISMATCH` — user and process tokens differ (recoverable after re-injection and re-auth).
-5. `PROCESS_ENV_STALE_ABSENT` — user token exists but process missing (recoverable).
-6. `TOKEN_AUTH_FAILURE` — token present but GitHub rejects authentication.
-7. `AUTHENTICATED_IDENTITY_MISMATCH` — authenticated user not the expected collaborator.
-8. `REPO_PUSH_PERMISSION_FAILURE` — authenticated but no push permission.
-9. `PROXY_PATH_FAILURE` — configured proxy path fails; direct path may be tested next.
-10. `NETWORK_PATH_FAILURE` — both proxy and direct HTTPS paths fail.
-11. `REMOTE_PARENT_MISMATCH` — remote ref points at unexpected parent.
-12. `NON_FAST_FORWARD` — local commit not a descendant of remote ref.
+2. `TOKEN_SOURCE_AMBIGUOUS` — conflicting operator-declared canonical sources.
+3. `TOKEN_SOURCE_MISSING` — no canonical source at user level.
+4. `UNTRUSTED_PROCESS_ONLY_TOKEN` — only process residue exists.
+5. `PROCESS_ENV_STALE_MISMATCH` — user and process tokens differ (recoverable after re-injection and re-auth).
+6. `PROCESS_ENV_STALE_ABSENT` — user token exists but process missing (recoverable).
+7. `TOKEN_AUTH_FAILURE` — token present but GitHub rejects authentication.
+8. `AUTHENTICATED_IDENTITY_MISMATCH` — authenticated user not the expected collaborator.
+9. `REPO_PUSH_PERMISSION_FAILURE` — authenticated but no push permission.
+10. `PROXY_PATH_FAILURE` — configured proxy path fails; direct path may be tested next.
+11. `NETWORK_PATH_FAILURE` — both proxy and direct HTTPS paths fail.
+12. `REMOTE_PARENT_MISMATCH` — remote ref points at unexpected parent.
+13. `NON_FAST_FORWARD` — local commit not a descendant of remote ref.
 
-Readiness observations (1–6) must not consume push budget.
+Readiness observations (1–6) must not consume any push budget.
 
 1. `PROCESS_ENV_STALE_ABSENT` and `PROCESS_ENV_STALE_MISMATCH` must be recovered by user-level read and child-process injection; operator must not be asked to reconfigure the token. If recovery fails, classify as `PROCESS_ENV_RECOVERY_FAILED` and STOP.
 2. Readiness failures (Level 1 or Level 2) do not count as push budget consumption.
@@ -3783,11 +3812,19 @@ Readiness observations (1–6) must not consume push budget.
 
 Every credential loader and Git readiness call must produce evidence containing:
 
+- `credential_runtime_state`: the five-state or final READY/STOP classification string
+- `canonical_source_present`: boolean — user-level `GH_TOKEN` is non-empty
+- `current_process_present`: boolean — current-process `GH_TOKEN` is non-empty
+- `process_env_absent`: boolean — true when canonical source present but process empty
+- `process_env_mismatch`: boolean — true when canonical source present and process value present but differs
+- `untrusted_process_only_token`: boolean — true when only process residue exists
+- `recovery_attempted`: boolean
+- `recovery_succeeded`: boolean
+- `recovery_failure_class`: nullable enum — e.g., `PROCESS_ENV_RECOVERY_FAILED`
+- `endpoint_intent`: one of `CREATE_NEW_DRAFT_PR` / `UPDATE_EXISTING_DRAFT_PR` / `POST_DRAFT_READY` / `POST_DRAFT_MERGE` / `POST_DRAFT_BRANCH_DELETION`
+- `credential_readiness_evidence_id`
+- `credential_readiness_evidence_reused`: must be `false`
 - `credential_source_name`: the canonical variable name
-- `user_level_present`: boolean (read via subprocess)
-- `current_process_present`: boolean
-- `process_env_stale`: boolean (true if user-level present but process missing)
-- `child_process_loaded`: boolean
 - `authenticated_github_login`: the GitHub login string
 - `repo_permission_raw`: the permission string as returned by GitHub (e.g., `admin`, `write`, `read`)
 - `repo_push_allowed`: boolean — derived from `repo_permission_raw` mapping (admin/write → true, read → false)
@@ -3798,8 +3835,11 @@ Every credential loader and Git readiness call must produce evidence containing:
 - `role_invocation_id`: the role invocation identifier
 - `model_invocation_id`: the model invocation identifier
 - `local_sha`, `remote_sha`, `pr_head_ref_oid`: final three-source values
-- `askpass_temporary_file_deleted`: boolean (must be true after every Git operation)
-- `token_exposed_to_model_context`: must be false
+- `askpass_temporary_file_deleted`: boolean (must be `true` after every Git operation)
+- `token_exposed_to_model_context`: must be `false`
+
+Where needed for backward-compatible summarisation, `process_env_stale` may be retained as a computed convenience field where:
+`process_env_stale = process_env_absent OR process_env_mismatch`
 
 The evidence must not contain:
 
@@ -3811,18 +3851,22 @@ The evidence must not contain:
 
 The credential hardening rules must be tested with at least the following scenarios:
 
-1. User-level token present; parent process token absent → classification `PROCESS_ENV_STALE_ABSENT`; child injection and re-auth recover → `READY`.
-2. User-level and parent process tokens present and identical → `USER_ENV_TOKEN_READY`.
-3. User-level and parent process tokens both present but differ → `PROCESS_ENV_STALE_MISMATCH`; child injection with user-level value + re-auth → `READY`; record mismatch boolean.
-4. User-level token absent, parent process non-empty → `UNTRUSTED_PROCESS_ONLY_TOKEN` → STOP.
-5. Token present but GitHub authentication fails → `TOKEN_AUTH_FAILURE` → STOP.
-6. Authenticated identity lacks repo push permission → `REPO_PUSH_PERMISSION_FAILURE` → STOP.
-7. Proxy path ls-remote succeeds; direct path fails → selection of proxy path for push.
-8. Level 1 (Global pre-Role-Activation) passes; Level 2 (pre-git-integrator) re-verification fails → git write must not start.
-9. Orchestrator attempts to call a write interface → rejection with `caller_role_mismatch`.
-10. Git write called without git-integrator model invocation ID → rejection with `missing_binding`.
-11. git-integrator uses correct credential injection and askpass; push succeeds; three-source SHA verification passes → `DELIVERY_VERIFIED`.
-12. Post-Draft Ready operation reuses Draft PR delivery binding → rejected with `stale_authority`.
+1. User-level token present; parent process token present and equal → `USER_ENV_TOKEN_READY`.
+2. User-level token present; parent process token absent → `PROCESS_ENV_STALE_ABSENT`; child injection and re-auth recover → `CREDENTIAL_RECOVERY_READY`.
+3. User-level and parent process tokens both present but differ → `PROCESS_ENV_STALE_MISMATCH`; child injection with canonical user-level value + re-auth → `CREDENTIAL_RECOVERY_READY`; mismatch boolean recorded.
+4. User-level token absent; parent process empty → `TOKEN_SOURCE_MISSING` → STOP.
+5. User-level token absent; parent process non-empty → `UNTRUSTED_PROCESS_ONLY_TOKEN` → STOP (process residue not used).
+6. `GITHUB_TOKEN` exists in user env; `GH_TOKEN` also valid → no ambiguity formed; `GITHUB_TOKEN` not used; `GH_TOKEN` is canonical source.
+7. Multiple operator-declared canonical user-level sources with conflicting values → `TOKEN_SOURCE_AMBIGUOUS` → STOP.
+8. Recoverable condition (#2 or #3) attempted but re-injection, re-auth, or ls-remote fails → `PROCESS_ENV_RECOVERY_FAILED` → STOP.
+9. `CREATE_NEW_DRAFT_PR` endpoint intent — PR does not yet exist; verification passes without requiring PR pre-existence.
+10. `UPDATE_EXISTING_DRAFT_PR` — exact PR number must exist and be OPEN + DRAFT; verification fails if PR is closed, merged, or non-existent.
+11. Draft PR delivery Level 2 evidence attempted for `POST_DRAFT_READY` → rejected with `stale_authority`.
+12. Ready operation Level 2 evidence attempted for `POST_DRAFT_MERGE` → rejected with `stale_authority`.
+13. Merge operation Level 2 evidence attempted for `POST_DRAFT_BRANCH_DELETION` → rejected with `stale_authority`.
+14. Push attempted; remote already at target SHA → `REMOTE_ALREADY_UPDATED`; no duplicate push permitted.
+15. Orchestrator attempts to call a write interface → rejection with `caller_role_mismatch`.
+16. Git write called without git-integrator model invocation ID or current-stage authority → rejection with `missing_binding`.
 
 
 
