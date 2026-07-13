@@ -3561,14 +3561,28 @@ These rules do not modify:
 
 **§14.2.1 Canonical secret source.** The canonical GitHub credential source is the Windows current-user environment variable `GH_TOKEN`. No other parallel canonical source shall be registered. The contract shall name no other user-facing token variable for this repository.
 
-**§14.2.2 Loader distinction.** Any runtime credential loader must distinguish exactly these four states:
+### §14.2.2 Loader distinction — complete credential runtime status truth table.
 
-| State | User-level `GH_TOKEN` | Current-process `GH_TOKEN` | Classification |
-|---|---|---|---|
-| `USER_ENV_TOKEN_PRESENT` | non-empty | non-empty, equal | ready |
-| `PROCESS_ENV_STALE` | non-empty | empty or absent | child-injection needed |
-| `TOKEN_SOURCE_MISSING` | empty | empty | STOP |
-| `TOKEN_SOURCE_AMBIGUOUS` | multiple non-empty sources with differing values | — | STOP |
+The canonical secret source is the Windows current-user environment variable `GH_TOKEN` only. The current-process value is a possibly-stale non-canonical cache, not a second authorised source.
+
+Any runtime credential loader must distinguish exactly these five states:
+
+| # | User-level `GH_TOKEN` | Current-process `GH_TOKEN` | Classification | Outcome |
+|---|---|---|---|---|
+| 1 | non-empty | non-empty, equal | `USER_ENV_TOKEN_READY` | ready — child can use process value directly or re-inject for isolation |
+| 2 | non-empty | empty | `PROCESS_ENV_STALE_ABSENT` | observation/recoverable — read from user level, inject into child subprocess, re-auth, ls-remote; success → READY |
+| 3 | non-empty | non-empty, different | `PROCESS_ENV_STALE_MISMATCH` | observation/recoverable — process value is stale/different; discard it; use canonical user-level value; re-inject into child; re-auth and ls-remote required; record non-secret mismatch boolean |
+| 4 | empty | empty | `TOKEN_SOURCE_MISSING` | terminal failure — STOP |
+| 5 | empty | non-empty | `UNTRUSTED_PROCESS_ONLY_TOKEN` | terminal failure — process residue value is not canonical; STOP, do **not** use it as credential |
+
+States are classified into three categories:
+- **observation/recoverable condition** (#2, #3): not a failure; recovery via user-level read and child injection is expected; if recovery fails, use `PROCESS_ENV_RECOVERY_FAILED` as terminal failure.
+- **readiness outcome** (#1): ready.
+- **terminal failure** (#4, #5): STOP, no further action.
+
+`REMOTE_ALREADY_UPDATED` is a success/no-op outcome, not a failure.
+
+If multiple user-level sources are explicitly declared as canonical, classify as `TOKEN_SOURCE_AMBIGUOUS` and STOP. The current contract declares only one canonical source (user-level `GH_TOKEN`); so `TOKEN_SOURCE_AMBIGUOUS` is reserved for future configuration changes and does not apply to process-environment comparison.
 
 **§14.2.3 PROCESS_ENV_STALE handling.** When the user-level token exists but the current process has not inherited it, the loader must:
 
@@ -3600,23 +3614,42 @@ These rules do not modify:
 
 For any FULL or LIGHTWEIGHT Work Order that includes a Draft PR Git endpoint, two readiness checks must execute before any Git write.
 
-**§14.3.1 Level 1 — Work Order Activation (Global Git Delivery Readiness).** Before the orchestrator activates the Work Order, the credential loader must verify:
+**§14.3.1 Level 1 — Global Git Delivery Readiness (as part of `GLOBAL_READINESS`).** The state chain is:
 
-1. Canonical user-level token exists and is unique (no source ambiguity).
+`OPERATOR_APPROVED_WORK_ORDER → WORK_ORDER_ACTIVE → GLOBAL_READINESS`
+
+Level 1 executes as a Git Delivery Readiness sub-check of `GLOBAL_READINESS`. The credential loader must verify:
+
+1. Canonical user-level token exists and is unique (`USER_ENV_TOKEN_READY` or `PROCESS_ENV_STALE_*` — both recoverable).
 2. A child process can load the token (injection test or equivalent signal).
 3. Authenticated GitHub identity matches the expected repository owner/collaborator.
 4. Target repository is readable.
 5. Repository permission reports `push=true` for the authenticated identity.
 6. Remote URL, target branch, and base branch match the approved Work Order.
 7. The same Git executable, HTTPS URL, credential injection method, and proxy path that will be used for the actual push successfully execute an authenticated `git ls-remote` against the target.
-8. The Draft PR endpoint is reachable and the PR exists.
+8. Draft PR endpoint check — applies differently per Work Order `git_delivery_contract` intent:
+
+   a. Intent `CREATE_NEW_DRAFT_PR`:
+      - GitHub API reachable.
+      - Authenticated identity has permission to create PRs on target repo.
+      - Approved base and head branches are valid.
+      - No conflicting or duplicate open PR exists for the same base/head pair.
+      - Draft PR creation capability is confirmed (e.g., via API metadata or permissions check).
+
+   b. Intent `UPDATE_EXISTING_DRAFT_PR`:
+      - The exact PR number exists.
+      - PR must be OPEN and DRAFT.
+      - PR base and head branches must match the approved Work Order.
+      - PR head ref and remote branch state are readable.
 
 If any check fails:
 
-- The Work Order must not enter automatic execution.
-- The failure must not be discovered at git-integrator phase.
+- The Work Order remains `WORK_ORDER_ACTIVE` but `GLOBAL_READINESS` reports failure/blocked.
+- No non-orchestrator Role Activation may proceed.
+- The approved Work Order is not reverted, revoked, or overridden.
 - No push budget may be consumed.
-- A structured failure classification (**§14.6**) must be output, and the orchestrator must STOP.
+- A structured failure classification (**§14.6**) must be output with STOP evidence.
+- The orchestrator must STOP.
 
 CONSULTATION_ONLY mode has no Git endpoint; Level 1 Git Delivery Readiness does not apply.
 
@@ -3660,12 +3693,15 @@ If Level 2 re-verification fails:
 | `create_or_update_draft_pr` | Create or update Draft PR body |
 | `verify_local_remote_pr_sha` | Final three-source SHA verification |
 
-**§14.4.3 Git write binding requirements.** Every Git write call must be bound to:
+### §14.4.3 Git write binding requirements — including Post-Draft operations.
 
-- `work_order_id`/`version`/`digest`
-- `git_integrator_assignment_id`/`version`/`digest`
-- `git_integrator_role_invocation_id`
-- `git_integrator_model_invocation_id`
+Every Git write call must be bound to its mode-specific authority. Two binding regimes apply:
+
+**A. Draft PR delivery Git write (original git-integrator within Work Order):**
+- Work Order ID / version / digest
+- git-integrator assignment ID / version / digest
+- git-integrator role invocation ID
+- git-integrator model invocation ID
 - Frozen integration Packet ref
 - Candidate ref
 - Git operation ref
@@ -3674,7 +3710,21 @@ If Level 2 re-verification fails:
 - Credential loader execution ID
 - Tool invocation ID
 
-A write call missing any of these bindings must be rejected.
+**B. Each Post-Draft Git/API write (Ready, Merge, Branch Deletion):**
+The original Work Order triple serves as provenance only, not as current authority.
+- Current-stage operator authorization Receipt (specific to Ready / Merge / Branch Deletion)
+- Current-stage post-Draft git-integrator binding (stage-specific)
+- Current-stage role invocation ID
+- Current-stage model invocation ID
+- Current-stage approval Packet ref
+- Current-stage operation ref (e.g., `DRAFT_TO_READY_OPERATION_REF`, `MERGE_OPERATION_REF`, `BRANCH_DELETION_OPERATION_REF`)
+- Current-stage PR or branch ref (e.g., `PR_TRIPLE`, `BRANCH_TRIPLE`)
+- Credential loader execution ID
+- Tool invocation ID
+
+A write call missing any of its regime-specific bindings must be rejected.
+
+Ready, Merge, and Branch Deletion must each use their own credential-readiness evidence, role invocation, and binding. These must not be reused from the original Draft PR delivery or from each other.
 
 ### §14.5 Role Boundary Enforcement
 
@@ -3702,9 +3752,24 @@ A write call missing any of these bindings must be rejected.
 | `NON_FAST_FORWARD` | Local commit not a descendant of remote ref |
 | `REMOTE_ALREADY_UPDATED` | Push not needed; remote already at target SHA |
 
-**§14.6.2 Retry rules.**
+**§14.6.2 Classification priority (to avoid double-classification).** When multiple conditions could apply to the same observation, the following priority order decides the single classification:
 
-1. `PROCESS_ENV_STALE` must be recovered by user-level read and child-process injection; operator must not be asked to reconfigure the token.
+1. `REMOTE_ALREADY_UPDATED` — check first; if remote is at target SHA, no further classification needed.
+2. `TOKEN_SOURCE_AMBIGUOUS` — conflicting canonical sources.
+3. `TOKEN_SOURCE_MISSING` / `UNTRUSTED_PROCESS_ONLY_TOKEN` — no valid canonical token.
+4. `PROCESS_ENV_STALE_MISMATCH` — user and process tokens differ (recoverable after re-injection and re-auth).
+5. `PROCESS_ENV_STALE_ABSENT` — user token exists but process missing (recoverable).
+6. `TOKEN_AUTH_FAILURE` — token present but GitHub rejects authentication.
+7. `AUTHENTICATED_IDENTITY_MISMATCH` — authenticated user not the expected collaborator.
+8. `REPO_PUSH_PERMISSION_FAILURE` — authenticated but no push permission.
+9. `PROXY_PATH_FAILURE` — configured proxy path fails; direct path may be tested next.
+10. `NETWORK_PATH_FAILURE` — both proxy and direct HTTPS paths fail.
+11. `REMOTE_PARENT_MISMATCH` — remote ref points at unexpected parent.
+12. `NON_FAST_FORWARD` — local commit not a descendant of remote ref.
+
+Readiness observations (1–6) must not consume push budget.
+
+1. `PROCESS_ENV_STALE_ABSENT` and `PROCESS_ENV_STALE_MISMATCH` must be recovered by user-level read and child-process injection; operator must not be asked to reconfigure the token. If recovery fails, classify as `PROCESS_ENV_RECOVERY_FAILED` and STOP.
 2. Readiness failures (Level 1 or Level 2) do not count as push budget consumption.
 3. After a push failure, the remote branch SHA and PR headRefOid must be read via authenticated API before any retry decision.
 4. If the remote is already updated to the target SHA, no retry push is permitted.
@@ -3724,7 +3789,8 @@ Every credential loader and Git readiness call must produce evidence containing:
 - `process_env_stale`: boolean (true if user-level present but process missing)
 - `child_process_loaded`: boolean
 - `authenticated_github_login`: the GitHub login string
-- `repo_push_permission`: the permission string (e.g., `admin`, `write`)
+- `repo_permission_raw`: the permission string as returned by GitHub (e.g., `admin`, `write`, `read`)
+- `repo_push_allowed`: boolean — derived from `repo_permission_raw` mapping (admin/write → true, read → false)
 - `remote_url_class`: e.g., `https_github`
 - `proxy_path_class`: `git_global_proxy` or `direct`
 - `authenticated_ls_remote_result`: `success` or `FAIL_reason`
@@ -3745,16 +3811,18 @@ The evidence must not contain:
 
 The credential hardening rules must be tested with at least the following scenarios:
 
-1. User-level token present; parent process token absent → classification `PROCESS_ENV_STALE`; child injection recovers → `READY`.
-2. User-level and parent process tokens present and identical → `READY`.
-3. Multiple non-empty token sources with differing values → `TOKEN_SOURCE_AMBIGUOUS` → STOP.
-4. Token present but GitHub authentication fails → `TOKEN_AUTH_FAILURE` → STOP.
-5. Authenticated identity lacks repo push permission → `REPO_PUSH_PERMISSION_FAILURE` → STOP.
-6. Proxy path ls-remote succeeds; direct path fails → selection of proxy path for push.
-7. Level 1 (Global pre-Activation) passes; Level 2 (pre-git-integrator) re-verification fails → git write must not start.
-8. Orchestrator attempts to call a write interface → rejection with `caller_role_mismatch`.
-9. Git write called without git-integrator model invocation ID → rejection with `missing_binding`.
-10. git-integrator uses correct credential injection and askpass; push succeeds; three-source SHA verification passes → `DELIVERY_VERIFIED`.
+1. User-level token present; parent process token absent → classification `PROCESS_ENV_STALE_ABSENT`; child injection and re-auth recover → `READY`.
+2. User-level and parent process tokens present and identical → `USER_ENV_TOKEN_READY`.
+3. User-level and parent process tokens both present but differ → `PROCESS_ENV_STALE_MISMATCH`; child injection with user-level value + re-auth → `READY`; record mismatch boolean.
+4. User-level token absent, parent process non-empty → `UNTRUSTED_PROCESS_ONLY_TOKEN` → STOP.
+5. Token present but GitHub authentication fails → `TOKEN_AUTH_FAILURE` → STOP.
+6. Authenticated identity lacks repo push permission → `REPO_PUSH_PERMISSION_FAILURE` → STOP.
+7. Proxy path ls-remote succeeds; direct path fails → selection of proxy path for push.
+8. Level 1 (Global pre-Role-Activation) passes; Level 2 (pre-git-integrator) re-verification fails → git write must not start.
+9. Orchestrator attempts to call a write interface → rejection with `caller_role_mismatch`.
+10. Git write called without git-integrator model invocation ID → rejection with `missing_binding`.
+11. git-integrator uses correct credential injection and askpass; push succeeds; three-source SHA verification passes → `DELIVERY_VERIFIED`.
+12. Post-Draft Ready operation reuses Draft PR delivery binding → rejected with `stale_authority`.
 
 
 
