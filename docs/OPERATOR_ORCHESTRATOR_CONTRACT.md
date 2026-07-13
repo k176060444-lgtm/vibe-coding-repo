@@ -1849,7 +1849,12 @@ A probe does **not** count as a role's formal execution.
   - **`FULL_9_ROLE_VIBECODING`** and **`LIGHTWEIGHT_OPERATION`** (execution-type): each non-orchestrator role, for each attempt, must submit a structured `ROLE_COMPLETION_REPORT` containing at minimum: role / assignment, Activation, attempt ID, invocation IDs, input / output artifact references, tools / commands, work product, acceptance results, blockers, completion claim. `vibedev` cross-verifies each report into `VERIFIED` / `INCOMPLETE` / `REJECTED`; `vibedev` **must not** fabricate role judgement.
   - **`VIBECODING_CONSULTATION_ONLY`**: records the consultation deliverable and `CONSULTATION_REPORT` with their ID / version / digest / source references. Non-orchestrator `ROLE_COMPLETION_REPORT` is **not** required.
 
-**Artifact schema** (execution-type only) requires at minimum: `artifact_id`, `type`, `version`, `digest`, `producer_role`, `role_invocation`, `input_refs`, `candidate_digest`, `created_at`, `status`. Permitted status values: `VALID`, `INVALIDATED`, `SUPERSEDED`, `REVALIDATION_REQUIRED`. Frozen artifacts **must not** be modified in place.
+**Artifact schema** — mode-discriminated:
+
+  - **`FULL_9_ROLE_VIBECODING`** and **`LIGHTWEIGHT_OPERATION`** (execution-type): requires at minimum: `artifact_id`, `type`, `version`, `digest`, `producer_role`, `role_invocation`, `input_refs`, `candidate_digest`, `created_at`, `status`.
+  - **`VIBECODING_CONSULTATION_ONLY`** (consultation-type): requires at minimum: `artifact_id`, `artifact_type` (deliverable or report), `version`, `digest`, `producer_role=orchestrator`, `orchestrator_invocation_id/version/digest`, `input_read_source_refs`, `evidence_ref_ids` / raw evidence references, `created_at`, `status`. `candidate_digest` is **not** required. No Gate, non-orchestrator assignment, or Git fields are required.
+
+Permitted status values (all modes): `VALID`, `INVALIDATED`, `SUPERSEDED`, `REVALIDATION_REQUIRED`. Frozen artifacts **must not** be modified in place. Any new content produces a new `version` and `digest`.
 
 #### §4.17.8 `gate_contract`
 
@@ -1863,12 +1868,10 @@ A probe does **not** count as a role's formal execution.
 
 #### §4.17.9 `corrective_loop_contract` and `budget_contract`
 
-**`corrective_loop_contract`** — only Work Order pre-approved paths are allowed. Each path records: `from_stage`, `return_role`, `invalidated_artifacts`, `per_path_budget`, `global_budget`. Default recommendations (subject to operator approval):
+**`corrective_loop_contract`** — mode-discriminated:
 
-  - `LIGHTWEIGHT_OPERATION`: per-path 4, global 6.
-  - `FULL_9_ROLE_VIBECODING`: per-path 5, global 10.
-
-Each loop round records: `loop_id`, `round`, `failure_signature`, `return_role`, `new_diff_or_evidence`, `result`, `remaining_budget`. Two consecutive rounds with the **same** failure signature and **no** effective diff, new root evidence, coverage, change-demand resolution, or new hypothesis trigger `LOOP_STAGNATION_DETECTED → STOP`. Hard `STOP` **must not** be bypassed by loop budget.
+  - **`FULL_9_ROLE_VIBECODING`** and **`LIGHTWEIGHT_OPERATION`**: only Work Order pre-approved paths are allowed. Each path records: `from_stage`, `return_role`, `invalidated_artifacts`, `per_path_budget`, `global_budget`. Default recommendations (subject to operator approval): `LIGHTWEIGHT_OPERATION`: per-path 4, global 6; `FULL_9_ROLE_VIBECODING`: per-path 5, global 10. Each loop round records: `loop_id`, `round`, `failure_signature`, `return_role`, `new_diff_or_evidence`, `result`, `remaining_budget`. Two consecutive rounds with the **same** failure signature and **no** effective diff, new root evidence, coverage, change-demand resolution, or new hypothesis trigger `LOOP_STAGNATION_DETECTED → STOP`. Hard `STOP` **must not** be bypassed by loop budget.
+  - **`VIBECODING_CONSULTATION_ONLY`**: `corrective_loop_contract.enabled = false`. No loop path, `loop_id`, `return_role`, artifact invalidation, per-path or global loop budget, or `LOOP_STAGNATION_DETECTED` state is created. If consultation conclusions need revision, the Work Order reaches STOP and the operator issues a new decision, new authorisation, or new Work Order version — **not** an automatic corrective loop.
 
 **`budget_contract`** — mode-discriminated. **All modes**: automatic model substitution, quota retry, and quota-reset wait are all `false`. `MODEL_QUOTA_EXHAUSTED`, credential / control-plane / assignment / evidence failure, or any evidence forgery triggers immediate `STOP`.
 
@@ -1917,9 +1920,9 @@ On indeterminate result, query the remote / PR state **first** before deciding w
 
 `STOP` covers **every** stage, enabling only the `selected_submode`-applicable STOP classes:
 
-  - **All modes**: Global Readiness failure, quota exhaustion (`MODEL_QUOTA_EXHAUSTED`), control plane failure, evidence forgery, session binding loss, scope drift, Work Order integrity failure, secret boundary violation, credential failure, loop stagnation, operator abort.
-  - **`FULL_9_ROLE_VIBECODING`** and **`LIGHTWEIGHT_OPERATION`** additionally: non-orchestrator Activation failure, assignment failure, role completion failure, Gate failure, candidate tree mismatch, remote branch drift, push / PR API budget exhaustion, proxy bypass budget exhaustion.
-  - **`VIBECODING_CONSULTATION_ONLY`**: Consultation **must not** trigger STOP on non-existent candidate, Gate, remote branch, or Git budget. Consultation remains subject to the "all modes" STOP classes, read-source failure, deliverable / report integrity failure, orchestrator invocation failure, and operator-revocation STOP.
+  - **All modes (common)**: Global Readiness failure, quota exhaustion (`MODEL_QUOTA_EXHAUSTED`), control plane failure, evidence forgery, orchestrator session binding (`OPERATOR_PRESELECTED_SESSION_BINDING`) loss or mismatch, scope drift, Work Order integrity failure, secret boundary violation, credential failure, operator abort.
+  - **`FULL_9_ROLE_VIBECODING`** and **`LIGHTWEIGHT_OPERATION`** additionally: non-orchestrator Activation failure, non-orchestrator assignment baseline failure, role completion failure, Gate failure, candidate tree mismatch, remote branch drift, loop stagnation, push / PR API budget exhaustion, proxy bypass budget exhaustion.
+  - **`VIBECODING_CONSULTATION_ONLY`**: Consultation **must not** trigger STOP on non-existent candidate, Gate, remote branch, loop stagnation, Git budget, or non-orchestrator assignment failure. Consultation remains subject to the "All modes" STOP classes, read-source failure, deliverable / report integrity failure, orchestrator invocation failure, and operator-revocation STOP. If a Consultation Work Order encounters these execution-type-only failure conditions, the correct response is `WORK_ORDER_MODE_APPLICABILITY_CONTRADICTION` (field applicability vs submode) or the appropriate Consultation-specific drift signal — **not** a fabricated execution-type STOP record.
 
 After `STOP`:
 
@@ -1977,8 +1980,10 @@ GLOBAL_READINESS_PASS → approved role / stage graph
 **Hard STOP branch (all modes):**
 
 ```
-WORK_ORDER_ACTIVE → hard STOP → WORK_ORDER_STOPPED_PENDING_OPERATOR
+ANY_POST_APPROVAL_ACTIVE_EXECUTION_STATE → hard STOP → WORK_ORDER_STOPPED_PENDING_OPERATOR
 ```
+
+Where `ANY_POST_APPROVAL_ACTIVE_EXECUTION_STATE` covers all un-terminated stages after `WORK_ORDER_ACTIVE`, including at minimum `WORK_ORDER_ACTIVE`, `GLOBAL_READINESS`, and every execution stage reachable via the mode's execution graph. Hard STOP **must not** be restricted to `WORK_ORDER_ACTIVE` alone; `WORK_ORDER_ACTIVE` is a transient transition, not a long-lived parent state capable of covering all failure points. If any execution material limits hard STOP entry to only `WORK_ORDER_ACTIVE`, the drift signal `WORK_ORDER_HARD_STOP_SOURCE_STATE_INCOMPLETE` fires and execution **must** `STOP`.
 
 Any DRAFT / APPROVED / STOPPED version may be `SUPERSEDED_BY_NEW_VERSION`; old approvals **must not** migrate to the new version. Operator approval **is** the start authorisation; no additional "start now" checkpoint may be inserted.
 
@@ -2645,7 +2650,7 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - **`FULL_9_ROLE_VIBECODING`** and **`LIGHTWEIGHT_OPERATION`**: lacks stage dependencies, entry / exit criteria, FAIL return path, STOP conditions, invalidated-downstream record, or omits the canonical default graph / role return loop / Gate / candidate invalidation stages where applicable (§4.17.6).
   - **`VIBECODING_CONSULTATION_ONLY`**: lacks read-only stages, entry / exit criteria, consultation deliverable / report endpoint, or failure → STOP path. Consultation **must not** require role return loop, Gate, or candidate invalidation in its execution graph. **Immediate STOP.**
   - (mmmmmm) `WORK_ORDER_GATE_TOPOLOGY_INVALID` — Gate pair missing independent invocation, majority vote, or `LIGHTWEIGHT` `required_pre_git_gates` empty / missing independent verifier / role covering multiple Gates without distinct Activation (§4.17.8). **Immediate STOP.**
-  - (nnnnnn) `WORK_ORDER_LOOP_PATH_UNAPPROVED` — corrective loop path not pre-approved in `corrective_loop_contract`, or `LOOP_STAGNATION_DETECTED` bypassed via loop budget (§4.17.9, §4.12). **Immediate STOP.**
+  - (nnnnnn) `WORK_ORDER_LOOP_PATH_UNAPPROVED` — **`FULL_9_ROLE_VIBECODING`** / **`LIGHTWEIGHT_OPERATION`**: corrective loop path not pre-approved in `corrective_loop_contract`, or `LOOP_STAGNATION_DETECTED` bypassed via loop budget (§4.17.9, §4.12). **`VIBECODING_CONSULTATION_ONLY`**: **not** applicable — if a Consultation Work Order contains a corrective loop object, `CONSULTATION_CORRECTIVE_LOOP_FABRICATED` is the correct signal. **Immediate STOP.**
   - (oooooo) `WORK_ORDER_BUDGET_UNBOUNDED` — `budget_contract` mode-discriminated check:
     - **`FULL_9_ROLE_VIBECODING`** and **`LIGHTWEIGHT_OPERATION`**: missing per-role / total / push / PR API / proxy bypass budgets, or any automatic model substitution / quota retry / quota-reset wait enabled (§4.17.9).
     - **`VIBECODING_CONSULTATION_ONLY`**: missing orchestrator model / invocation / read-source / evidence / output budget. Git / loop / push / PR API / proxy bypass budgets being `NOT_APPLICABLE` or `disabled / 0` is **not** a violation — `CONSULTATION_GIT_BUDGET_REQUIRED` is the correct signal for requiring execution-type budgets in Consultation. **Immediate STOP.**
@@ -2675,6 +2680,10 @@ Operator may grant a one-shot bounded authorisation package containing: task ID,
   - (gggggg) `CONSULTATION_READINESS_EXECUTION_FIELD_REQUIRED` — a Consultation Global Readiness check requires execution-type fields (repository / assignment / Git delivery) instead of validating them as `NOT_APPLICABLE` (§4.17.7). **Immediate STOP.**
   - (hhhhhh) `CONSULTATION_GIT_BUDGET_REQUIRED` — a Consultation Work Order is required to have execution-type budgets (push / PR API / proxy bypass) present and non-zero (§4.17.9). **Immediate STOP.**
   - (iiiiii) `CONSULTATION_RUNTIME_STATE_FABRICATED` — a Consultation Work Order's runtime state creates or references fictional Gate, candidate, or Git state (§4.17.12). **Immediate STOP.**
+  - (jjjjjj) `CONSULTATION_CORRECTIVE_LOOP_FABRICATED` — a Consultation Work Order creates a corrective loop path, loop_id, return_role, artifact invalidation, or `LOOP_STAGNATION_DETECTED` state (§4.17.9). **Immediate STOP.**
+  - (kkkkkk) `CONSULTATION_LOOP_STOP_STATE_FABRICATED` — a Consultation execution record records `LOOP_STAGNATION_DETECTED` or any loop-related STOP event (§4.17.11). **Immediate STOP.**
+  - (llllll) `CONSULTATION_NONORCHESTRATOR_ASSIGNMENT_FAILURE_FABRICATED` — a Consultation execution record records a non-orchestrator assignment baseline failure or non-orchestrator Activation failure (§4.17.11). **Immediate STOP.**
+  - (mmmmmm) `WORK_ORDER_HARD_STOP_SOURCE_STATE_INCOMPLETE` — hard STOP entry is restricted to only `WORK_ORDER_ACTIVE` instead of covering all post-approval active execution states (§4.17.13). **Immediate STOP.**
 
 ### §10.2 Drift Handling
 
