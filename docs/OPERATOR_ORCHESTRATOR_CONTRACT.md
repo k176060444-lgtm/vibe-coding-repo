@@ -2532,7 +2532,7 @@ where `KIND` is one of:
 
 Only `DRIFT_STOP`, `HARD_STOP`, and `RECOVERY_BUDGET_STOP` kinds form a current-execution STOP. `AUDIT_DEVIATION`, `AUDIT_UNKNOWN`, and `FAIL_CLOSED_SUCCESS` are historical / protective record states and **must not** be reinterpreted as new drift or success endpoint.
 
-**Machine-parseable rule.** Any entry that is missing the canonical backtick `signal_id` or has its canonical ID determined only by `legacy_display_index` is invalid. After this round the catalog contains exactly 220 top-level entries, 220 unique canonical signal IDs, 56 unique one-to-one legacy indices, 0 duplicate canonical ID, 0 parenthetical-only definition, 0 nonstandard subject definition, and 0 logical-entry content after metadata suffix.
+**Machine-parseable rule.** Any entry that is missing the canonical backtick `signal_id` or has its canonical ID determined only by `legacy_display_index` is invalid. After this round the catalog contains exactly 226 top-level entries, 226 unique canonical signal IDs, 56 unique one-to-one legacy indices, 0 duplicate canonical ID, 0 parenthetical-only definition, 0 nonstandard subject definition, and 0 logical-entry content after metadata suffix.
 - `PROFILE_TREATED_AS_NODE` — treating a profile as a node; [legacy_display_index=(a), signal_kind=DRIFT_STOP]
 - `ROLE_TRIMMING_OR_SUBSTITUTION` — role trimming — trimming the roles / gates required by the operator-selected entry constitutes drift. `FULL_9_ROLE_VIBECODING`: complete 9-role must not be trimmed. `LIGHTWEIGHT_OPERATION`: executes operator-approved actual role set. Named-but-not-executed, no distinct model invocation, shared invocation across roles, multi-role response reuse, and generic-command-only role completion are all drift; [legacy_display_index=(b), signal_kind=DRIFT_STOP]
 - `SIMULATION_TREATED_AS_REAL_EXECUTION` — substituting simulation for real execution; [legacy_display_index=(c), signal_kind=DRIFT_STOP]
@@ -2756,6 +2756,13 @@ Only `DRIFT_STOP`, `HARD_STOP`, and `RECOVERY_BUDGET_STOP` kinds form a current-
 - `VERSION_QUALIFICATION_SECRET_EVIDENCE_VIOLATION` — V7 qualification Evidence contains or derives a secret value, hash, length, prefix/suffix, header, token/cookie, or secret-derived fingerprint instead of limiting to credential identity, approved source class, availability/binding verification, and `secret_value_observed=false`; [signal_kind=DRIFT_STOP]
 - `LIFECYCLE_STATE_MUTATED_IN_PLACE` — an object's lifecycle state was changed in place on the original object body instead of recording the transition via a new object version or an append-only Receipt; [signal_kind=DRIFT_STOP]
 
+- `RECEIPT_REGISTRY_DUPLICATE_TYPE` — a receipt type appears more than once in the canonical receipt type registry; [signal_kind=DRIFT_STOP]
+- `RECEIPT_REGISTRY_FIELD_INCOMPLETE` — a receipt type in the canonical registry is missing one or more required specification fields (issuer class, authority basis, subject class, prerequisite types, required evidence classes, allowed decision results, or `state_created`); [signal_kind=DRIFT_STOP]
+- `RECEIPT_TYPE_AND_STATE_CREATED_CONFLATED` — a `state_created` business workflow state (e.g. `OPERATOR_APPROVED_INTAKE_SCOPE`) is used or treated as a receipt type identifier, or vice versa; [signal_kind=DRIFT_STOP]
+- `RECEIPT_ISSUER_ROLE_BOUNDARY_CONTRADICTION` — a role issues a receipt type that is outside its authority (e.g. a role issuing `STOP_RECEIPT` or a deleted `ROLE_COMPLETION_RECEIPT`), or an issuer field in the registry contradicts the authority matrix; [signal_kind=DRIFT_STOP]
+- `PACKET_EFFECTIVE_STATE_WITHOUT_TRANSITION_RECEIPT` — a Packet effective state (e.g. `CONSUMED`) has no corresponding canonical transition receipt type; [signal_kind=DRIFT_STOP]
+- `ARTIFACT_PRODUCER_BINDING_MODE_CONTRADICTION` — an Artifact's `producer_binding` mode does not match its artifact type, execution mode, or the presence/absence of mandatory refs; [signal_kind=DRIFT_STOP]
+
 ### §10.2 Drift Handling
 
 `STOP → IDENTIFY → RE-ANCHOR → PROPOSE → WAIT`.
@@ -2837,8 +2844,13 @@ Once an object has been verified, referenced, or frozen, it must not be modified
 An Artifact must record at least:
 
 - `artifact_id` / `type` / `version` / `digest`
-- `producer_role` — the role that produced this artifact
-- `assignment_ref` / `activation_ref` / `attempt_ref` / `invocation_ref` — `id + version + digest` triples
+- `producer_binding` — discriminated mode, one of:
+  - `ROLE_EXECUTION`: role `assignment_ref` / `activation_ref` / `attempt_ref` / `invocation_ref` all required (`id + version + digest` triples)
+  - `ORCHESTRATOR_SESSION`: operator-preselected session `session_ref`, orchestrator `invocation_ref` / `attempt_ref` / `operation_execution_ref` required; `assignment_ref` / `activation_ref` explicitly `NOT_APPLICABLE + reason`
+  - `DEDICATED_GOVERNANCE_GATE`: governance operation / stage `governance_operation_ref`, applicable operator Receipt, orchestrator `invocation_ref` / Evidence required; Work Order `work_order_ref` and `assignment_ref` / `activation_ref` explicitly `NOT_APPLICABLE + reason`
+  - `DERIVED_PUBLIC_PROJECTION`: source Artifact / Evidence `source_refs` required; projection producer `invocation_ref` / `safety_check_required_flag` required; `assignment_ref` / `activation_ref` / `attempt_ref` explicitly `NOT_APPLICABLE + reason`
+- `producer_role` — the role, orchestrator, or gate that produced this artifact
+- `producer_binding_refs` — refs according to the `producer_binding` mode above
 - `input_artifact_refs` / `input_evidence_refs` / `input_packet_refs` / `input_receipt_refs` — `id + version + digest` triples
 - `structured_content` — the substantive content of the artifact
 - `rendered_ref` — optional reference to a rendered / Markdown representation
@@ -2969,7 +2981,7 @@ A Receipt must record at least:
 The Receipt body and digest are **permanently immutable** from creation. The initial `lifecycle_state_at_creation` is `CURRENT`. Subsequent effective status transitions (`STALE`, `SUPERSEDED`, `REVOKED_BY_OPERATOR`) must be recorded by independent append-only Receipts:
 
 - `INVALIDATION_RECEIPT` — marks a single subject object (Artifact, Evidence, Packet, or Receipt) as invalidated. The subject's effective status is computed as: `STALE` for a Receipt subject; `INVALIDATED` for Artifact, Evidence, or Packet subjects (or `REVALIDATION_REQUIRED` for Artifact). Each `INVALIDATION_RECEIPT` binds exactly one subject `id + version + digest` triple. Batch invalidation of multiple subjects is expressed via independent Receipts linked by a common `cause_ref` or `batch_ref` field (optional).
-- `SUPERSESSION_RECEIPT` — marks a single subject Artifact, Packet, or Receipt as `SUPERSEDED` and links to the superseding object triple.
+- `SUPERSESSION_RECEIPT` — marks a single subject Artifact, Evidence, Packet, or Receipt as `SUPERSEDED` and links to the superseding object triple; subject and superseding object classes must be compatible.
 - `OPERATOR_REVOCATION_RECEIPT` — issued only by the operator; marks a single subject operator-authorisation Receipt as `REVOKED_BY_OPERATOR`.
 
 The authoritative effective status of any Receipt is computed from the immutable Receipt chain, not from in-place field mutation. `state_created` records the business workflow state created by this Receipt (e.g., `GLOBAL_READINESS_PASS`, `GATE_PASS`, `AUTHORIZATION_GRANTED`) and must not be conflated with the Receipt's own lifecycle state.
@@ -2980,47 +2992,87 @@ Receipt lifecycle states: `lifecycle_state_at_creation=CURRENT` (immutable). Eff
 
 Only the operator may issue:
 
-- `OPERATOR_APPROVED_INTAKE_SCOPE`
-- `OPERATOR_SELECTED_SUBMODE`
-- `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE`
-- `OPERATOR_APPROVED_WORK_ORDER`
-- `OPERATOR_APPROVED_IMPLEMENTATION_PLAN`
-- `OPERATOR_AUTHORIZED_DRAFT_TO_READY`
-- `OPERATOR_AUTHORIZED_MERGE`
-- `OPERATOR_AUTHORIZED_BRANCH_DELETION`
-- `OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT` (§3.8 V3)
-- `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT` (§3.8 V5)
-- Any V4 checkpoint review Receipt that requires an operator checkpoint decision
-- `OPERATOR_REVOCATION_RECEIPT` — revocation of any operator-authorisation Receipt (V3/V5/Intake/Merge/Branch Deletion)
+**Operator approval / authorisation receipts.** These Receipt types each carry `state_created` set to the corresponding business workflow state listed here (the backtick state names are **not** receipt type identifiers; they are the `state_created` values of the respective canonical receipt types):
+
+| Receipt Type | `state_created` (business workflow state) |
+|---|---|
+| `OPERATOR_INTAKE_SCOPE_APPROVAL_RECEIPT` | `OPERATOR_APPROVED_INTAKE_SCOPE` |
+| `OPERATOR_SUBMODE_SELECTION_RECEIPT` | `OPERATOR_SELECTED_SUBMODE` |
+| `OPERATOR_ROLE_NODE_MODEL_ASSIGNMENT_APPROVAL_RECEIPT` | `OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE` |
+| `OPERATOR_WORK_ORDER_APPROVAL_RECEIPT` | `OPERATOR_APPROVED_WORK_ORDER` |
+| `OPERATOR_IMPLEMENTATION_PLAN_APPROVAL_RECEIPT` | `OPERATOR_APPROVED_IMPLEMENTATION_PLAN` |
+| `OPERATOR_DRAFT_TO_READY_AUTHORIZATION_RECEIPT` | `OPERATOR_AUTHORIZED_DRAFT_TO_READY` |
+| `OPERATOR_MERGE_AUTHORIZATION_RECEIPT` | `OPERATOR_AUTHORIZED_MERGE` |
+| `OPERATOR_BRANCH_DELETION_AUTHORIZATION_RECEIPT` | `OPERATOR_AUTHORIZED_BRANCH_DELETION` |
+| `OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT` | `VERSION_PREPARATION_APPROVED` (§3.8 V3) |
+| `VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT` | `VERSION_CHECKPOINT_REVIEWED` / `VERSION_CHECKPOINT_BLOCKED` (§3.8 V4) |
+| `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT` | `VERSION_EXECUTION_AUTHORIZED` (§3.8 V5) |
+| `OPERATOR_REVOCATION_RECEIPT` | `AUTHORISATION_REVOKED` |
+
+Conflating a `state_created` business workflow state (e.g. `OPERATOR_APPROVED_INTAKE_SCOPE`) with a receipt type identifier triggers `RECEIPT_TYPE_AND_STATE_CREATED_CONFLATED → STOP`.
 
 `vibedev` / orchestrator may issue within its authority:
 
-- Global Readiness receipts
-- Activation receipts
-- Role completion cross-verification receipts
-- Explorer / Plan validation receipts
-- Gate aggregation and cross-verification receipts
-- STOP receipts
-- Version inventory validation receipts (§3.8 V1)
-- Version proposal validation receipts (§3.8 V2)
-- `VERSION_QUALIFICATION_PASS_RECEIPT` / `VERSION_QUALIFICATION_FAIL_RECEIPT` (§3.8 V7) — with authority basis: V5 operator authorisation + V6 execution evidence
-- `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT` (§3.8 V8) — prerequisite: V7 qualification receipt + all prior V0–V7 objects
+- Global Readiness receipts (`GLOBAL_READINESS_RECEIPT`, `ROLE_ACTIVATION_READINESS_RECEIPT`)
+- Activation receipts (role activation readiness)
+- Role completion cross-verification receipts (`ROLE_CROSS_VERIFICATION_RECEIPT`)
+- Explorer / Plan / Artifact validation receipts (`EXPLORER_VALIDATION_RECEIPT`, `PLAN_VALIDATION_RECEIPT`, `ARTIFACT_VALIDATION_RECEIPT`)
+- Packet assembly, freeze, validation, and consumption receipts (`PACKET_ASSEMBLY_RECEIPT`, `PACKET_FREEZE_RECEIPT`, `PACKET_VALIDATION_RECEIPT`, `PACKET_CONSUMPTION_RECEIPT`)
+- Gate aggregation and cross-verification receipts (`TEST_GATE_PASS_RECEIPT`, `REVIEW_GATE_PASS_RECEIPT`, `GIT_INTEGRATION_GATE_PASS_RECEIPT`)
+- Ready transition receipt (`READY_TRANSITION_RECEIPT`)
+- Post-Draft binding receipt (`POST_DRAFT_GIT_INTEGRATOR_BINDING_RECEIPT`)
+- Consultation endpoint receipt (`CONSULTATION_ENDPOINT_RECEIPT`)
+- Public projection safety check receipt (`PUBLIC_PROJECTION_SAFETY_CHECK_RECEIPT`)
+- Transition, invalidation, and supersession receipts (`STOP_RECEIPT`, `INVALIDATION_RECEIPT`, `SUPERSESSION_RECEIPT`)
+- Version governance receipts (`VERSION_QUALIFICATION_PASS_RECEIPT`, `VERSION_QUALIFICATION_FAIL_RECEIPT`, `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT`)
+- Version inventory validation and proposal validation (§3.8 V1/V2 — via Artifact/validation receipt types)
 
-A role submits only its own claim and report. The git-integrator submits only its execution and delivery evidence / claim; the final `VERIFIED` state is formed through the existing cross-verification chain.
+A role produces only its Artifact (`ROLE_COMPLETION_REPORT`, `STOP_REPORT`) and associated Evidence. A role must not issue `ROLE_COMPLETION_RECEIPT` (deleted — not a canonical type) or `STOP_RECEIPT` (issuer: vibedev/orchestrator only). The git-integrator submits only its execution and delivery evidence / claim; the final `VERIFIED` state is formed through the existing cross-verification chain.
 
-Canonical receipt type registry (each type specifies issuer class, authority basis, subject class, and prerequisites):
+Canonical receipt type registry (each entry is unique; each type defines the following fields):
 
-- Readiness: `GLOBAL_READINESS_RECEIPT` — vibedev/orchestrator; `ROLE_ACTIVATION_READINESS_RECEIPT` — vibedev/orchestrator
-- Role: `ROLE_COMPLETION_RECEIPT` — role; `ROLE_CROSS_VERIFICATION_RECEIPT` — vibedev/orchestrator
-- Validation: `EXPLORER_VALIDATION_RECEIPT` — vibedev/orchestrator; `PLAN_VALIDATION_RECEIPT` — vibedev/orchestrator; `ARTIFACT_VALIDATION_RECEIPT` — vibedev/orchestrator or specified validator
-- Freeze: `PACKET_ASSEMBLY_RECEIPT` — assembler; `PACKET_FREEZE_RECEIPT` — vibedev/orchestrator; `PACKET_VALIDATION_RECEIPT` — vibedev/orchestrator
-- Gate: `TEST_GATE_PASS_RECEIPT` — vibedev/orchestrator; `REVIEW_GATE_PASS_RECEIPT` — vibedev/orchestrator; `GIT_INTEGRATION_GATE_PASS_RECEIPT` — vibedev/orchestrator
-- Git Delivery: `DRAFT_PR_DELIVERY_RECEIPT` — git-integrator; `READY_TRANSITION_RECEIPT` — vibedev/orchestrator; `MERGE_DELIVERY_RECEIPT` — git-integrator; `BRANCH_DELETION_RECEIPT` — git-integrator
-- Post-Draft: `POST_DRAFT_GIT_INTEGRATOR_BINDING_RECEIPT` — vibedev/orchestrator
-- Consultation: `CONSULTATION_ENDPOINT_RECEIPT` — vibedev/orchestrator
-- Public Projection: `PUBLIC_PROJECTION_SAFETY_CHECK_RECEIPT` — vibedev/orchestrator (public-safe verification function)
-- Transition / Invalidation / Supersession: `STOP_RECEIPT` — vibedev/orchestrator or role; `INVALIDATION_RECEIPT` — vibedev/orchestrator; `SUPERSESSION_RECEIPT` — vibedev/orchestrator; `OPERATOR_REVOCATION_RECEIPT` — operator only
-- Version Governance: `OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT` — operator only (§3.8 V3); `VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT` — operator only (§3.8 V4); `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT` — operator only (§3.8 V5); `VERSION_QUALIFICATION_PASS_RECEIPT` — vibedev/orchestrator (authority basis: V5 operator authorisation + V6 execution evidence); `VERSION_QUALIFICATION_FAIL_RECEIPT` — vibedev/orchestrator (same authority); `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT` — vibedev/orchestrator (prerequisite: V7 qualification receipt + all prior V0–V7 objects); `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT` — vibedev/orchestrator (prerequisite: V7 qualification receipt + all V0–V7 objects)
+| Receipt Type | Issuer Class | Authority Basis | Subject Class | Prerequisite Types | Required Evidence Classes | Allowed Decision Results | `state_created` |
+|---|---|---|---|---|---|---|---|
+| `GLOBAL_READINESS_RECEIPT` | vibedev/orchestrator | current mode scope packet | scope packet triple | INTAKE_SCOPE_PACKET assembly/freeze | COMMAND_RESULT, FILE_SNAPSHOT, OPERATOR_DECISION_RECORD | PASS, FAIL | GLOBAL_READINESS_PASS / GLOBAL_READINESS_FAIL |
+| `ROLE_ACTIVATION_READINESS_RECEIPT` | vibedev/orchestrator | global readiness | activation packet triple | GLOBAL_READINESS_RECEIPT | READINESS_CHECK, NODE_ROUTE_PROBE, MODEL_INVOCATION_RECORD | READY, BLOCKED | ROLE_ACTIVATION_READY / ROLE_ACTIVATION_BLOCKED |
+| `ROLE_CROSS_VERIFICATION_RECEIPT` | vibedev/orchestrator | role completion report | ROLE_COMPLETION_REPORT triple | GLOBAL_READINESS_RECEIPT, role completion Artifact | GIT_OBJECT, TEST_RESULT, MODEL_INVOCATION_RECORD, OPERATOR_DECISION_RECORD | VERIFIED, INCOMPLETE, REJECTED | ROLE_CROSS_VERIFIED / ROLE_CROSS_VERIFICATION_INCOMPLETE / ROLE_CROSS_VERIFICATION_REJECTED |
+| `EXPLORER_VALIDATION_RECEIPT` | vibedev/orchestrator | explorer artifact | EXPLORER_ARTIFACT triple | ROLE_CROSS_VERIFICATION_RECEIPT | MODEL_INVOCATION_RECORD, FILE_SNAPSHOT | PASS, FAIL | EXPLORER_VALIDATED / EXPLORER_VALIDATION_FAILED |
+| `PLAN_VALIDATION_RECEIPT` | vibedev/orchestrator | implementation plan | IMPLEMENTATION_PLAN triple | EXPLORER_VALIDATION_RECEIPT | MODEL_INVOCATION_RECORD, FILE_SNAPSHOT | PASS, FAIL | PLAN_VALIDATED / PLAN_VALIDATION_FAILED |
+| `ARTIFACT_VALIDATION_RECEIPT` | vibedev/orchestrator or validator per mode | artifact type + mode | any Artifact triple | as applicable per role/review | as applicable per artifact type | VALID, INVALID | ARTIFACT_VALIDATED / ARTIFACT_INVALID |
+| `PACKET_ASSEMBLY_RECEIPT` | assembler (vibedev/orchestrator) | assembly completion | assembled Packet triple | upstream validation/verification receipts | DIFF_MANIFEST, TREE_MANIFEST | ASSEMBLED | PACKET_ASSEMBLED |
+| `PACKET_FREEZE_RECEIPT` | vibedev/orchestrator | PACKET_ASSEMBLY_RECEIPT | Packet triple (same as subject) | PACKET_ASSEMBLY_RECEIPT | FILE_SNAPSHOT, GIT_OBJECT | FROZEN | PACKET_FROZEN |
+| `PACKET_VALIDATION_RECEIPT` | vibedev/orchestrator | PACKET_FREEZE_RECEIPT | Packet triple (same as subject) | PACKET_FREEZE_RECEIPT | DIFF_MANIFEST, TREE_MANIFEST, TEST_RESULT | VALIDATED, INVALID | PACKET_VALIDATED / PACKET_VALIDATION_FAILED |
+| `PACKET_CONSUMPTION_RECEIPT` | consumer role/stage controller or vibedev/orchestrator | FROZEN + optionally VALIDATED Packet | Packet triple | PACKET_FREEZE_RECEIPT, PACKET_VALIDATION_RECEIPT (if applicable) | as applicable per consumer | CONSUMED | PACKET_CONSUMED |
+| `TEST_GATE_PASS_RECEIPT` | vibedev/orchestrator | tester report + evidence | test evidence packet triple | TESTER_A_INPUT_PACKET, TESTER_B_INPUT_PACKET freeze | TEST_RESULT, MODEL_INVOCATION_RECORD | PASS, FAIL | GATE_PASS / GATE_FAIL |
+| `REVIEW_GATE_PASS_RECEIPT` | vibedev/orchestrator | review report + evidence | review input packet triple | REVIEW_INPUT_PACKET freeze, TEST_GATE_PASS_RECEIPT | MODEL_INVOCATION_RECORD, FILE_SNAPSHOT | PASS, FAIL | GATE_PASS / GATE_FAIL |
+| `GIT_INTEGRATION_GATE_PASS_RECEIPT` | vibedev/orchestrator | integration packet + evidence | INTEGRATION_INPUT_FROZEN triple | REVIEW_GATE_PASS_RECEIPT | GIT_OBJECT, DIFF_MANIFEST, PR_METADATA_SNAPSHOT | PASS, FAIL | GATE_PASS / GATE_FAIL |
+| `DRAFT_PR_DELIVERY_RECEIPT` | git-integrator | GIT_INTEGRATION_GATE_PASS_RECEIPT | candidate + PR triple | GIT_INTEGRATION_GATE_PASS_RECEIPT | GIT_OBJECT, PR_METADATA_SNAPSHOT | DELIVERED, FAILED | DRAFT_DELIVERED / DRAFT_DELIVERY_FAILED |
+| `READY_TRANSITION_RECEIPT` | vibedev/orchestrator | DRAFT_PR_DELIVERY_RECEIPT + DRAFT_TO_READY_APPROVAL_PACKET | PR triple | DRAFT_PR_DELIVERY_RECEIPT, DRAFT_TO_READY_APPROVAL_PACKET freeze | PR_METADATA_SNAPSHOT, OPERATOR_DECISION_RECORD | READY, BLOCKED | PR_READY / PR_READY_BLOCKED |
+| `MERGE_DELIVERY_RECEIPT` | git-integrator | READY_TRANSITION_RECEIPT + MERGE_APPROVAL_PACKET | PR triple | READY_TRANSITION_RECEIPT, MERGE_APPROVAL_PACKET freeze | GIT_OBJECT, PR_METADATA_SNAPSHOT | MERGED, FAILED | PR_MERGED / MERGE_FAILED |
+| `BRANCH_DELETION_RECEIPT` | git-integrator | MERGE_DELIVERY_RECEIPT + BRANCH_DELETION_APPROVAL_PACKET | branch triple | MERGE_DELIVERY_RECEIPT, BRANCH_DELETION_APPROVAL_PACKET freeze | GIT_OBJECT, PR_METADATA_SNAPSHOT | DELETED, FAILED | BRANCH_DELETED / BRANCH_DELETION_FAILED |
+| `POST_DRAFT_GIT_INTEGRATOR_BINDING_RECEIPT` | vibedev/orchestrator | DRAFT_PR_DELIVERY_RECEIPT + post-draft binding evidence | git-integrator role completion triple | DRAFT_PR_DELIVERY_RECEIPT | MODEL_INVOCATION_RECORD, GIT_OBJECT | BOUND | GIT_INTEGRATOR_BOUND |
+| `CONSULTATION_ENDPOINT_RECEIPT` | vibedev/orchestrator | consultation scope + evidence | CONSULTATION_DELIVERABLE triple | GLOBAL_READINESS_RECEIPT | MODEL_INVOCATION_RECORD, OPERATOR_DECISION_RECORD | DELIVERED, FAILED | CONSULTATION_DELIVERED / CONSULTATION_FAILED |
+| `PUBLIC_PROJECTION_SAFETY_CHECK_RECEIPT` | vibedev/orchestrator (public-safe verification function) | PUBLIC_EVIDENCE_PROJECTION_ARTIFACT + source Evidence | PUBLIC_EVIDENCE_PROJECTION_ARTIFACT triple | upstream Evidence validation | FILE_SNAPSHOT, OPERATOR_DECISION_RECORD | SAFE, UNSAFE | PROJECTION_SAFE / PROJECTION_UNSAFE |
+| `STOP_RECEIPT` | vibedev/orchestrator (only) | STOP_REPORT Artifact + Evidence; or hard STOP signal; or operator instruction | subject STOP reason triple | as applicable per stop class | MODEL_INVOCATION_RECORD, OPERATOR_DECISION_RECORD, STOP signal catalog entry | STOPPED | TASK_STOPPED / WORKFLOW_STOPPED |
+| `INVALIDATION_RECEIPT` | vibedev/orchestrator | Evidence of invalidation condition | single Artifact, Evidence, Packet, or Receipt triple | upstream evidence of invalidation | as applicable per subject type | INVALIDATED | SUBJECT_INVALIDATED |
+| `SUPERSESSION_RECEIPT` | vibedev/orchestrator | Evidence of supersession + superseding object | single Artifact, Evidence, Packet, or Receipt triple | upstream evidence + superseding object receipt | FILE_SNAPSHOT, GIT_OBJECT | SUPERSEDED | OBJECT_SUPERSEDED |
+| `OPERATOR_REVOCATION_RECEIPT` | operator (only) | operator authority | single operator-authorisation Receipt triple | as applicable per revocation reason | OPERATOR_DECISION_RECORD | REVOKED | AUTHORISATION_REVOKED |
+| `OPERATOR_INTAKE_SCOPE_APPROVAL_RECEIPT` | operator (only) | operator authority | intake scope packet triple | none | OPERATOR_DECISION_RECORD | APPROVED | OPERATOR_APPROVED_INTAKE_SCOPE |
+| `OPERATOR_SUBMODE_SELECTION_RECEIPT` | operator (only) | operator authority | sub-mode declaration triple | OPERATOR_INTAKE_SCOPE_APPROVAL_RECEIPT | OPERATOR_DECISION_RECORD | SELECTED | OPERATOR_SELECTED_SUBMODE |
+| `OPERATOR_ROLE_NODE_MODEL_ASSIGNMENT_APPROVAL_RECEIPT` | operator (only) | operator authority | assignment baseline packet triple | OPERATOR_SUBMODE_SELECTION_RECEIPT | OPERATOR_DECISION_RECORD | APPROVED | OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE |
+| `OPERATOR_WORK_ORDER_APPROVAL_RECEIPT` | operator (only) | operator authority | Work Order triple | OPERATOR_ROLE_NODE_MODEL_ASSIGNMENT_APPROVAL_RECEIPT | OPERATOR_DECISION_RECORD | APPROVED | OPERATOR_APPROVED_WORK_ORDER |
+| `OPERATOR_IMPLEMENTATION_PLAN_APPROVAL_RECEIPT` | operator (only) | operator authority | implementation plan approval packet triple | OPERATOR_WORK_ORDER_APPROVAL_RECEIPT | OPERATOR_DECISION_RECORD | APPROVED | OPERATOR_APPROVED_IMPLEMENTATION_PLAN |
+| `OPERATOR_DRAFT_TO_READY_AUTHORIZATION_RECEIPT` | operator (only) | operator authority | DRAFT_TO_READY_APPROVAL_PACKET triple | OPERATOR_IMPLEMENTATION_PLAN_APPROVAL_RECEIPT, DRAFT_TO_READY_APPROVAL_PACKET assembly/freeze/validation | OPERATOR_DECISION_RECORD | AUTHORIZED | OPERATOR_AUTHORIZED_DRAFT_TO_READY |
+| `OPERATOR_MERGE_AUTHORIZATION_RECEIPT` | operator (only) | operator authority | MERGE_APPROVAL_PACKET triple | OPERATOR_DRAFT_TO_READY_AUTHORIZATION_RECEIPT, MERGE_APPROVAL_PACKET assembly/freeze/validation | OPERATOR_DECISION_RECORD | AUTHORIZED | OPERATOR_AUTHORIZED_MERGE |
+| `OPERATOR_BRANCH_DELETION_AUTHORIZATION_RECEIPT` | operator (only) | operator authority | BRANCH_DELETION_APPROVAL_PACKET triple | OPERATOR_MERGE_AUTHORIZATION_RECEIPT, BRANCH_DELETION_APPROVAL_PACKET assembly/freeze/validation | OPERATOR_DECISION_RECORD | AUTHORIZED | OPERATOR_AUTHORIZED_BRANCH_DELETION |
+| `OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT` | operator (only) | operator authority (§3.8 V3) | VERSION_PREPARATION_PACKET triple | VERSION_GOVERNANCE_SCOPE_PACKET, VERSION_INVENTORY_ARTIFACT, VERSION_CHANGE_PROPOSAL_ARTIFACT | OPERATOR_DECISION_RECORD, FILE_SNAPSHOT, GIT_OBJECT | APPROVED | VERSION_PREPARATION_APPROVED |
+| `VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT` | operator (only) | operator checkpoint decision (§3.8 V4) | VERSION_PRE_EXECUTION_CHECKPOINT_PACKET triple | OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT | OPERATOR_DECISION_RECORD, FILE_SNAPSHOT, GIT_OBJECT | REVIEWED, BLOCKED | VERSION_CHECKPOINT_REVIEWED / VERSION_CHECKPOINT_BLOCKED |
+| `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT` | operator (only) | operator authority (§3.8 V5) | VERSION_EXECUTION_AUTHORIZATION_PACKET triple | VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT | OPERATOR_DECISION_RECORD | AUTHORIZED | VERSION_EXECUTION_AUTHORIZED |
+| `VERSION_QUALIFICATION_PASS_RECEIPT` | vibedev/orchestrator | V5 operator authorisation + V6 execution evidence (§3.8 V7) | VERSION_QUALIFICATION_PACKET triple | OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT | FILE_SNAPSHOT, GIT_OBJECT, MODEL_INVOCATION_RECORD, TEST_RESULT | PASS, FAIL | VERSION_QUALIFICATION_PASS / VERSION_QUALIFICATION_FAIL |
+| `VERSION_QUALIFICATION_FAIL_RECEIPT` | vibedev/orchestrator | V5 operator authorisation + V6 execution evidence (§3.8 V7) | VERSION_QUALIFICATION_PACKET triple | OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT | FILE_SNAPSHOT, GIT_OBJECT, MODEL_INVOCATION_RECORD, TEST_RESULT | PASS, FAIL | VERSION_QUALIFICATION_PASS / VERSION_QUALIFICATION_FAIL |
+| `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT` | vibedev/orchestrator | V7 qualification receipt + all V0–V7 objects (§3.8 V8) | VERSION_CLOSEOUT_REPORT triple | VERSION_QUALIFICATION_PASS_RECEIPT, VERSION_QUALIFICATION_FAIL_RECEIPT, all V0–V7 objects | all V0–V7 class evidence as applicable | CLOSED | VERSION_GOVERNANCE_CLOSED |
+
+A Receipt is invalid if the issuer lacks authority, or the subject / prerequisite / evidence refs do not match (triggers `RECEIPT_ISSUER_UNAUTHORIZED`, `RECEIPT_SUBJECT_BINDING_MISMATCH`, `RECEIPT_PREREQUISITE_MISSING`, or `RECEIPT_EVIDENCE_INSUFFICIENT` as applicable). A duplicate receipt type in the registry triggers `RECEIPT_REGISTRY_DUPLICATE_TYPE → STOP`. A receipt type missing required registry fields triggers `RECEIPT_REGISTRY_FIELD_INCOMPLETE → STOP`. Conflating a `state_created` business workflow state with a receipt type identifier triggers `RECEIPT_TYPE_AND_STATE_CREATED_CONFLATED → STOP`.
 
 If the issuer lacks authority, or the subject / prerequisite / evidence refs do not match, the Receipt is invalid and triggers `RECEIPT_ISSUER_UNAUTHORIZED` / `RECEIPT_SUBJECT_BINDING_MISMATCH` / `RECEIPT_PREREQUISITE_MISSING` / `RECEIPT_EVIDENCE_INSUFFICIENT` as applicable.
 
@@ -3041,7 +3093,7 @@ Invalidation must propagate downstream via append-only Receipts (in-place field 
 
 A candidate digest change must invalidate all tester, reviewer, Gate, and Integration objects that reference the prior candidate digest. A PR head or body change must make Ready / Merge approval Packets and their authorisation Receipts stale. Old evidence must be retained but must not contribute to a current PASS. All invalidation, staling, supersession, and revocation are expressed via independent append-only Receipts; no lifecycle field is mutated in place on the original object.
 
-Packet lifecycle states (at creation): `ASSEMBLED` (initial immutable state after assembly). Effective states computed from Receipt chain: `FROZEN` (via `PACKET_FREEZE_RECEIPT`), `VALIDATED` (via `PACKET_VALIDATION_RECEIPT`), `CONSUMED`, `INVALIDATED`, `SUPERSEDED`. The Packet body records only `lifecycle_state_at_creation=ASSEMBLED`; subsequent effective states are derived from external Receipts, not from in-place Packet field mutation.
+Packet lifecycle states (at creation): `ASSEMBLED` (initial immutable state after assembly). Effective states computed from Receipt chain: `FROZEN` (via `PACKET_FREEZE_RECEIPT`), `VALIDATED` (via `PACKET_VALIDATION_RECEIPT`), `CONSUMED` (via `PACKET_CONSUMPTION_RECEIPT`), `INVALIDATED`, `SUPERSEDED`. The Packet body records only `lifecycle_state_at_creation=ASSEMBLED`; subsequent effective states are derived from external Receipts, not from in-place Packet field mutation.
 
 Artifact lifecycle states (at creation): `VALID`. Effective states: `INVALIDATED`, `SUPERSEDED`, `REVALIDATION_REQUIRED` — all computed from the append-only Receipt chain, not from in-place field mutation.
 
@@ -3307,7 +3359,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in `PRE_V2_HISTORICAL_EVIDENCE_BANNER_MISSING` (§10.1) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
-| Drift signals | 7 | expanded to 220-entry canonical signal catalog (31 + 9 + 5 new self-reference / lifecycle / registry / secret-evidence signals) |
+| Drift signals | 7 | expanded to 226-entry canonical signal catalog (31 + 9 + 5 + 6 new registry / state-separation / role-boundary / packet-consumption / producer-binding signals) |
 | High-risk checkpoints | §4 vague | §9 explicit 4 categories (A/B/C/D), 12+ high-risk items, including `Hermes` / `OpenCode` install / update / downgrade / migration / restart / switch (§9.3) |
 | Top-line governance | role authority scattered | §1 GP-1 / GP-2 / GP-3 single page; recommend → assign → execute locked |
 | Effect mechanism | §10 "signing" (later corrected to Working Agreement) | effective only on operator explicit chat acceptance; on acceptance update existing file with `Version: 2.0` + `Supersedes: V1 / PR #276` + `Historical source retained in Git history` |
@@ -3318,9 +3370,9 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Historical PR / report handling | unspecified | `PRE_V2_HISTORICAL_EVIDENCE` rules; historical files untouched |
 
 
-| Artifact / Evidence / Packet / Receipt schema | absent | §10.3 canonical governance schema (11-field common envelope including execution_record_ref as formal bullet, lifecycle_state_at_creation, type-specific aliases, conditional execution_record_ref, Claim as embedded subobject without parent digest, Public Projection as derived Artifact without embedded safety receipt, authority matrix, lineage with append-only invalidation, append-only Receipt lifecycle with single-subject transition Receipts for all 4 types, complete lifecycle registries for Artifact/Evidence/Packet/Receipt, complete canonical Receipt type registry); status: `PROVISIONAL_ARTIFACT_EVIDENCE_SCHEMA_PENDING_GRAY4_VALIDATION` — not V2 final acceptance or runtime E2E PASS |
+| Artifact / Evidence / Packet / Receipt schema | absent | §10.3 canonical governance schema (11-field common envelope including execution_record_ref as formal bullet, lifecycle_state_at_creation, type-specific aliases, conditional execution_record_ref, Claim as embedded subobject without parent digest, Public Projection as derived Artifact without embedded safety receipt, authority matrix, lineage with append-only invalidation, append-only Receipt lifecycle with single-subject transition Receipts for all 4 types, complete lifecycle registries for Artifact/Evidence/Packet/Receipt, complete canonical Receipt type registry (37 types with full fields, 8 operator business states separated from receipt types, role boundary corrected, PACKET_CONSUMPTION_RECEIPT added)); status: `PROVISIONAL_ARTIFACT_EVIDENCE_SCHEMA_PENDING_GRAY4_VALIDATION` — not V2 final acceptance or runtime E2E PASS |
 | Version governance objects | absent | §3.8 V0–V8 bound to Packet / Artifact / Receipt objects (§10.3.14); V3 authorises preparation only, V4 checkpoint Packet + review Receipt (not V5), V5 authorises exact-scope execution via frozen authorization Packet, V6 execution Evidence independent of V5 Packet; V7 qualification failure = STOP; V4/V5/V6 object conflation triggers `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION → STOP`; V7 credential Evidence limited to identity/class/binding, no secret value observation |
-| Drift signals | 175 | expanded to 220-entry canonical signal catalog (31 + 9 + 5 new self-reference / lifecycle / registry / secret-evidence signals) |
+| Drift signals | 175 | expanded to 226-entry canonical signal catalog (31 + 9 + 5 + 6 new registry / state-separation / role-boundary / packet-consumption / producer-binding signals) |
 
 ---
 
