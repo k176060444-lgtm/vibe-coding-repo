@@ -429,7 +429,7 @@ Version compatibility layers **must not** alter the following governance semanti
 
 #### §3.8.13 Version Governance Object Bindings
 
-The V0–V8 stages defined above are bound to Packet, Artifact, and Receipt objects per §10.3.14. V3 preparation approval must not authorise real installation. V4 checkpoint Packet must be reviewed by operator; the review Receipt must not substitute for V5 authorisation. V5 second confirmation is the point at which the exact version, action, node / profile, backup / rollback point, and qualification plan are authorised. V6 execution must read the V5 frozen Packet only; execution Evidence must be recorded independently and must not write back into the V5 Packet. Any change to target version, component, node / profile, action, backup / rollback point, or qualification plan makes the V5 authorisation stale. Any V4/V5/V6 object conflation triggers `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION → STOP`.
+The V0–V8 stages defined above are bound to Packet, Artifact, and Receipt objects per §10.3.14. V3 preparation approval must not authorise real installation. V4 checkpoint Packet must be reviewed by operator; the review Receipt must not substitute for V5 authorisation. V5 second confirmation is the point at which the exact version, action, node / profile, backup / rollback point, and qualification plan are authorised. V6 execution must read the V5 frozen Packet only; execution Evidence must be recorded independently and must not write back into the V5 Packet. Any change to target version, component, node / profile, action, backup / rollback point, or qualification plan makes the V5 authorisation stale. Any V4/V5/V6 object conflation triggers `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION → STOP`; V7 credential Evidence limited to identity/class/binding, no secret value observation.
 
 ## §4. VIBECODING_MODE and Entry Gates
 
@@ -2532,7 +2532,7 @@ where `KIND` is one of:
 
 Only `DRIFT_STOP`, `HARD_STOP`, and `RECOVERY_BUDGET_STOP` kinds form a current-execution STOP. `AUDIT_DEVIATION`, `AUDIT_UNKNOWN`, and `FAIL_CLOSED_SUCCESS` are historical / protective record states and **must not** be reinterpreted as new drift or success endpoint.
 
-**Machine-parseable rule.** Any entry that is missing the canonical backtick `signal_id` or has its canonical ID determined only by `legacy_display_index` is invalid. After this round the catalog contains exactly 215 top-level entries, 215 unique canonical signal IDs, 56 unique one-to-one legacy indices, 0 duplicate canonical ID, 0 parenthetical-only definition, 0 nonstandard subject definition, and 0 logical-entry content after metadata suffix.
+**Machine-parseable rule.** Any entry that is missing the canonical backtick `signal_id` or has its canonical ID determined only by `legacy_display_index` is invalid. After this round the catalog contains exactly 220 top-level entries, 220 unique canonical signal IDs, 56 unique one-to-one legacy indices, 0 duplicate canonical ID, 0 parenthetical-only definition, 0 nonstandard subject definition, and 0 logical-entry content after metadata suffix.
 - `PROFILE_TREATED_AS_NODE` — treating a profile as a node; [legacy_display_index=(a), signal_kind=DRIFT_STOP]
 - `ROLE_TRIMMING_OR_SUBSTITUTION` — role trimming — trimming the roles / gates required by the operator-selected entry constitutes drift. `FULL_9_ROLE_VIBECODING`: complete 9-role must not be trimmed. `LIGHTWEIGHT_OPERATION`: executes operator-approved actual role set. Named-but-not-executed, no distinct model invocation, shared invocation across roles, multi-role response reuse, and generic-command-only role completion are all drift; [legacy_display_index=(b), signal_kind=DRIFT_STOP]
 - `SIMULATION_TREATED_AS_REAL_EXECUTION` — substituting simulation for real execution; [legacy_display_index=(c), signal_kind=DRIFT_STOP]
@@ -2731,7 +2731,7 @@ Only `DRIFT_STOP`, `HARD_STOP`, and `RECOVERY_BUDGET_STOP` kinds form a current-
 - `RECEIPT_SUBJECT_BINDING_MISMATCH` — the `subject id/version/digest` in a Receipt does not match the actual subject object's identity; [signal_kind=DRIFT_STOP]
 - `RECEIPT_PREREQUISITE_MISSING` — a Receipt declares prerequisite receipts that are missing, stale, or do not match the expected decision result; [signal_kind=DRIFT_STOP]
 - `RECEIPT_EVIDENCE_INSUFFICIENT` — a Receipt's `evidence_refs` do not collectively support the declared `decision result`; [signal_kind=DRIFT_STOP]
-- `RECEIPT_STALE_AFTER_DRIFT` — a Receipt remains in `CURRENT` state after its subject, prerequisite, or upstream evidence has been invalidated or superseded; [signal_kind=DRIFT_STOP]
+- `RECEIPT_STALE_AFTER_DRIFT` — a drift event occurred that should make a Receipt's effective status `STALE`, but the required `INVALIDATION_RECEIPT` is missing or the system still computes the Receipt as `CURRENT`; [signal_kind=DRIFT_STOP]
 - `OPERATOR_RECEIPT_FORGED_OR_SUBSTITUTED` — a Receipt that only the operator may issue (§10.3.x Authority Matrix) was issued by a non-operator entity; [signal_kind=DRIFT_STOP]
 - `GATE_RECEIPT_CANDIDATE_MISMATCH` — a Gate receipt references a candidate Packet or Artifact that does not match the candidate frozen for that Gate; [signal_kind=DRIFT_STOP]
 - `PUBLIC_PROJECTION_SOURCE_MISMATCH` — a `PUBLIC_EVIDENCE_PROJECTION` references source Evidence records that do not match its declared `source_refs`; [signal_kind=DRIFT_STOP]
@@ -2750,6 +2750,12 @@ Only `DRIFT_STOP`, `HARD_STOP`, and `RECOVERY_BUDGET_STOP` kinds form a current-
 - `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION` — a V4/V5/V6 version governance object is used for a purpose that belongs to a different stage (e.g., V4 checkpoint substituting for V5 authorisation, V6 execution evidence written back into V5 Packet); [signal_kind=DRIFT_STOP]
 - `EVIDENCE_OBJECT_DIGEST_MISSING` — an Evidence record lacks `evidence_version` or `evidence_digest` (canonical_digest of the Evidence object itself, distinct from `raw_digest`); [signal_kind=DRIFT_STOP]
 
+- `OBJECT_CANONICAL_DIGEST_SELF_REFERENCE` — a canonical payload includes its own digest or its containing parent object's digest, creating a fixed-point self-reference cycle; [signal_kind=DRIFT_STOP]
+- `OBJECT_SELF_CERTIFYING_RECEIPT_CYCLE` — a subject object's canonical body embeds a reference (id/version/digest) to a Receipt that certifies, validates, or freezes that same subject object, creating a self-certification cycle; [signal_kind=DRIFT_STOP]
+- `RECEIPT_TYPE_REGISTRY_INCOMPLETE` — a Receipt type that is referenced or used in governance logic is missing from the minimum Receipt type registry, or its issuer/authority/prerequisites are ambiguous; [signal_kind=DRIFT_STOP]
+- `VERSION_QUALIFICATION_SECRET_EVIDENCE_VIOLATION` — V7 qualification Evidence contains or derives a secret value, hash, length, prefix/suffix, header, token/cookie, or secret-derived fingerprint instead of limiting to credential identity, approved source class, availability/binding verification, and `secret_value_observed=false`; [signal_kind=DRIFT_STOP]
+- `LIFECYCLE_STATE_MUTATED_IN_PLACE` — an object's lifecycle state was changed in place on the original object body instead of recording the transition via a new object version or an append-only Receipt; [signal_kind=DRIFT_STOP]
+
 ### §10.2 Drift Handling
 
 `STOP → IDENTIFY → RE-ANCHOR → PROPOSE → WAIT`.
@@ -2765,7 +2771,7 @@ Four distinct object types must not be substituted for one another:
 
 - **Artifact**: a work product produced by a role or the orchestrator (plan, report, candidate, deliverable).
 - **Evidence**: a raw observation that supports facts, actions, invocations, and conclusions (command output, file snapshot, API response, test result, model invocation record).
-- **Packet**: a frozen ordered collection of member objects (Artifacts, Evidence, or sub-Packets) assembled for a downstream consumer role or stage.
+- **Packet**: a frozen ordered collection of member objects (Artifacts, Evidence, Receipts, or sub-Packets) assembled for a downstream consumer role or stage.
 - **Receipt**: an immutable record that an authorisation, verification, Gate, or state transition has occurred.
 
 An Artifact claim is **not** Evidence. An Evidence collection that has not been frozen is **not** a Packet. The existence of a Packet does **not** constitute a Gate PASS. A Receipt must **not** expand Work Order or operator authorisation.
@@ -2782,7 +2788,7 @@ All four governance object types (Artifact, Evidence, Packet, Receipt) share the
 - `created_at` — RFC 3339 UTC timestamp
 - `producer_or_collector_or_issuer_identity` — role, node, or entity that produced, collected, or issued the object
 - `work_order_or_governance_operation_ref` — `id + version + digest` of the governing Work Order or governance operation
-- `lifecycle_state` — current lifecycle state per the type-specific lifecycle registry (§10.3.8 for Packet, §10.3.9 for Receipt, §10.3.5 for Artifact, §10.3.7 for Evidence)
+- `lifecycle_state_at_creation` — the lifecycle state at object creation, recorded immutably in the canonical digest. The **effective** lifecycle state is computed from the object version chain and the append-only Receipt chain (Invalidation / Supersession / Revocation Receipts); it must not be written back into the object body. Type-specific lifecycle registries: Artifact (§10.3.5), Evidence (§10.3.7), Packet (§10.3.8), Receipt (§10.3.9)
 - `supersedes_ref` — `id + version + digest` of the object this one supersedes (or null)
 
 `execution_record_ref` — `id + version + digest` of the governing execution record. This field is **conditionally required**: when an execution record exists (post-Activation), it must be populated. For pre-execution governance objects (operator approval Receipts, pre-Activation governance objects), the value must be explicitly `NOT_APPLICABLE` with a reason; a fabricated or stale reference is forbidden.
@@ -2854,12 +2860,14 @@ Every substantive conclusion in an Artifact must use a stable `claim_id`. Claim 
 - `claim_type`
 - `statement` — the substantive assertion
 - `producer` — role or entity that made the claim
-- `artifact_ref` — `id + version + digest` of the containing artifact
+- `containing_artifact_id` / `containing_artifact_version` — local locator fields; the containing Artifact's `canonical_digest` must **not** appear in the Claim payload
 - `evidence_refs` — one or more `id + version + digest` Evidence references
 - `status` — one of `ASSERTED`, `VERIFIED`, `CONTRADICTED`
 - `limitations` — any known limitations, assumptions, or scope restrictions
 
-**Cross-object Claim references**: when a Claim is referenced from outside its containing Artifact (from another Artifact, Packet, or Receipt), the reference must use the triple `containing_artifact_ref + claim_id + claim_digest`. A bare `claim_id` without the containing Artifact triple is forbidden. If a Claim is later promoted to an independent object, it must carry the full common envelope (§10.3.2); a `claim_id` alone must not serve as a cross-object reference.
+`claim_digest` is computed from the Claim's own canonical payload, excluding the `claim_digest` field itself and excluding any containing Artifact digest. The containing Artifact's `canonical_digest` covers the Claim as an embedded subobject, but the Claim payload must not contain that digest — a parent digest in its own subobject's payload creates a fixed-point self-reference cycle.
+
+**Cross-object Claim references**: when a Claim is referenced from outside its containing Artifact (from another Artifact, Packet, or Receipt), the reference must use the triple `containing_artifact_ref (id + version + digest) + claim_id + claim_digest`. A bare `claim_id` without the containing Artifact triple is forbidden. The verifier must independently verify: (a) the containing Artifact's `canonical_digest`, (b) the Claim's `claim_digest`, and (c) that the Claim belongs to the stated Artifact. If a Claim is later promoted to an independent object, it must carry the full common envelope (§10.3.2); a `claim_id` alone must not serve as a cross-object reference.
 
 Repo / file state, test results, model invocations, route / node state, candidate tree, push / PR / Gate / review / post-merge conclusions must each be bound to at least one Evidence record. A bare "verified / tests pass / remote consistent / no issues" assertion must not form a PASS without supporting Evidence.
 
@@ -2882,7 +2890,9 @@ Minimum evidence types:
 
 `COMMAND_RESULT`, `FILE_SNAPSHOT`, `GIT_OBJECT`, `REMOTE_API_RESPONSE`, `TEST_RESULT`, `MODEL_INVOCATION_RECORD`, `ROLE_OUTPUT`, `NODE_ROUTE_PROBE`, `READINESS_CHECK`, `PR_METADATA_SNAPSHOT`, `DIFF_MANIFEST`, `TREE_MANIFEST`, `OPERATOR_DECISION_RECORD`, `TIME_SOURCE_RECORD`.
 
-**Raw payload and normalized observation must be separated.** Public metadata may reference only a `PUBLIC_EVIDENCE_PROJECTION` that has passed a public-safe check. The following must never appear in any Evidence record that may be publicly projected: environment variable dumps, token / cookie / header values, secret values, secret hash / length / prefix / suffix. Credential Evidence may record only: `credential_identity`, `approved_source_class`, `available = true / false`, and `secret_value_observed = false`.
+**Raw payload and normalized observation must be separated.** Public metadata may reference only a `PUBLIC_EVIDENCE_PROJECTION` that has passed a public-safe check. The following must never appear in any Evidence record that may be publicly projected: environment variable dump
+
+Evidence lifecycle states (at creation): `VALID`. Effective states: `INVALIDATED`, `SUPERSEDED` — computed from the append-only Receipt chain, not from in-place field mutation.s, token / cookie / header values, secret values, secret hash / length / prefix / suffix. Credential Evidence may record only: `credential_identity`, `approved_source_class`, `available = true / false`, and `secret_value_observed = false`.
 
 ##### Formal Model Invocation Evidence
 
@@ -2911,7 +2921,7 @@ A Packet must record at least:
 - `packet_id` / `type` / `version` / `digest`
 - `assembler_identity` / `assembler_function`
 - `deterministic_ordered_membership` — ordered list of `id + version + digest` triples (members may be Artifact, Evidence, Receipt, or sub-Packet; unapproved object types must not enter membership)
-- `freeze_state` / `freeze_time` / `freeze_receipt_ref`
+- `freeze_required` — boolean flag indicating that freeze is required before the Packet is considered ready for consumption (the `PACKET_FREEZE_RECEIPT` is an external Receipt that references this Packet's `id + version + digest` triple; it must not be embedded in the Packet canonical body)
 - `intended_consumer_role` / `intended_consumer_stage`
 - `scope_ref` / `requirement_ref` / `candidate_ref`
 - `excluded_objects` — list of objects considered but excluded, with reason
@@ -2943,23 +2953,25 @@ A Receipt must record at least:
 - `issuer_type` / `issuer_identity` / `authority_basis`
 - `subject_id` / `subject_version` / `subject_digest` — `id + version + digest` triple
 - `decision_result` — the substantive decision (PASS, FAIL, GRANTED, REVOKED, etc.)
-- `state_created` — the lifecycle state created by this receipt
+- `state_created` — the **business workflow state** created by this Receipt (e.g., `GLOBAL_READINESS_PASS`, `GATE_PASS`, `AUTHORIZATION_GRANTED`); this is **not** the Receipt's own lifecycle state
 - `reason_codes` — one or more reason codes
 - `evidence_refs` — one or more `id + version + digest` Evidence references
 - `prerequisite_receipts` — `id + version + digest` triples of prerequisite receipts
 - `issued_at` — RFC 3339 UTC timestamp
 - `expires_on_drift` — whether this receipt becomes stale on drift detection
 - `invalidation_conditions` — conditions under which this receipt must be invalidated
-- `lifecycle_state` — one of `CURRENT`, `STALE`, `SUPERSEDED`, `REVOKED_BY_OPERATOR`
+- `lifecycle_state_at_creation` — `CURRENT` (immutable; effective status is computed from the append-only Receipt chain)
 - `cryptographic_attestation.enabled` — `false` (reserved for future PKI)
 
-The Receipt body and digest are **permanently immutable** from creation. The initial `lifecycle_state` is recorded as `CURRENT`. Subsequent state transitions (`STALE`, `SUPERSEDED`, `REVOKED_BY_OPERATOR`) must be recorded by independent append-only Receipts:
+The Receipt body and digest are **permanently immutable** from creation. The initial `lifecycle_state_at_creation` is `CURRENT`. Subsequent effective status transitions (`STALE`, `SUPERSEDED`, `REVOKED_BY_OPERATOR`) must be recorded by independent append-only Receipts:
 
 - `INVALIDATION_RECEIPT` — marks one or more subject Receipts as `STALE`
 - `SUPERSESSION_RECEIPT` — marks a subject Receipt as `SUPERSEDED` and links to the superseding Receipt
 - Operator revocation Receipt — marks a subject Receipt as `REVOKED_BY_OPERATOR`
 
-The authoritative current status of any Receipt is computed from the immutable Receipt chain, not from in-place field mutation. `state_created` records the business workflow state created by this Receipt (e.g., `GLOBAL_READINESS`, `GATE_PASS`) and must not be conflated with the Receipt's own lifecycle state.
+The authoritative effective status of any Receipt is computed from the immutable Receipt chain, not from in-place field mutation. `state_created` records the business workflow state created by this Receipt (e.g., `GLOBAL_READINESS_PASS`, `GATE_PASS`, `AUTHORIZATION_GRANTED`) and must not be conflated with the Receipt's own lifecycle state.
+
+Receipt lifecycle states: `lifecycle_state_at_creation=CURRENT` (immutable). Effective statuses (computed from the append-only Receipt chain): `CURRENT`, `STALE`, `SUPERSEDED`, `REVOKED_BY_OPERATOR`.
 
 #### §10.3.10 Authority Matrix
 
@@ -3013,18 +3025,18 @@ All Artifacts, Packets, and Receipts must form a verifiable DAG:
 
 Cycles are forbidden. A detected cycle triggers `OBJECT_LINEAGE_CYCLE_DETECTED → STOP`.
 
-Invalidation must propagate downstream:
+Invalidation must propagate downstream via append-only Receipts (in-place field mutation is forbidden):
 
-- Evidence invalidated → dependent Claims / Artifacts enter `REVALIDATION_REQUIRED`
-- Artifact invalidated → containing Packet enters `INVALIDATED`
-- Packet invalidated → dependent Receipts enter `STALE`
-- Receipt stale → downstream Gates and Packets are invalidated
+- Evidence invalidated → issue `INVALIDATION_RECEIPT`; dependent Claims / Artifacts have their effective status computed as `REVALIDATION_REQUIRED`
+- Artifact invalidated → issue `INVALIDATION_RECEIPT`; containing Packet's effective status computed as `INVALIDATED`
+- Packet invalidated → issue `INVALIDATION_RECEIPT`; dependent Receipts' effective status computed as `STALE`
+- Receipt stale → downstream Gates and Packets have their effective status computed as invalidated
 
-A candidate digest change must invalidate all tester, reviewer, Gate, and Integration objects that reference the prior candidate digest. A PR head or body change must make Ready / Merge approval Packets and their authorisation Receipts stale. Old evidence must be retained but must not contribute to a current PASS.
+A candidate digest change must invalidate all tester, reviewer, Gate, and Integration objects that reference the prior candidate digest. A PR head or body change must make Ready / Merge approval Packets and their authorisation Receipts stale. Old evidence must be retained but must not contribute to a current PASS. All invalidation, staling, supersession, and revocation are expressed via independent append-only Receipts; no lifecycle field is mutated in place on the original object.
 
-Packet lifecycle states: `ASSEMBLING`, `FROZEN`, `VALIDATED`, `CONSUMED`, `INVALIDATED`, `SUPERSEDED`
+Packet lifecycle states (at creation): `ASSEMBLED` (initial immutable state after assembly). Effective states computed from Receipt chain: `FROZEN` (via `PACKET_FREEZE_RECEIPT`), `VALIDATED` (via `PACKET_VALIDATION_RECEIPT`), `CONSUMED`, `INVALIDATED`, `SUPERSEDED`. The Packet body records only `lifecycle_state_at_creation=ASSEMBLED`; subsequent effective states are derived from external Receipts, not from in-place Packet field mutation.
 
-Artifact lifecycle states: `VALID`, `INVALIDATED`, `SUPERSEDED`, `REVALIDATION_REQUIRED`
+Artifact lifecycle states (at creation): `VALID`. Effective states: `INVALIDATED`, `SUPERSEDED`, `REVALIDATION_REQUIRED` — all computed from the append-only Receipt chain, not from in-place field mutation.
 
 #### §10.3.12 Mode Applicability
 
@@ -3058,7 +3070,7 @@ Internal governance objects must not be directly published in full. `PUBLIC_EVID
 
 - `source_refs` — `id + version + digest` triples of source Evidence records
 - `allowed_fields` / `omitted_fields`
-- `public_safe_check_receipt_ref`
+- `public_safe_check_required` — boolean flag; the `PUBLIC_PROJECTION_SAFETY_CHECK_RECEIPT` is an external Receipt that references this Projection's `id + version + digest` triple and must be `CURRENT` before publication; it must not be embedded in the Projection canonical body
 
 PR bodies, commit messages, and public comments may reference only `PUBLIC_EVIDENCE_PROJECTION_ARTIFACT` objects. The following must never appear in a public projection: credential values, private host / IP / user / path, internal prompts, raw private logs, or secret-derived fingerprints. Redaction must not change the technical PASS / FAIL fact.
 
@@ -3078,7 +3090,7 @@ The existing §3.8 `HERMES_OPENCODE_VERSION_GOVERNANCE_GATE` (V0–V8) is the so
 | V7 — Qualification | `VERSION_QUALIFICATION_PACKET` + `VERSION_QUALIFICATION_PASS_RECEIPT` / `VERSION_QUALIFICATION_FAIL_RECEIPT` |
 | V8 — Closeout | `VERSION_CLOSEOUT_REPORT` + `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT` |
 
-V3 preparation approval must not authorise real installation. V4 checkpoint Packet must be reviewed by operator; the review Receipt must not substitute for V5 authorisation. V5 second confirmation is the point at which the exact version, action, node / profile, backup / rollback point, and qualification plan are authorised. V6 execution must read the V5 frozen Packet only; execution Evidence must be recorded independently and must not write back into the V5 Packet. Any change to target version, component, node / profile, action, backup / rollback point, or qualification plan makes the V5 authorisation stale. Any V4/V5/V6 object conflation triggers `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION → STOP`. V7 must bind binary / checksum, config / capability / provider / model / CMP / wrapper / bounded call / gate / evidence / secret / rollback / drift evidence. Failure at V7 triggers immediate STOP; no automatic version substitution, scope expansion, or rollback unless the operator has pre-approved an atomic rollback plan.
+V3 preparation approval must not authorise real installation. V4 checkpoint Packet must be reviewed by operator; the review Receipt must not substitute for V5 authorisation. V5 second confirmation is the point at which the exact version, action, node / profile, backup / rollback point, and qualification plan are authorised. V6 execution must read the V5 frozen Packet only; execution Evidence must be recorded independently and must not write back into the V5 Packet. Any change to target version, component, node / profile, action, backup / rollback point, or qualification plan makes the V5 authorisation stale. Any V4/V5/V6 object conflation triggers `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION → STOP`; V7 credential Evidence limited to identity/class/binding, no secret value observation. V7 must bind binary / checksum, config / capability / provider / model / CMP / wrapper / bounded call / gate / evidence / secret / rollback / drift evidence. Failure at V7 triggers immediate STOP; no automatic version substitution, scope expansion, or rollback unless the operator has pre-approved an atomic rollback plan.
 
 #### §10.3.15 Version Gate Trigger Boundary
 
@@ -3288,7 +3300,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in `PRE_V2_HISTORICAL_EVIDENCE_BANNER_MISSING` (§10.1) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
-| Drift signals | 7 | expanded to 215-entry canonical signal catalog (31 new Artifact / Evidence / Packet / Receipt / Version governance signals + 9 new identity/claim/projection/receipt/consultation/version governance signals) |
+| Drift signals | 7 | expanded to 220-entry canonical signal catalog (31 + 9 + 5 new self-reference / lifecycle / registry / secret-evidence signals) |
 | High-risk checkpoints | §4 vague | §9 explicit 4 categories (A/B/C/D), 12+ high-risk items, including `Hermes` / `OpenCode` install / update / downgrade / migration / restart / switch (§9.3) |
 | Top-line governance | role authority scattered | §1 GP-1 / GP-2 / GP-3 single page; recommend → assign → execute locked |
 | Effect mechanism | §10 "signing" (later corrected to Working Agreement) | effective only on operator explicit chat acceptance; on acceptance update existing file with `Version: 2.0` + `Supersedes: V1 / PR #276` + `Historical source retained in Git history` |
@@ -3299,9 +3311,9 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Historical PR / report handling | unspecified | `PRE_V2_HISTORICAL_EVIDENCE` rules; historical files untouched |
 
 
-| Artifact / Evidence / Packet / Receipt schema | absent | §10.3 canonical governance schema (10-field common envelope + type-specific aliases, conditional execution_record_ref, Claim as embedded subobject, Public Projection as derived Artifact, authority matrix, lineage, invalidation, append-only Receipt lifecycle); status: `PROVISIONAL_ARTIFACT_EVIDENCE_SCHEMA_PENDING_GRAY4_VALIDATION` — not V2 final acceptance or runtime E2E PASS |
-| Version governance objects | absent | §3.8 V0–V8 bound to Packet / Artifact / Receipt objects (§10.3.14); V3 authorises preparation only, V4 checkpoint Packet + review Receipt (not V5), V5 authorises exact-scope execution via frozen authorization Packet, V6 execution Evidence independent of V5 Packet; V7 qualification failure = STOP; V4/V5/V6 object conflation triggers `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION → STOP` |
-| Drift signals | 175 | expanded to 215-entry canonical signal catalog (31 new Artifact / Evidence / Packet / Receipt / Version governance signals + 9 new identity/claim/projection/receipt/consultation/version governance signals) |
+| Artifact / Evidence / Packet / Receipt schema | absent | §10.3 canonical governance schema (10-field common envelope with lifecycle_state_at_creation, type-specific aliases, conditional execution_record_ref, Claim as embedded subobject without parent digest, Public Projection as derived Artifact without embedded safety receipt, authority matrix, lineage with append-only invalidation, append-only Receipt lifecycle, complete lifecycle registries for Artifact/Evidence/Packet/Receipt); status: `PROVISIONAL_ARTIFACT_EVIDENCE_SCHEMA_PENDING_GRAY4_VALIDATION` — not V2 final acceptance or runtime E2E PASS |
+| Version governance objects | absent | §3.8 V0–V8 bound to Packet / Artifact / Receipt objects (§10.3.14); V3 authorises preparation only, V4 checkpoint Packet + review Receipt (not V5), V5 authorises exact-scope execution via frozen authorization Packet, V6 execution Evidence independent of V5 Packet; V7 qualification failure = STOP; V4/V5/V6 object conflation triggers `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION → STOP`; V7 credential Evidence limited to identity/class/binding, no secret value observation |
+| Drift signals | 175 | expanded to 220-entry canonical signal catalog (31 + 9 + 5 new self-reference / lifecycle / registry / secret-evidence signals) |
 
 ---
 
