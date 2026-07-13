@@ -3546,7 +3546,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 
 This section addresses documented runtime risks from rounds 69–70 of the V2 Draft:
 
-- Windows user-level `GH_TOKEN` exists and operator has not modified it, but the Hermes/vibedev agent process does not inherit it (`PROCESS_ENV_STALE`), causing false "token not found" failures and Git push failures.
+- Windows user-level `GH_TOKEN` exists and operator has not modified it, but the Hermes/vibedev agent process does not inherit it (`PROCESS_ENV_STALE_ABSENT) conditions, causing false "token not found" failures and Git push failures.
 - Default `git push` does not automatically use `$env:GH_TOKEN`; without a deterministic credential loader and temporary askpass, delivery may fail despite a valid token.
 - In FULL-mode Work Orders, an independent `git-integrator` role faces the same process-env staleness problem, and may not discover it until the final commit fails to push.
 - Proxy, token, credential injection, repo permission, and remote path issues conflate during diagnosis, causing blind retries and budget exhaustion.
@@ -3582,9 +3582,9 @@ States are classified into three categories:
 
 `REMOTE_ALREADY_UPDATED` is a success/no-op outcome, not a failure.
 
-If multiple user-level sources are explicitly declared as canonical, classify as `TOKEN_SOURCE_AMBIGUOUS` and STOP. The current contract declares only one canonical source (user-level `GH_TOKEN`); so `TOKEN_SOURCE_AMBIGUOUS` is reserved for future configuration changes and does not apply to process-environment comparison.
+If multiple user-level sources are explicitly declared as canonical, classify as `TOKEN_SOURCE_AMBIGUOUS` and STOP. The current Contract permits only one canonical credential source. `TOKEN_SOURCE_AMBIGUOUS` indicates a Contract-drift / invalid configuration — the effective runtime configuration has violated the single-source invariant. The loader must not select any value and must STOP.
 
-**§14.2.3 PROCESS_ENV_STALE handling.** When the user-level token exists but the current process has not inherited it, the loader must:
+**§14.2.3 Recoverable Process Environment Conditions.** When the canonical user-level token exists but the current process has not inherited it, or inherits a different value, the loader must:
 
 1. Read the user-level value via a subprocess (e.g., `PowerShell [Environment]::GetEnvironmentVariable("GH_TOKEN","User")`).
 2. Inject the value into a controlled subprocess environment variable (e.g., `VIBECODING_GH_TOKEN`).
@@ -3611,7 +3611,7 @@ If multiple user-level sources are explicitly declared as canonical, classify as
 
 **§14.2.7 Token secrecy from model context.** The model (orchestrator, git-integrator, or any other role) must never receive the token value, a partial value, a hash, or any encoding from which the token could be derived. The model receives only:
 
-- The credential state classification string (e.g., `PROCESS_ENV_STALE`, `HTTPS_AUTH_AND_NETWORK_READY`).
+- The credential state classification string (e.g., `PROCESS_ENV_STALE_ABSENT`, `HTTPS_AUTH_AND_NETWORK_READY`).
 - Non-secret evidence items listed in **§14.7**.
 
 ### §14.3 Two-Level Git Delivery Readiness
@@ -3756,12 +3756,14 @@ Ready, Merge, and Branch Deletion must each use their own credential-readiness e
 |---|---|
 | `PROCESS_ENV_STALE_ABSENT` | Canonical user-level token exists; current process has not inherited it. Recoverable via child-process injection (§14.2.3). |
 | `PROCESS_ENV_STALE_MISMATCH` | Canonical user-level and current-process values differ. Process value discarded; canonical value re-injected; re-auth required (§14.2.2 #3). |
+| `PROXY_PATH_FAILURE` | Configured proxy path fails; an operator-approved / contract-allowed alternate HTTPS path may be tested. Not a terminal failure on its own. |
 
 **B. Ready / success / no-op (not failures):**
 | Class | Meaning |
 |---|---|
 | `USER_ENV_TOKEN_READY` | Canonical user-level token present; current-process value present and equal. Ready for use. |
-| `CREDENTIAL_RECOVERY_READY` | Recoverable condition (#2 or #3) was resolved via user-level read, child injection, re-authentication, and ls-remote. Ready for use. |
+| `CREDENTIAL_RECOVERY_READY` | Recoverable condition (STALE_ABSENT or STALE_MISMATCH) was resolved via user-level read, child injection, re-authentication, and ls-remote. Ready for use. |
+| `ALTERNATE_HTTPS_PATH_READY` | Primary proxy path failed; an operator-approved alternate HTTPS path passed authenticated ls-remote using the same credential and remote. Ready for use via alternate path. |
 | `REMOTE_ALREADY_UPDATED` | Push not needed; remote already at target SHA. Success/no-op outcome. |
 | `DELIVERY_VERIFIED` | Push completed; local, remote, and PR head SHA match. Success outcome. |
 
@@ -3770,33 +3772,50 @@ Ready, Merge, and Branch Deletion must each use their own credential-readiness e
 |---|---|
 | `TOKEN_SOURCE_MISSING` | No canonical source found at user level or in any operator-declared canonical location. |
 | `UNTRUSTED_PROCESS_ONLY_TOKEN` | User-level canonical source absent; only a non-canonical process residue exists. STOP, do not use. |
-| `TOKEN_SOURCE_AMBIGUOUS` | Two or more operator-declared canonical user-level sources have conflicting values. §14.2.4 applies. |
-| `PROCESS_ENV_RECOVERY_FAILED` | A recoverable condition (#2 or #3) was attempted but recovery failed (child injection, re-auth, or ls-remote failed). |
+| `TOKEN_SOURCE_AMBIGUOUS` | Two or more operator-declared canonical user-level sources have conflicting values. The Contract permits only one canonical source; this is a Contract-drift / invalid configuration. |
+| `PROCESS_ENV_RECOVERY_FAILED` | A recoverable condition was attempted but recovery failed (child injection, re-auth, or ls-remote failed). |
 | `TOKEN_AUTH_FAILURE` | Token present but GitHub authentication rejects it. |
 | `AUTHENTICATED_IDENTITY_MISMATCH` | Authenticated user does not match the expected repository collaborator for this Work Order. |
 | `REPO_PUSH_PERMISSION_FAILURE` | Authenticated identity lacks push permission on the target repository. |
-| `PROXY_PATH_FAILURE` | Configured proxy path fails; direct HTTPS path may be tested as alternate. |
-| `NETWORK_PATH_FAILURE` | Both proxy and direct HTTPS paths fail. |
+| `NETWORK_PATH_FAILURE` | Proxy path and all operator-approved alternate HTTPS paths have failed. |
 | `REMOTE_PARENT_MISMATCH` | Remote ref does not point at the expected parent commit. |
-| `NON_FAST_FORWARD` | Local commit is not a descendant of the remote ref; fast-forward push is not possible without force. |
+**§14.6.2 Classification priority — seven evaluation groups.**
 
-**§14.6.2 Classification priority (to avoid double-classification).** When multiple conditions could apply to the same observation, the following priority order decides the single classification:
+Each evaluation step produces exactly one classification. A single readiness flow may produce an ordered state transition (e.g., `PROCESS_ENV_STALE_ABSENT` → `CREDENTIAL_RECOVERY_READY`). The following group order determines the primary classification at each step:
 
-1. `REMOTE_ALREADY_UPDATED` — check first; if remote is at target SHA, no further classification needed.
-2. `TOKEN_SOURCE_AMBIGUOUS` — conflicting operator-declared canonical sources.
-3. `TOKEN_SOURCE_MISSING` — no canonical source at user level.
-4. `UNTRUSTED_PROCESS_ONLY_TOKEN` — only process residue exists.
-5. `PROCESS_ENV_STALE_MISMATCH` — user and process tokens differ (recoverable after re-injection and re-auth).
-6. `PROCESS_ENV_STALE_ABSENT` — user token exists but process missing (recoverable).
-7. `TOKEN_AUTH_FAILURE` — token present but GitHub rejects authentication.
-8. `AUTHENTICATED_IDENTITY_MISMATCH` — authenticated user not the expected collaborator.
-9. `REPO_PUSH_PERMISSION_FAILURE` — authenticated but no push permission.
-10. `PROXY_PATH_FAILURE` — configured proxy path fails; direct path may be tested next.
-11. `NETWORK_PATH_FAILURE` — both proxy and direct HTTPS paths fail.
-12. `REMOTE_PARENT_MISMATCH` — remote ref points at unexpected parent.
-13. `NON_FAST_FORWARD` — local commit not a descendant of remote ref.
+**Group 1 — pre-write no-op check:**
+1. `REMOTE_ALREADY_UPDATED`
 
-Readiness observations (1–6) must not consume any push budget.
+**Group 2 — source validity (terminal unless resolved):**
+2. `TOKEN_SOURCE_AMBIGUOUS`
+3. `TOKEN_SOURCE_MISSING`
+4. `UNTRUSTED_PROCESS_ONLY_TOKEN`
+
+**Group 3 — process observation / recovery (non-terminal transitions):**
+5. `PROCESS_ENV_STALE_MISMATCH` → may transition to `CREDENTIAL_RECOVERY_READY`
+6. `PROCESS_ENV_STALE_ABSENT` → may transition to `CREDENTIAL_RECOVERY_READY`
+7. `PROCESS_ENV_RECOVERY_FAILED` → terminal, STOP
+8. `USER_ENV_TOKEN_READY`
+9. `CREDENTIAL_RECOVERY_READY`
+
+**Group 4 — authentication / authority:**
+10. `TOKEN_AUTH_FAILURE`
+11. `AUTHENTICATED_IDENTITY_MISMATCH`
+12. `REPO_PUSH_PERMISSION_FAILURE`
+
+**Group 5 — network:**
+13. `PROXY_PATH_FAILURE` → may transition to `ALTERNATE_HTTPS_PATH_READY` if alternate path passes validated ls-remote
+14. `ALTERNATE_HTTPS_PATH_READY`
+15. `NETWORK_PATH_FAILURE` → all paths exhausted, terminal
+
+**Group 6 — repository topology:**
+16. `REMOTE_PARENT_MISMATCH`
+17. `NON_FAST_FORWARD`
+
+**Group 7 — delivery:**
+18. `DELIVERY_VERIFIED`
+
+Readiness observations (Groups 1–3) and alternate-path checks (Group 5 transitions) must not consume push budget.
 
 1. `PROCESS_ENV_STALE_ABSENT` and `PROCESS_ENV_STALE_MISMATCH` must be recovered by user-level read and child-process injection; operator must not be asked to reconfigure the token. If recovery fails, classify as `PROCESS_ENV_RECOVERY_FAILED` and STOP.
 2. Readiness failures (Level 1 or Level 2) do not count as push budget consumption.
@@ -3812,7 +3831,12 @@ Readiness observations (1–6) must not consume any push budget.
 
 Every credential loader and Git readiness call must produce evidence containing:
 
-- `credential_runtime_state`: the five-state or final READY/STOP classification string
+- `credential_runtime_observation`: nullable enum — the initial observation (e.g., `PROCESS_ENV_STALE_ABSENT`, `PROCESS_ENV_STALE_MISMATCH`, `PROXY_PATH_FAILURE`, or `null` if ready at first check)
+- `credential_runtime_final_outcome`: one of `READY` / `SUCCESS` / `NO_OP` / `STOP`
+- `credential_runtime_transition_sequence`: ordered list of non-secret classification strings (e.g., `["PROCESS_ENV_STALE_ABSENT", "CREDENTIAL_RECOVERY_READY"]`)
+- `selected_https_path_class`: the HTTPS path class used for the attempted operation (`git_global_proxy` or `direct` or `alternate`)
+- `alternate_https_path_tested`: boolean — was an alternate HTTPS path tested?
+- `alternate_https_path_ready`: boolean — did the alternate path pass authenticated ls-remote?
 - `canonical_source_present`: boolean — user-level `GH_TOKEN` is non-empty
 - `current_process_present`: boolean — current-process `GH_TOKEN` is non-empty
 - `process_env_absent`: boolean — true when canonical source present but process empty
@@ -3857,7 +3881,7 @@ The credential hardening rules must be tested with at least the following scenar
 4. User-level token absent; parent process empty → `TOKEN_SOURCE_MISSING` → STOP.
 5. User-level token absent; parent process non-empty → `UNTRUSTED_PROCESS_ONLY_TOKEN` → STOP (process residue not used).
 6. `GITHUB_TOKEN` exists in user env; `GH_TOKEN` also valid → no ambiguity formed; `GITHUB_TOKEN` not used; `GH_TOKEN` is canonical source.
-7. Multiple operator-declared canonical user-level sources with conflicting values → `TOKEN_SOURCE_AMBIGUOUS` → STOP.
+7. Runtime effective configuration violates Contract single-source invariant — two canonical-marked sources conflict → `TOKEN_SOURCE_AMBIGUOUS` → STOP.
 8. Recoverable condition (#2 or #3) attempted but re-injection, re-auth, or ls-remote fails → `PROCESS_ENV_RECOVERY_FAILED` → STOP.
 9. `CREATE_NEW_DRAFT_PR` endpoint intent — PR does not yet exist; verification passes without requiring PR pre-existence.
 10. `UPDATE_EXISTING_DRAFT_PR` — exact PR number must exist and be OPEN + DRAFT; verification fails if PR is closed, merged, or non-existent.
