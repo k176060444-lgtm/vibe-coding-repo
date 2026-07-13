@@ -3546,7 +3546,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 
 This section addresses documented runtime risks from rounds 69–70 of the V2 Draft:
 
-- Windows user-level `GH_TOKEN` exists and operator has not modified it, but the Hermes/vibedev agent process does not inherit it (`PROCESS_ENV_STALE_ABSENT) conditions, causing false "token not found" failures and Git push failures.
+- Windows user-level `GH_TOKEN` exists and operator has not modified it, but the Hermes/vibedev agent process does not inherit it (`PROCESS_ENV_STALE_ABSENT`) conditions, causing false "token not found" failures and Git push failures.
 - Default `git push` does not automatically use `$env:GH_TOKEN`; without a deterministic credential loader and temporary askpass, delivery may fail despite a valid token.
 - In FULL-mode Work Orders, an independent `git-integrator` role faces the same process-env staleness problem, and may not discover it until the final commit fails to push.
 - Proxy, token, credential injection, repo permission, and remote path issues conflate during diagnosis, causing blind retries and budget exhaustion.
@@ -3582,7 +3582,7 @@ States are classified into three categories:
 
 `REMOTE_ALREADY_UPDATED` is a success/no-op outcome, not a failure.
 
-If multiple user-level sources are explicitly declared as canonical, classify as `TOKEN_SOURCE_AMBIGUOUS` and STOP. The current Contract permits only one canonical credential source. `TOKEN_SOURCE_AMBIGUOUS` indicates a Contract-drift / invalid configuration — the effective runtime configuration has violated the single-source invariant. The loader must not select any value and must STOP.
+If the effective runtime configuration presents two or more canonical-marked credential sources, contrary to the Contract single-source invariant, classify as `TOKEN_SOURCE_AMBIGUOUS` and STOP. The loader must not select any value. This indicates a Contract-drift / invalid runtime configuration — the second canonical mark is not authorised by the current Contract version. To change the canonical source rule, the operator must pass a new Contract version; the loader must not extend itself at runtime.
 
 **§14.2.3 Recoverable Process Environment Conditions.** When the canonical user-level token exists but the current process has not inherited it, or inherits a different value, the loader must:
 
@@ -3593,11 +3593,11 @@ If multiple user-level sources are explicitly declared as canonical, classify as
 5. The loader **must not** report the token value, partial value, reversible encoding, or hash fingerprint that could identify the secret.
 6. Report only the classification string and the non-secret evidence items listed in **§14.7**.
 
-**§14.2.4 Canonical source boundary.** The sole canonical GitHub credential source is the Windows current-user environment variable `GH_TOKEN`. The current-process value of `GH_TOKEN` is a non-canonical cache only — it may be stale, absent, or match the canonical value.
+**§14.2.4 Canonical source boundary — single-source invariant.** The sole canonical GitHub credential source is the Windows current-user environment variable `GH_TOKEN`. The current-process value of `GH_TOKEN` is a non-canonical cache only — it may be stale, absent, or match the canonical value.
 
 - If the current-process value differs from the canonical user-level value, this is `PROCESS_ENV_STALE_MISMATCH` (§14.2.2 #3). The process value must be discarded; only the canonical user-level value is used after re-injection and re-authentication.
 - `GITHUB_TOKEN` and any other variable not explicitly declared as canonical by the operator shall not participate in source-ambiguity comparison and shall not be automatically used.
-- `TOKEN_SOURCE_AMBIGUOUS` applies only when two or more explicitly operator-declared canonical user-level sources have conflicting non-empty values. The current contract declares only one canonical source (user-level `GH_TOKEN`). The loader must not discover, promote, or select a new canonical source on its own.
+- `TOKEN_SOURCE_AMBIGUOUS` applies when the effective runtime configuration presents two or more canonical-marked sources, contrary to the Contract single-source invariant. The loader must not select any value. The loader must not discover, promote, or select a new canonical source at runtime.
 
 **§14.2.5 Temporary askpass.** The loader must create a temporary askpass script that:
 
@@ -3772,7 +3772,7 @@ Ready, Merge, and Branch Deletion must each use their own credential-readiness e
 |---|---|
 | `TOKEN_SOURCE_MISSING` | No canonical source found at user level or in any operator-declared canonical location. |
 | `UNTRUSTED_PROCESS_ONLY_TOKEN` | User-level canonical source absent; only a non-canonical process residue exists. STOP, do not use. |
-| `TOKEN_SOURCE_AMBIGUOUS` | Two or more operator-declared canonical user-level sources have conflicting values. The Contract permits only one canonical source; this is a Contract-drift / invalid configuration. |
+| `TOKEN_SOURCE_AMBIGUOUS` | Effective runtime configuration presents two or more canonical-marked sources, contrary to the Contract single-source invariant. The second canonical mark is not authorised by the current Contract version. |
 | `PROCESS_ENV_RECOVERY_FAILED` | A recoverable condition was attempted but recovery failed (child injection, re-auth, or ls-remote failed). |
 | `TOKEN_AUTH_FAILURE` | Token present but GitHub authentication rejects it. |
 | `AUTHENTICATED_IDENTITY_MISMATCH` | Authenticated user does not match the expected repository collaborator for this Work Order. |
@@ -3791,12 +3791,12 @@ Each evaluation step produces exactly one classification. A single readiness flo
 3. `TOKEN_SOURCE_MISSING`
 4. `UNTRUSTED_PROCESS_ONLY_TOKEN`
 
-**Group 3 — process observation / recovery (non-terminal transitions):**
-5. `PROCESS_ENV_STALE_MISMATCH` → may transition to `CREDENTIAL_RECOVERY_READY`
-6. `PROCESS_ENV_STALE_ABSENT` → may transition to `CREDENTIAL_RECOVERY_READY`
-7. `PROCESS_ENV_RECOVERY_FAILED` → terminal, STOP
-8. `USER_ENV_TOKEN_READY`
-9. `CREDENTIAL_RECOVERY_READY`
+**Group 3 — process observation / recovery outcomes:**
+5. `PROCESS_ENV_STALE_MISMATCH` → observation; may transition to `CREDENTIAL_RECOVERY_READY`
+6. `PROCESS_ENV_STALE_ABSENT` → observation; may transition to `CREDENTIAL_RECOVERY_READY`
+7. `PROCESS_ENV_RECOVERY_FAILED` → terminal recovery outcome, STOP
+8. `USER_ENV_TOKEN_READY` → ready outcome
+9. `CREDENTIAL_RECOVERY_READY` → ready outcome
 
 **Group 4 — authentication / authority:**
 10. `TOKEN_AUTH_FAILURE`
@@ -3815,7 +3815,18 @@ Each evaluation step produces exactly one classification. A single readiness flo
 **Group 7 — delivery:**
 18. `DELIVERY_VERIFIED`
 
-Readiness observations (Groups 1–3) and alternate-path checks (Group 5 transitions) must not consume push budget.
+### §14.6.3 Push and write budget rules.
+
+1. Any classification, readiness check, credential recovery, identity/permission verification, remote topology check, no-op determination, or HTTPS path validation that occurs before an actual Git/API write interface call does not consume push or write budget.
+2. Budget is consumed only when one of the following write interfaces is actually called:
+   - `push_approved_refspec`
+   - `create_or_update_draft_pr`
+   - Post-Draft Ready API write
+   - Merge API write
+   - Branch Deletion API write
+3. Authenticated `git ls-remote`, API reads, remote/PR SHA queries, and alternate-path validation are read-only and do not consume write budget.
+4. `REMOTE_ALREADY_UPDATED` is a `NO_OP`; no write interface is called, therefore no budget is consumed.
+5. When a write call returns a failure, only the next actual write call that conforms to the established retry rules consumes a second budget unit. The failed call already consumed its budget unit.
 
 1. `PROCESS_ENV_STALE_ABSENT` and `PROCESS_ENV_STALE_MISMATCH` must be recovered by user-level read and child-process injection; operator must not be asked to reconfigure the token. If recovery fails, classify as `PROCESS_ENV_RECOVERY_FAILED` and STOP.
 2. Readiness failures (Level 1 or Level 2) do not count as push budget consumption.
@@ -3881,7 +3892,7 @@ The credential hardening rules must be tested with at least the following scenar
 4. User-level token absent; parent process empty → `TOKEN_SOURCE_MISSING` → STOP.
 5. User-level token absent; parent process non-empty → `UNTRUSTED_PROCESS_ONLY_TOKEN` → STOP (process residue not used).
 6. `GITHUB_TOKEN` exists in user env; `GH_TOKEN` also valid → no ambiguity formed; `GITHUB_TOKEN` not used; `GH_TOKEN` is canonical source.
-7. Runtime effective configuration violates Contract single-source invariant — two canonical-marked sources conflict → `TOKEN_SOURCE_AMBIGUOUS` → STOP.
+7. Effective runtime configuration presents two canonical-marked sources, contrary to Contract single-source invariant → `TOKEN_SOURCE_AMBIGUOUS` → STOP.
 8. Recoverable condition (#2 or #3) attempted but re-injection, re-auth, or ls-remote fails → `PROCESS_ENV_RECOVERY_FAILED` → STOP.
 9. `CREATE_NEW_DRAFT_PR` endpoint intent — PR does not yet exist; verification passes without requiring PR pre-existence.
 10. `UPDATE_EXISTING_DRAFT_PR` — exact PR number must exist and be OPEN + DRAFT; verification fails if PR is closed, merged, or non-existent.
