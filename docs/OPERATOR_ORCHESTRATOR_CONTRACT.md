@@ -3539,4 +3539,223 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 
 ---
 
+
+## §14. GitHub Credential Runtime Reliability Hardening
+
+### §14.1 Scope & Rationale
+
+This section addresses documented runtime risks from rounds 69–70 of the V2 Draft:
+
+- Windows user-level `GH_TOKEN` exists and operator has not modified it, but the Hermes/vibedev agent process does not inherit it (`PROCESS_ENV_STALE`), causing false "token not found" failures and Git push failures.
+- Default `git push` does not automatically use `$env:GH_TOKEN`; without a deterministic credential loader and temporary askpass, delivery may fail despite a valid token.
+- In FULL-mode Work Orders, an independent `git-integrator` role faces the same process-env staleness problem, and may not discover it until the final commit fails to push.
+- Proxy, token, credential injection, repo permission, and remote path issues conflate during diagnosis, causing blind retries and budget exhaustion.
+
+These rules do not modify:
+
+- The nine role definitions, execution order, or role responsibilities (**§5**).
+- The 21bao/5bao/9bao topology (**§5.1**).
+- Gate ownership or operator permissions (**§9**).
+
+### §14.2 GitHub Credential Runtime Loader Rules
+
+**§14.2.1 Canonical secret source.** The canonical GitHub credential source is the Windows current-user environment variable `GH_TOKEN`. No other parallel canonical source shall be registered. The contract shall name no other user-facing token variable for this repository.
+
+**§14.2.2 Loader distinction.** Any runtime credential loader must distinguish exactly these four states:
+
+| State | User-level `GH_TOKEN` | Current-process `GH_TOKEN` | Classification |
+|---|---|---|---|
+| `USER_ENV_TOKEN_PRESENT` | non-empty | non-empty, equal | ready |
+| `PROCESS_ENV_STALE` | non-empty | empty or absent | child-injection needed |
+| `TOKEN_SOURCE_MISSING` | empty | empty | STOP |
+| `TOKEN_SOURCE_AMBIGUOUS` | multiple non-empty sources with differing values | — | STOP |
+
+**§14.2.3 PROCESS_ENV_STALE handling.** When the user-level token exists but the current process has not inherited it, the loader must:
+
+1. Read the user-level value via a subprocess (e.g., `PowerShell [Environment]::GetEnvironmentVariable("GH_TOKEN","User")`).
+2. Inject the value into a controlled subprocess environment variable (e.g., `VIBECODING_GH_TOKEN`).
+3. Pass it via a temporary askpass script or equivalent credential channel — **never** embed in the script file.
+4. The loader **must not** write the token back to the parent process, any repo or user configuration file, remote URL, log output, Receipt, Evidence, or model context.
+5. The loader **must not** report the token value, partial value, reversible encoding, or hash fingerprint that could identify the secret.
+6. Report only the classification string and the non-secret evidence items listed in **§14.7**.
+
+**§14.2.4 Multiple source ambiguity.** If more than one candidate variable is non-empty and the values differ, the loader must fail closed and STOP. It must not auto-select or heuristically choose between them.
+
+**§14.2.5 Temporary askpass.** The loader must create a temporary askpass script that:
+
+- Reads the token from a single-use environment variable (e.g., `VIBECODING_GH_TOKEN`) at runtime.
+- Does **not** contain the token inside the script file.
+- Is created with restrictive ACLs (`chmod 700` or equivalent).
+- Is deleted immediately after the Git operation completes.
+- Is not retained in any persistent location or backup.
+
+**§14.2.6 No SSH fallback.** The loader shall operate only over the HTTPS transport path. SSH fallback is permanently prohibited for this credential hardening scope.
+
+**§14.2.7 Token secrecy from model context.** The model (orchestrator, git-integrator, or any other role) must never receive the token value, a partial value, a hash, or any encoding from which the token could be derived. The model receives only:
+
+- The credential state classification string (e.g., `PROCESS_ENV_STALE`, `HTTPS_AUTH_AND_NETWORK_READY`).
+- Non-secret evidence items listed in **§14.7**.
+
+### §14.3 Two-Level Git Delivery Readiness
+
+For any FULL or LIGHTWEIGHT Work Order that includes a Draft PR Git endpoint, two readiness checks must execute before any Git write.
+
+**§14.3.1 Level 1 — Work Order Activation (Global Git Delivery Readiness).** Before the orchestrator activates the Work Order, the credential loader must verify:
+
+1. Canonical user-level token exists and is unique (no source ambiguity).
+2. A child process can load the token (injection test or equivalent signal).
+3. Authenticated GitHub identity matches the expected repository owner/collaborator.
+4. Target repository is readable.
+5. Repository permission reports `push=true` for the authenticated identity.
+6. Remote URL, target branch, and base branch match the approved Work Order.
+7. The same Git executable, HTTPS URL, credential injection method, and proxy path that will be used for the actual push successfully execute an authenticated `git ls-remote` against the target.
+8. The Draft PR endpoint is reachable and the PR exists.
+
+If any check fails:
+
+- The Work Order must not enter automatic execution.
+- The failure must not be discovered at git-integrator phase.
+- No push budget may be consumed.
+- A structured failure classification (**§14.6**) must be output, and the orchestrator must STOP.
+
+CONSULTATION_ONLY mode has no Git endpoint; Level 1 Git Delivery Readiness does not apply.
+
+**§14.3.2 Level 2 — git-integrator Activation Re-verification.** Immediately before a git-integrator model invocation starts Git write operations, the same credential loader and network path must re-verify:
+
+1. `USER_ENV_TOKEN_PRESENT` (re-read from user env).
+2. Child process token loaded (re-inject if necessary).
+3. Authenticated GitHub identity matches expected identity.
+4. Repository push permission.
+5. Remote branch current SHA.
+6. Authenticated `git ls-remote` succeeds.
+7. Target refspec is available for push.
+8. Proxy path is available.
+
+If Level 2 re-verification fails:
+
+- The git-integrator must not execute Git write operations.
+- The orchestrator must not take over Git writing.
+- No new commit may be created.
+- Resumption evidence must be returned and the process must STOP.
+
+### §14.4 Git Write Capability Control
+
+**§14.4.1 Read-only interfaces (may be called by orchestrator readiness):**
+
+| Interface | Purpose |
+|---|---|
+| `credential_source_probe` | Read user-level token presence without exposing value |
+| `authenticated_identity_probe` | Verify GitHub authenticated login |
+| `repo_permission_probe` | Verify repository push permission |
+| `authenticated_ls_remote` | Authenticated `git ls-remote` via inject+askpass |
+| `remote_and_pr_state_probe` | Read remote branch SHA and PR headRefOid |
+
+**§14.4.2 Write interfaces (only git-integrator invocation may call):**
+
+| Interface | Purpose |
+|---|---|
+| `stage_exact_manifest` | `git add` with approved manifest |
+| `create_normal_commit` | `git commit` with structured message |
+| `push_approved_refspec` | `git push` with approved remote/branch/refspec |
+| `create_or_update_draft_pr` | Create or update Draft PR body |
+| `verify_local_remote_pr_sha` | Final three-source SHA verification |
+
+**§14.4.3 Git write binding requirements.** Every Git write call must be bound to:
+
+- `work_order_id`/`version`/`digest`
+- `git_integrator_assignment_id`/`version`/`digest`
+- `git_integrator_role_invocation_id`
+- `git_integrator_model_invocation_id`
+- Frozen integration Packet ref
+- Candidate ref
+- Git operation ref
+- Exact staged manifest
+- Approved remote, branch, and refspec
+- Credential loader execution ID
+- Tool invocation ID
+
+A write call missing any of these bindings must be rejected.
+
+### §14.5 Role Boundary Enforcement
+
+- **orchestrator** calls read-only readiness interfaces only (**§14.4.1**). It must not directly perform `git commit`, `git push`, `stage_exact_manifest`, or `create_or_update_draft_pr`.
+- **git-integrator** is the sole role authorised to call Git write interfaces (**§14.4.2**), after approved Activation and Level 2 readiness.
+- Every Git write must record `caller_role=git-integrator` plus the corresponding role and model invocation IDs.
+- If git-integrator fails after Level 2 readiness, the orchestrator must not take over Git writing. The orchestrator may only report the failure and STOP.
+- The credential loader is a 21bao tool infrastructure responsibility, not an orchestrator business decision and not a git-integrator model output.
+
+### §14.6 Failure Classification & Retry
+
+**§14.6.1 Failure classes.** All Git runtime failures must be classified into exactly one of:
+
+| Class | Meaning |
+|---|---|
+| `PROCESS_ENV_STALE` | User-level token exists; parent process missing; child injection recovers |
+| `TOKEN_SOURCE_MISSING` | No token at user level or any canonical source |
+| `TOKEN_SOURCE_AMBIGUOUS` | Multiple non-empty sources with conflicting values |
+| `TOKEN_AUTH_FAILURE` | Token present but GitHub authentication fails |
+| `AUTHENTICATED_IDENTITY_MISMATCH` | Authenticated user does not match expected repository collaborator |
+| `REPO_PUSH_PERMISSION_FAILURE` | Authenticated identity lacks push permission |
+| `PROXY_PATH_FAILURE` | Configured proxy path fails; direct path may be tested |
+| `NETWORK_PATH_FAILURE` | Both proxy and direct HTTPS paths fail |
+| `REMOTE_PARENT_MISMATCH` | Remote ref does not point at expected parent commit |
+| `NON_FAST_FORWARD` | Local commit not a descendant of remote ref |
+| `REMOTE_ALREADY_UPDATED` | Push not needed; remote already at target SHA |
+
+**§14.6.2 Retry rules.**
+
+1. `PROCESS_ENV_STALE` must be recovered by user-level read and child-process injection; operator must not be asked to reconfigure the token.
+2. Readiness failures (Level 1 or Level 2) do not count as push budget consumption.
+3. After a push failure, the remote branch SHA and PR headRefOid must be read via authenticated API before any retry decision.
+4. If the remote is already updated to the target SHA, no retry push is permitted.
+5. A single controlled retry on an alternate HTTPS path is permitted only when:
+   - The primary push failed due to transport/proxy failure;
+   - The remote has not been updated; and
+   - The alternate path has passed a read-only `git ls-remote` test at Level 2.
+6. Blind repeated pushes and SSH fallback are permanently prohibited.
+
+### §14.7 Evidence Requirements (Non-Secret)
+
+Every credential loader and Git readiness call must produce evidence containing:
+
+- `credential_source_name`: the canonical variable name
+- `user_level_present`: boolean (read via subprocess)
+- `current_process_present`: boolean
+- `process_env_stale`: boolean (true if user-level present but process missing)
+- `child_process_loaded`: boolean
+- `authenticated_github_login`: the GitHub login string
+- `repo_push_permission`: the permission string (e.g., `admin`, `write`)
+- `remote_url_class`: e.g., `https_github`
+- `proxy_path_class`: `git_global_proxy` or `direct`
+- `authenticated_ls_remote_result`: `success` or `FAIL_reason`
+- `caller_role`: `orchestrator` or `git-integrator`
+- `role_invocation_id`: the role invocation identifier
+- `model_invocation_id`: the model invocation identifier
+- `local_sha`, `remote_sha`, `pr_head_ref_oid`: final three-source values
+- `askpass_temporary_file_deleted`: boolean (must be true after every Git operation)
+- `token_exposed_to_model_context`: must be false
+
+The evidence must not contain:
+
+- The token value, partial value, hash, fingerprint, or any encoding from which the token could be derived.
+- The askpass script content or file path token.
+- Any reversible transformation of the credential.
+
+### §14.8 Deterministic Tests
+
+The credential hardening rules must be tested with at least the following scenarios:
+
+1. User-level token present; parent process token absent → classification `PROCESS_ENV_STALE`; child injection recovers → `READY`.
+2. User-level and parent process tokens present and identical → `READY`.
+3. Multiple non-empty token sources with differing values → `TOKEN_SOURCE_AMBIGUOUS` → STOP.
+4. Token present but GitHub authentication fails → `TOKEN_AUTH_FAILURE` → STOP.
+5. Authenticated identity lacks repo push permission → `REPO_PUSH_PERMISSION_FAILURE` → STOP.
+6. Proxy path ls-remote succeeds; direct path fails → selection of proxy path for push.
+7. Level 1 (Global pre-Activation) passes; Level 2 (pre-git-integrator) re-verification fails → git write must not start.
+8. Orchestrator attempts to call a write interface → rejection with `caller_role_mismatch`.
+9. Git write called without git-integrator model invocation ID → rejection with `missing_binding`.
+10. git-integrator uses correct credential injection and askpass; push succeeds; three-source SHA verification passes → `DELIVERY_VERIFIED`.
+
+
+
 *End of V2 CANDIDATE_TRIPLE. Awaiting operator explicit acceptance in chat per §0.1.*
