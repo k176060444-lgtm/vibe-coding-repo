@@ -3072,12 +3072,21 @@ A role produces only its Artifact (`ROLE_COMPLETION_REPORT`, `STOP_REPORT`) and 
 | `ROW_SUBJECT_IS(OBJECT_REF)` | canonical object ref | current Receipt subject equals OBJECT_REF (no self-reference; verified at issuance check time) | registry row | n/a | no | n/a | n/a | n/a |
 | `ROW_OPERATION_IS(OPERATION_REF)` | canonical operation ref | current operation ref equals OPERATION_REF | registry row | n/a | no | n/a | n/a | n/a |
 | `SAME_OPERATION(ref...)` | 1+ operation refs | all refs share same operation id/version/digest (different from SAME_OBJECT which tests identical triple) | registry row | n/a | yes | FALSE | current operation only | n/a |
+
+| `OBJECT_CLASS_IS(CLASS)` | one of `ROLE_PRODUCED_ARTIFACT` / `GOVERNANCE_ARTIFACT_OR_APPROVAL` | object class matches current artifact | registry row | n/a | no | FALSE | current object class only | n/a |
+| `STATE_CREATED(RECEIPT_TYPE, INSTANCE_REF, STATE)` | canonical Receipt type (1st arg), concrete instance ref (2nd arg), canonical state value (3rd arg) | the specific Receipt INSTANCE has state equal to STATE | registry row | instance-bound via 2nd arg | no | FALSE if no CURRENT instance with that state | CURRENT instance only | n/a |
+| `DECISION(RECEIPT_TYPE, INSTANCE_REF, DECISION_VALUE)` | canonical Receipt type (1st arg), concrete instance ref (2nd arg), canonical decision value (3rd arg) | the specific Receipt INSTANCE has decision equal to DECISION_VALUE | registry row | instance-bound via 2nd arg | no | FALSE if no CURRENT instance with that decision | CURRENT instance only | n/a |
+| `CURRENT(RECEIPT_TYPE, INSTANCE_REF)` | canonical Receipt type (1st arg), concrete instance ref (2nd arg) | the specific Receipt INSTANCE is CURRENT | registry row | instance-bound via 2nd arg | no | FALSE if no CURRENT instance | `lifecycle_state_at_creation=CURRENT` AND no effective INVALIDATION/SUPERSESSION/REVOCATION on that instance | n/a |
 | `PACKET_CLASS_IS(CLASS)` | one of FULL_EXECUTION / LIGHTWEIGHT_WITH_PLANNER / LIGHTWEIGHT_DIRECT_TO_IMPLEMENTER / VERSION_GOVERNANCE / DRAFT_TO_READY_APPROVAL / MERGE_APPROVAL / BRANCH_DELETION_APPROVAL / CONSULTATION_SOURCE | packet class matches current operation | registry row | n/a | no | FALSE | always-current packet class | n/a |
 **Canonical operators:** `AND`, `OR`, `EXACTLY_ONE_OF`, `NOT`. (Implemented as `expr`-list predicates above.)
 
 **Canonical Evidence classes** (only `EVIDENCE_OF` may reference): listed per row in `Required Evidence Classes` column. `DECISION()` first argument is a canonical Receipt type, NEVER `TEST_RESULT` or any Evidence class.
 
 ### §10.3.12 Canonical Object / Reference Catalog
+
+All Object Types, concrete refs, role refs, operation refs, and Evidence subject refs used in the Registry. Each entry defines token name, class, identity structure, lifecycle, permissible stage/mode, and whether type-token or concrete-ref.
+
+### §10.3.10.2 Canonical Object / Reference Catalog
 
 All Object Types, concrete refs, role refs, operation refs, and Evidence subject refs used in the Registry. Each entry defines token name, class, identity structure, lifecycle, permissible stage/mode, and whether type-token or concrete-ref.
 
@@ -3090,13 +3099,32 @@ All Object Types, concrete refs, role refs, operation refs, and Evidence subject
 | `BRANCH_TRIPLE` | object triple | id+version+digest | n/a (post-Draft) | BRANCH_DELETION | concrete ref |
 | `SUBJECT_TRIPLE` | object triple | id+version+digest | n/a | INVALIDATION | concrete ref |
 | `SUPERSEDING_OBJECT_TRIPLE` | object triple | id+version+digest | n/a | SUPERSESSION | concrete ref |
-| `AUTHORISATION_RECEIPT_TRIPLE` | receipt-derived | subject Receipt id+version+digest | same as subject | all operator | concrete ref |
+| `AUTHORISATION_RECEIPT_TRIPLE` | receipt-derived | subject Receipt triple | Receipt lifecycle | operator all | concrete ref |
 | `SUBJECT_ARTIFACT_TRIPLE` | artifact triple | id+version+digest | ARTIFACT lifecycle | AV, EXPLORER, PLAN | concrete ref |
+| `INTAKE_SCOPE_PACKET` | packet | id+version+digest | PACKET lifecycle | INTAKE | concrete ref |
+| `INTAKE_EVIDENCE_PACKET` | packet | id+version+digest | PACKET lifecycle | INTAKE | concrete ref |
+| `ROLE_ACTIVATION_PACKET` | packet | id+version+digest | PACKET lifecycle | F, LL | concrete ref |
+| `ROLE_COMPLETION_REPORT` | artifact | id+version+digest | ARTIFACT lifecycle | all execution | concrete ref |
+| `ROLE_NODE_MODEL_ASSIGNMENT_BASELINE_PACKET` | packet | id+version+digest | PACKET lifecycle | ASSIGNMENT | concrete ref |
+| `IMPLEMENTATION_PLAN` | artifact | id+version+digest | ARTIFACT lifecycle | PLAN | concrete ref |
+| `IMPLEMENTATION_PLAN_APPROVAL_PACKET` | packet | id+version+digest | PACKET lifecycle | PLAN_APPROVAL | concrete ref |
+| `EXPLORER_ARTIFACT` | artifact | id+version+digest | ARTIFACT lifecycle | EXPLORER | concrete ref |
 | `GIT_INTEGRATOR_ROLE_TRIPLE` | role-derived | id+version+digest | ROLE lifecycle | GIT | type token |
+| `GIT_INTEGRATOR_ACTIVATION_EVIDENCE` | evidence | id+version+digest | EVIDENCE lifecycle | GIT | type token |
 | `GIT_INTEGRATOR_ACTIVATION_EVIDENCE_DRAFT_TO_READY` | evidence | id+version+digest | EVIDENCE lifecycle | DRAFT_TO_READY | concrete ref |
 | `GIT_INTEGRATOR_ACTIVATION_EVIDENCE_MERGE` | evidence | id+version+digest | EVIDENCE lifecycle | MERGE | concrete ref |
 | `GIT_INTEGRATOR_ACTIVATION_EVIDENCE_BD` | evidence | id+version+digest | EVIDENCE lifecycle | BD | concrete ref |
 | `SOURCE_EVIDENCE_OBJECTS` | evidence | id+version+digest | EVIDENCE lifecycle | PUBLIC_SAFETY | type token |
+| `TESTER_A_INPUT_PACKET` | packet | id+version+digest | PACKET lifecycle | TEST | concrete ref |
+| `TESTER_B_INPUT_PACKET` | packet | id+version+digest | PACKET lifecycle | TEST | concrete ref |
+| `TEST_EVIDENCE_PACKET` | packet | id+version+digest | PACKET lifecycle | TEST | concrete ref |
+| `REVIEW_INPUT_PACKET` | packet | id+version+digest | PACKET lifecycle | REVIEW | concrete ref |
+| `INTEGRATION_INPUT_FROZEN` | packet | id+version+digest | PACKET lifecycle | GIT | concrete ref |
+| `DRAFT_TO_READY_APPROVAL_PACKET` | packet | id+version+digest | PACKET lifecycle | DRAFT_TO_READY | concrete ref |
+| `MERGE_APPROVAL_PACKET` | packet | id+version+digest | PACKET lifecycle | MERGE | concrete ref |
+| `BRANCH_DELETION_APPROVAL_PACKET` | packet | id+version+digest | PACKET lifecycle | BD | concrete ref |
+| `CONSULTATION_SOURCE_PACKET` | packet | id+version+digest | PACKET lifecycle | CONSULTATION | concrete ref |
+| `STOP_REPORT` | artifact | id+version+digest | ARTIFACT lifecycle | STOP | concrete ref |
 | `VERSION_GOVERNANCE_SCOPE_PACKET` | packet | id+version+digest | PACKET lifecycle | V0 | concrete ref |
 | `VERSION_INVENTORY_ARTIFACT` | artifact | id+version+digest | ARTIFACT lifecycle | V1 | concrete ref |
 | `VERSION_CHANGE_PROPOSAL_ARTIFACT` | artifact | id+version+digest | ARTIFACT lifecycle | V2 | concrete ref |
@@ -3112,28 +3140,10 @@ All Object Types, concrete refs, role refs, operation refs, and Evidence subject
 | `REVIEWER_A_ROLE_TRIPLE` | role-derived | id+version+digest | ROLE lifecycle | REVIEW | concrete ref |
 | `REVIEWER_B_ROLE_TRIPLE` | role-derived | id+version+digest | ROLE lifecycle | REVIEW | concrete ref |
 | `VERSION_OPERATION_REF` | operation ref | id+version+digest | n/a (governance) | V0–V8 | concrete ref |
+| `READY_TRANSITION_COMPLETION_REPORT` | completion report | id+version+digest | REPORT lifecycle | DRAFT_TO_READY | concrete ref |
+| `MERGE_COMPLETION_REPORT` | completion report | id+version+digest | REPORT lifecycle | MERGE | concrete ref |
+| `BRANCH_DELETION_COMPLETION_REPORT` | completion report | id+version+digest | REPORT lifecycle | BD | concrete ref |
 
-
-
-
-**Constraints:**
-
-- `CURRENT(RECEIPT_TYPE)` returns the most recent Receipt with `lifecycle_state_at_creation` = `CURRENT` AND no effective `INVALIDATION`, `SUPERSESSION`, or `REVOCATION` on the same subject/object triple.
-- `STATE_CREATED(RECEIPT_TYPE, STATE_VALUE)` queries the CURRENT Receipt's `state_created`, NEVER historical.
-- A missing Receipt (no CURRENT instance) returns FALSE (denying dependency), NOT an error.
-- `NOT_APPLICABLE_IF(condition, expr)` MUST be outermost. If condition TRUE → row NOT_APPLICABLE (no Receipt, no state). If condition FALSE → expr evaluated normally.
-- NOT_APPLICABLE, PASS, FAIL are three distinct states for the `state_created` column: NOT_APPLICABLE (row not instantiated), PASS (success state created), FAIL (failure/stop state created).
-- `Prerequisite Receipt Types` column contains only canonical Receipt type names (or `∅` for `TRUE`). Evidence, Object, or natural-language are forbidden.
-- `Prerequisite Object Types` column contains only canonical object type names or `∅`. Receipt or natural-language are forbidden.
-- Evidence judgment uses `EVIDENCE_OF(CONDITION, SUBJECT_REF)` only; it MAY appear in the expression column via conjunction.
-
-**Forbidden (unparseable) forms:**
-- `MODE_IS(FULL) OR MODE_IS(LIGHTWEIGHT)` as a free-floating fragment (must be canonical `OR(MODE_IS(FULL), MODE_IS(LIGHTWEIGHT))`)
-- `FULL → ...` / `LIGHTWEIGHT with ...` / `CONSULTATION_ONLY → ...` — must use `MODE_IS(...)` predicates
-- `CURRENT Receipt for each/all ...` — must enumerate `CURRENT(RECEIPT_TYPE)` calls per V0–V7 element
-- `as applicable`, `upstream ...`, `subject-class-specific ...`, `superseding object Receipt`, `per stop class Evidence`, etc. — all unparseable bare prose
-
-**Citation example:** `AND(CURRENT(GIT_INTEGRATION_GATE_PASS_RECEIPT), CURRENT(PRE_DRAFT_GIT_INTEGRATOR_BINDING_RECEIPT), OR(MODE_IS(FULL), MODE_IS(LIGHTWEIGHT)))`.
 
 #### §10.3.10.1 Authority Matrix — Registry Issuer Closure
 
@@ -3184,7 +3194,7 @@ Canonical receipt type registry (10 canonical columns):
 | `STOP_RECEIPT` | vibedev/orchestrator (only) | STOP_REPORT Artifact + Evidence; or hard STOP signal; or operator instruction (`TEST_GATE_FAIL_RECEIPT`, `REVIEW_GATE_FAIL_RECEIPT`, `GIT_INTEGRATION_GATE_FAIL_RECEIPT` trigger STOP) | subject STOP reason triple | `STOP_REPORT` | `ARTIFACT_VALIDATION_RECEIPT` | AND(CURRENT(ARTIFACT_VALIDATION_RECEIPT)) | MODEL_INVOCATION_RECORD, OPERATOR_DECISION_RECORD, STOP signal catalog entry | STOPPED | TASK_STOPPED / WORKFLOW_STOPPED |
 | `INVALIDATION_RECEIPT` | vibedev/orchestrator | Evidence of invalidation condition | single Artifact, Evidence, Packet, or Receipt triple | `SUBJECT_TRIPLE` | `ARTIFACT_VALIDATION_RECEIPT` | AND(CURRENT(ARTIFACT_VALIDATION_RECEIPT), STATE_CREATED(ARTIFACT_VALIDATION_RECEIPT, ARTIFACT_VALIDATED)) | COMMAND_RESULT, MODEL_INVOCATION_RECORD, OPERATOR_DECISION_RECORD | INVALIDATED | SUBJECT_INVALIDATED |
 | `SUPERSESSION_RECEIPT` | vibedev/orchestrator | Evidence of supersession + superseding-object Receipt triple (canonical object reference; uses `STATE_CREATED(SUPERSESSION_RECEIPT, SUPERSEDED)` downstream) | single Artifact, Evidence, Packet, or Receipt triple | `SUPERSEDING_OBJECT_TRIPLE` | `ARTIFACT_VALIDATION_RECEIPT` | AND(CURRENT(ARTIFACT_VALIDATION_RECEIPT), STATE_CREATED(ARTIFACT_VALIDATION_RECEIPT, ARTIFACT_VALIDATED)) | FILE_SNAPSHOT, GIT_OBJECT | SUPERSEDED | OBJECT_SUPERSEDED |
-| `OPERATOR_REVOCATION_RECEIPT` | operator (only) | operator authority | single operator-authorisation Receipt triple | `AUTHORISATION_RECEIPT_TRIPLE` | ∅ | AND(CURRENT(OPERATOR_INTAKE_SCOPE_APPROVAL_RECEIPT, AUTHORISATION_RECEIPT_TRIPLE), ROW_SUBJECT_IS(AUTHORISATION_RECEIPT_TRIPLE)) | OPERATOR_DECISION_RECORD | REVOKED | AUTHORISATION_REVOKED |
+| `OPERATOR_REVOCATION_RECEIPT` | operator (only) | operator authority | single operator-authorisation Receipt triple | `AUTHORISATION_RECEIPT_TRIPLE` | ∅ | AND(EXACTLY_ONE_OF(CURRENT(OPERATOR_INTAKE_SCOPE_APPROVAL_RECEIPT, AUTHORISATION_RECEIPT_TRIPLE), CURRENT(OPERATOR_SUBMODE_SELECTION_RECEIPT, AUTHORISATION_RECEIPT_TRIPLE), CURRENT(OPERATOR_WORK_ORDER_APPROVAL_RECEIPT, AUTHORISATION_RECEIPT_TRIPLE), CURRENT(OPERATOR_IMPLEMENTATION_PLAN_APPROVAL_RECEIPT, AUTHORISATION_RECEIPT_TRIPLE), CURRENT(OPERATOR_DRAFT_TO_READY_AUTHORIZATION_RECEIPT, AUTHORISATION_RECEIPT_TRIPLE), CURRENT(OPERATOR_MERGE_AUTHORIZATION_RECEIPT, AUTHORISATION_RECEIPT_TRIPLE), CURRENT(OPERATOR_BRANCH_DELETION_AUTHORIZATION_RECEIPT, AUTHORISATION_RECEIPT_TRIPLE), CURRENT(OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT, AUTHORISATION_RECEIPT_TRIPLE), CURRENT(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT, AUTHORISATION_RECEIPT_TRIPLE)), ROW_SUBJECT_IS(AUTHORISATION_RECEIPT_TRIPLE)) | OPERATOR_DECISION_RECORD | REVOKED | AUTHORISATION_REVOKED |
 | `OPERATOR_INTAKE_SCOPE_APPROVAL_RECEIPT` | operator (only) | operator authority (may be followed by `OPERATOR_REVOCATION_RECEIPT`) | intake scope packet triple | `INTAKE_SCOPE_PACKET` | ∅ | AND(EVIDENCE_OF(OPERATOR_DECISION, INTAKE_SCOPE_PACKET), ROW_SUBJECT_IS(INTAKE_SCOPE_PACKET)) | OPERATOR_DECISION_RECORD | APPROVED | OPERATOR_APPROVED_INTAKE_SCOPE |
 | `OPERATOR_SUBMODE_SELECTION_RECEIPT` | operator (only) | operator authority | `SUBMODE_DECLARATION` triple | `SUBMODE_DECLARATION` | `OPERATOR_INTAKE_SCOPE_APPROVAL_RECEIPT` | AND(CURRENT(OPERATOR_INTAKE_SCOPE_APPROVAL_RECEIPT)) | OPERATOR_DECISION_RECORD | SELECTED | OPERATOR_SELECTED_SUBMODE |
 | `OPERATOR_ROLE_NODE_MODEL_ASSIGNMENT_APPROVAL_RECEIPT` | operator (only) | operator authority | assignment baseline packet triple | `ROLE_NODE_MODEL_ASSIGNMENT_BASELINE_PACKET` | `OPERATOR_SUBMODE_SELECTION_RECEIPT` | AND(CURRENT(OPERATOR_SUBMODE_SELECTION_RECEIPT)) | OPERATOR_DECISION_RECORD | APPROVED | OPERATOR_APPROVED_ROLE_NODE_MODEL_ASSIGNMENT_BASELINE |
@@ -3198,7 +3208,7 @@ Canonical receipt type registry (10 canonical columns):
 | `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT` | operator (only) | operator authority (§3.8 V5) | VERSION_EXECUTION_AUTHORIZATION_PACKET triple | `VERSION_EXECUTION_AUTHORIZATION_PACKET` | `VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT` | AND(CURRENT(VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT), STATE_CREATED(VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT, VERSION_CHECKPOINT_REVIEWED)) | OPERATOR_DECISION_RECORD | AUTHORIZED | VERSION_EXECUTION_AUTHORIZED |
 | `VERSION_QUALIFICATION_PASS_RECEIPT` | vibedev/orchestrator | V5 operator authorization + V6 execution Evidence (§3.8 V7) | VERSION_QUALIFICATION_PACKET triple | `VERSION_QUALIFICATION_PACKET` | `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT` | AND(CURRENT(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT), STATE_CREATED(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT, VERSION_EXECUTION_AUTHORIZED)) | FILE_SNAPSHOT, GIT_OBJECT, MODEL_INVOCATION_RECORD, TEST_RESULT | PASS | VERSION_QUALIFICATION_PASS |
 | `VERSION_QUALIFICATION_FAIL_RECEIPT` | vibedev/orchestrator | V5 operator authorization + V6 execution Evidence (§3.8 V7) | VERSION_QUALIFICATION_PACKET triple | `VERSION_QUALIFICATION_PACKET` | `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT` | AND(CURRENT(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT), STATE_CREATED(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT, VERSION_EXECUTION_AUTHORIZED)) | FILE_SNAPSHOT, GIT_OBJECT, MODEL_INVOCATION_RECORD, TEST_RESULT | FAIL | VERSION_QUALIFICATION_FAIL |
-| `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT` | vibedev/orchestrator | V0–V7 explicit list + lifecycle management (`STOP_RECEIPT`, `INVALIDATION_RECEIPT`, `SUPERSESSION_RECEIPT`, `CONSULTATION_ENDPOINT_RECEIPT`, `PACKET_CONSUMPTION_RECEIPT`, `PUBLIC_PROJECTION_SAFETY_CHECK_RECEIPT`, `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT`) | VERSION_CLOSEOUT_REPORT triple | `VERSION_CLOSEOUT_REPORT`, `VERSION_GOVERNANCE_SCOPE_PACKET`, `VERSION_INVENTORY_ARTIFACT`, `VERSION_CHANGE_PROPOSAL_ARTIFACT`, `VERSION_PREPARATION_PACKET`, `VERSION_PRE_EXECUTION_CHECKPOINT_PACKET`, `VERSION_EXECUTION_AUTHORIZATION_PACKET`, `VERSION_EXECUTION_REPORT`, `VERSION_EXECUTION_EVIDENCE_PACKET`, `VERSION_QUALIFICATION_PACKET` | `OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT`, `VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT`, `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT`, `VERSION_QUALIFICATION_PASS_RECEIPT`, `VERSION_QUALIFICATION_FAIL_RECEIPT`, `PACKET_VALIDATION_RECEIPT`, `ARTIFACT_VALIDATION_RECEIPT` | AND(CURRENT(PACKET_VALIDATION_RECEIPT, VERSION_GOVERNANCE_SCOPE_PACKET), CURRENT(ARTIFACT_VALIDATION_RECEIPT, VERSION_INVENTORY_ARTIFACT), CURRENT(ARTIFACT_VALIDATION_RECEIPT, VERSION_CHANGE_PROPOSAL_ARTIFACT), CURRENT(OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT), CURRENT(VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT), OR(AND(STATE_CREATED(VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT, VERSION_CHECKPOINT_REVIEWED), CURRENT(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT), STATE_CREATED(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT, VERSION_EXECUTION_AUTHORIZED), EXACTLY_ONE_OF(STATE_CREATED(VERSION_QUALIFICATION_PASS_RECEIPT, VERSION_QUALIFICATION_PASS), STATE_CREATED(VERSION_QUALIFICATION_FAIL_RECEIPT, VERSION_QUALIFICATION_FAIL))), AND(STATE_CREATED(VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT, VERSION_CHECKPOINT_BLOCKED)), SAME_OPERATION(VERSION_GOVERNANCE_SCOPE_PACKET, VERSION_INVENTORY_ARTIFACT, VERSION_CHANGE_PROPOSAL_ARTIFACT, VERSION_PREPARATION_PACKET, VERSION_PRE_EXECUTION_CHECKPOINT_PACKET, VERSION_EXECUTION_AUTHORIZATION_PACKET, VERSION_EXECUTION_REPORT, VERSION_EXECUTION_EVIDENCE_PACKET, VERSION_QUALIFICATION_PACKET, VERSION_CLOSEOUT_REPORT))) | all V0–V7 Evidence classes | CLOSED / CLOSED_AFTER_FAILURE_STOP | VERSION_GOVERNANCE_CLOSED_PASS / VERSION_GOVERNANCE_CLOSED_AFTER_FAILURE_STOP |
+| `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT` | vibedev/orchestrator | V0–V7 explicit list + lifecycle management (`STOP_RECEIPT`, `INVALIDATION_RECEIPT`, `SUPERSESSION_RECEIPT`, `CONSULTATION_ENDPOINT_RECEIPT`, `PACKET_CONSUMPTION_RECEIPT`, `PUBLIC_PROJECTION_SAFETY_CHECK_RECEIPT`, `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT`) | VERSION_CLOSEOUT_REPORT triple | `VERSION_CLOSEOUT_REPORT`, `VERSION_GOVERNANCE_SCOPE_PACKET`, `VERSION_INVENTORY_ARTIFACT`, `VERSION_CHANGE_PROPOSAL_ARTIFACT`, `VERSION_PREPARATION_PACKET`, `VERSION_PRE_EXECUTION_CHECKPOINT_PACKET`, `VERSION_EXECUTION_AUTHORIZATION_PACKET`, `VERSION_EXECUTION_REPORT`, `VERSION_EXECUTION_EVIDENCE_PACKET`, `VERSION_QUALIFICATION_PACKET` | `OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT`, `VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT`, `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT`, `VERSION_QUALIFICATION_PASS_RECEIPT`, `VERSION_QUALIFICATION_FAIL_RECEIPT`, `PACKET_VALIDATION_RECEIPT`, `ARTIFACT_VALIDATION_RECEIPT` | AND(SAME_OPERATION(VERSION_GOVERNANCE_SCOPE_PACKET, VERSION_INVENTORY_ARTIFACT, VERSION_CHANGE_PROPOSAL_ARTIFACT, VERSION_PREPARATION_PACKET, VERSION_PRE_EXECUTION_CHECKPOINT_PACKET, VERSION_EXECUTION_AUTHORIZATION_PACKET, VERSION_EXECUTION_REPORT, VERSION_EXECUTION_EVIDENCE_PACKET, VERSION_QUALIFICATION_PACKET, VERSION_CLOSEOUT_REPORT), CURRENT(PACKET_VALIDATION_RECEIPT, VERSION_GOVERNANCE_SCOPE_PACKET), CURRENT(ARTIFACT_VALIDATION_RECEIPT, VERSION_INVENTORY_ARTIFACT), CURRENT(ARTIFACT_VALIDATION_RECEIPT, VERSION_CHANGE_PROPOSAL_ARTIFACT), CURRENT(OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT), CURRENT(VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT), EXACTLY_ONE_OF(AND(STATE_CREATED(VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT, VERSION_CHECKPOINT_REVIEWED), CURRENT(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT), STATE_CREATED(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT, VERSION_EXECUTION_AUTHORIZED), STATE_CREATED(VERSION_QUALIFICATION_PASS_RECEIPT, VERSION_QUALIFICATION_PASS)), AND(STATE_CREATED(VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT, VERSION_CHECKPOINT_REVIEWED), CURRENT(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT), STATE_CREATED(OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT, VERSION_EXECUTION_AUTHORIZED), STATE_CREATED(VERSION_QUALIFICATION_FAIL_RECEIPT, VERSION_QUALIFICATION_FAIL), CURRENT(STOP_RECEIPT)), AND(STATE_CREATED(VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT, VERSION_CHECKPOINT_BLOCKED)))) | all V0–V7 Evidence classes | CLOSED / CLOSED_AFTER_FAILURE_STOP | VERSION_GOVERNANCE_CLOSED_PASS / VERSION_GOVERNANCE_CLOSED_AFTER_FAILURE_STOP |
 
 A Receipt is invalid if the issuer lacks authority, or the subject / prerequisite / evidence refs do not match (triggers `RECEIPT_ISSUER_UNAUTHORIZED`, `RECEIPT_SUBJECT_BINDING_MISMATCH`, `RECEIPT_PREREQUISITE_MISSING`, or `RECEIPT_EVIDENCE_INSUFFICIENT` as applicable). A duplicate receipt type in the registry triggers `RECEIPT_REGISTRY_DUPLICATE_TYPE → STOP`. A receipt type missing required registry fields triggers `RECEIPT_REGISTRY_FIELD_INCOMPLETE → STOP`. Conflating a `state_created` business workflow state with a receipt type identifier triggers `RECEIPT_TYPE_AND_STATE_CREATED_CONFLATED → STOP`.
 
