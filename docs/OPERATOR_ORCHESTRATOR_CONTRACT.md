@@ -429,7 +429,7 @@ Version compatibility layers **must not** alter the following governance semanti
 
 #### §3.8.13 Version Governance Object Bindings
 
-The V0–V8 stages defined above are bound to Packet, Artifact, and Receipt objects per §10.3.14. V3 preparation approval must not authorise real installation. V5 second confirmation is the point at which the exact version, action, node / profile, backup / rollback point, and qualification plan are authorised. Any change to target version, component, node / profile, action, backup / rollback point, or qualification plan makes the V5 authorisation stale.
+The V0–V8 stages defined above are bound to Packet, Artifact, and Receipt objects per §10.3.14. V3 preparation approval must not authorise real installation. V4 checkpoint Packet must be reviewed by operator; the review Receipt must not substitute for V5 authorisation. V5 second confirmation is the point at which the exact version, action, node / profile, backup / rollback point, and qualification plan are authorised. V6 execution must read the V5 frozen Packet only; execution Evidence must be recorded independently and must not write back into the V5 Packet. Any change to target version, component, node / profile, action, backup / rollback point, or qualification plan makes the V5 authorisation stale. Any V4/V5/V6 object conflation triggers `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION → STOP`.
 
 ## §4. VIBECODING_MODE and Entry Gates
 
@@ -2378,7 +2378,7 @@ The following items **remain** to be finalised by operator in the future operato
 - task-specific role linear order, concurrency, and handoff topology;
 - task-specific test / review choreography;
 - workspace and command implementation;
-- packet / receipt physical storage format (logical schema fixed in §10.3);
+- packet / receipt physical storage format (logical schema provisionally fixed in §10.3 — `PROVISIONAL_ARTIFACT_EVIDENCE_SCHEMA_PENDING_GRAY4_VALIDATION`);
 - closeout schema;
 - complete `VIBECODING_MODE` state machine.
 
@@ -2399,7 +2399,7 @@ Until the operational workflow is formally accepted and `OPERATIONAL_PHASE` cuto
 
 ### §8.4 Receipt Linkage
 
-This contract **does not** fix receipt counts. Each applicable gate produces an associable, auditable receipt / trace / verdict / closeout artifact. The canonical governance fields, authority matrix, and lineage rules for Artifact / Evidence / Packet / Receipt objects are fixed in §10.3. Physical storage, file format, and ledger implementation details live in the runtime / evidence spec.
+This contract **does not** fix receipt counts. Each applicable gate produces an associable, auditable receipt / trace / verdict / closeout artifact. The canonical governance fields, authority matrix, and lineage rules for Artifact / Evidence / Packet / Receipt objects are provisionally fixed in §10.3 (status: `PROVISIONAL_ARTIFACT_EVIDENCE_SCHEMA_PENDING_GRAY4_VALIDATION`). Physical storage, file format, and ledger implementation details live in the runtime / evidence spec.
 
 ### §8.5 Evidence Levels
 
@@ -2532,7 +2532,7 @@ where `KIND` is one of:
 
 Only `DRIFT_STOP`, `HARD_STOP`, and `RECOVERY_BUDGET_STOP` kinds form a current-execution STOP. `AUDIT_DEVIATION`, `AUDIT_UNKNOWN`, and `FAIL_CLOSED_SUCCESS` are historical / protective record states and **must not** be reinterpreted as new drift or success endpoint.
 
-**Machine-parseable rule.** Any entry that is missing the canonical backtick `signal_id` or has its canonical ID determined only by `legacy_display_index` is invalid. After this round the catalog contains exactly 206 top-level entries, 206 unique canonical signal IDs, 56 unique one-to-one legacy indices, 0 duplicate canonical ID, 0 parenthetical-only definition, 0 nonstandard subject definition, and 0 logical-entry content after metadata suffix.
+**Machine-parseable rule.** Any entry that is missing the canonical backtick `signal_id` or has its canonical ID determined only by `legacy_display_index` is invalid. After this round the catalog contains exactly 215 top-level entries, 215 unique canonical signal IDs, 56 unique one-to-one legacy indices, 0 duplicate canonical ID, 0 parenthetical-only definition, 0 nonstandard subject definition, and 0 logical-entry content after metadata suffix.
 - `PROFILE_TREATED_AS_NODE` — treating a profile as a node; [legacy_display_index=(a), signal_kind=DRIFT_STOP]
 - `ROLE_TRIMMING_OR_SUBSTITUTION` — role trimming — trimming the roles / gates required by the operator-selected entry constitutes drift. `FULL_9_ROLE_VIBECODING`: complete 9-role must not be trimmed. `LIGHTWEIGHT_OPERATION`: executes operator-approved actual role set. Named-but-not-executed, no distinct model invocation, shared invocation across roles, multi-role response reuse, and generic-command-only role completion are all drift; [legacy_display_index=(b), signal_kind=DRIFT_STOP]
 - `SIMULATION_TREATED_AS_REAL_EXECUTION` — substituting simulation for real execution; [legacy_display_index=(c), signal_kind=DRIFT_STOP]
@@ -2717,7 +2717,7 @@ Only `DRIFT_STOP`, `HARD_STOP`, and `RECOVERY_BUDGET_STOP` kinds form a current-
 - `OBJECT_LINEAGE_CYCLE_DETECTED` — the Artifact / Evidence / Packet / Receipt DAG contains a cycle; [signal_kind=DRIFT_STOP]
 - `ARTIFACT_PROVENANCE_INCOMPLETE` — an Artifact is missing required provenance fields (producer role, assignment/Activation/attempt/invocation refs, input refs); [signal_kind=DRIFT_STOP]
 - `ARTIFACT_CLAIM_WITHOUT_EVIDENCE` — an Artifact contains a substantive claim (`claim_id`) that is not backed by at least one Evidence record; [signal_kind=DRIFT_STOP]
-- `ARTIFACT_VALIDATION_RECEIPT_MISSING` — an Artifact requiring validation has no corresponding `PACKET_VALIDATION_RECEIPT` or equivalent validation receipt; [signal_kind=DRIFT_STOP]
+- `ARTIFACT_VALIDATION_RECEIPT_MISSING` — an Artifact requiring validation has no corresponding `ARTIFACT_VALIDATION_RECEIPT` or equivalent role/Explorer/Plan validation receipt; [signal_kind=DRIFT_STOP]
 - `EVIDENCE_SOURCE_UNTRUSTWORTHY` — Evidence is sourced from a trust domain or source identity that is not operator-approved for the current mode; [signal_kind=DRIFT_STOP]
 - `EVIDENCE_RAW_PAYLOAD_MISSING` — Evidence record lacks a `raw_payload_ref` / `raw_digest` or the referenced raw payload is inaccessible; [signal_kind=DRIFT_STOP]
 - `EVIDENCE_NORMALIZATION_MISMATCH` — the `normalized_observation` in an Evidence record contradicts the raw payload or omits a material fact present in the raw payload; [signal_kind=DRIFT_STOP]
@@ -2739,6 +2739,16 @@ Only `DRIFT_STOP`, `HARD_STOP`, and `RECOVERY_BUDGET_STOP` kinds form a current-
 - `VERSION_GOVERNANCE_PACKET_BINDING_MISMATCH` — a §3.8 version governance stage references a Packet or Receipt that does not match the current version governance operation's scope; [signal_kind=DRIFT_STOP]
 - `VERSION_EXECUTION_AUTHORIZATION_STALE` — a §3.8 V5 second confirmation authorisation has become stale because the target version, component, node/profile, action, backup/rollback point, or qualification plan changed; [signal_kind=DRIFT_STOP]
 - `VERSION_GATE_BYPASSED_BY_WORK_ORDER` — a Work Order attempts to perform a Hermes / OpenCode version change that should have been routed through §3.8 HERMES_OPENCODE_VERSION_GOVERNANCE_GATE; [signal_kind=DRIFT_STOP]
+
+- `CONTRACT_SECTION_IDENTIFIER_COLLISION` — two or more sections share the same heading path within the contract; [signal_kind=DRIFT_STOP]
+- `OBJECT_IDENTITY_ALIAS_MISMATCH` — a type-specific identity alias (`artifact_id`, `packet_id`, `receipt_id`, `evidence_id`, `evidence_version`, `projection_id`, `projection_digest`, etc.) does not match the corresponding common envelope field; [signal_kind=DRIFT_STOP]
+- `CLAIM_REFERENCE_BINDING_INCOMPLETE` — a cross-object Claim reference uses only `claim_id` without the required `containing_artifact_ref + claim_id + claim_digest` triple; [signal_kind=DRIFT_STOP]
+- `PUBLIC_PROJECTION_OBJECT_CLASS_UNDEFINED` — a `PUBLIC_EVIDENCE_PROJECTION` is used without being classified as a derived Artifact (`PUBLIC_EVIDENCE_PROJECTION_ARTIFACT`) or other defined object type; [signal_kind=DRIFT_STOP]
+- `RECEIPT_LIFECYCLE_MUTATED_IN_PLACE` — a Receipt's `lifecycle_state` was changed in place instead of recording the transition via an independent append-only Receipt; [signal_kind=DRIFT_STOP]
+- `RECEIPT_BUSINESS_STATE_LIFECYCLE_CONFLATION` — the business workflow state (`state_created`) is conflated with the Receipt's own lifecycle state; [signal_kind=DRIFT_STOP]
+- `CONSULTATION_REQUIRED_EVIDENCE_OR_AUTHORIZATION_OBJECT_FORBIDDEN` — a required common governance object (operator approval Receipt, Evidence, model invocation Evidence, public projection, invalidation/supersession Receipt) is missing in Consultation mode, or a forbidden object (non-orchestrator assignment/Activation, candidate, test/review Gate, Integration/Git/Post-Draft) is present; [signal_kind=DRIFT_STOP]
+- `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION` — a V4/V5/V6 version governance object is used for a purpose that belongs to a different stage (e.g., V4 checkpoint substituting for V5 authorisation, V6 execution evidence written back into V5 Packet); [signal_kind=DRIFT_STOP]
+- `EVIDENCE_OBJECT_DIGEST_MISSING` — an Evidence record lacks `evidence_version` or `evidence_digest` (canonical_digest of the Evidence object itself, distinct from `raw_digest`); [signal_kind=DRIFT_STOP]
 
 ### §10.2 Drift Handling
 
@@ -2762,7 +2772,7 @@ An Artifact claim is **not** Evidence. An Evidence collection that has not been 
 
 #### §10.3.2 Common Object Envelope
 
-Artifact, Packet, and Receipt objects must include at least:
+All four governance object types (Artifact, Evidence, Packet, Receipt) share the following common fields:
 
 - `object_id` — unique identifier within governance scope
 - `object_type` — type classifier from the applicable type registry
@@ -2770,19 +2780,33 @@ Artifact, Packet, and Receipt objects must include at least:
 - `object_version` — version of this specific object (monotonic)
 - `canonical_digest` — SHA-256 hex digest of the canonical serialization
 - `created_at` — RFC 3339 UTC timestamp
-- `producer_or_issuer_identity` — role, node, or entity that produced or issued the object
+- `producer_or_collector_or_issuer_identity` — role, node, or entity that produced, collected, or issued the object
 - `work_order_or_governance_operation_ref` — `id + version + digest` of the governing Work Order or governance operation
-- `execution_record_ref` — `id + version + digest` of the governing execution record
-- `lifecycle_state` — current lifecycle state per §10.3.8
+- `lifecycle_state` — current lifecycle state per the type-specific lifecycle registry (§10.3.8 for Packet, §10.3.9 for Receipt, §10.3.5 for Artifact, §10.3.7 for Evidence)
 - `supersedes_ref` — `id + version + digest` of the object this one supersedes (or null)
 
-Evidence may originate from an external source producer. When it does, the Evidence record must additionally record:
+`execution_record_ref` — `id + version + digest` of the governing execution record. This field is **conditionally required**: when an execution record exists (post-Activation), it must be populated. For pre-execution governance objects (operator approval Receipts, pre-Activation governance objects), the value must be explicitly `NOT_APPLICABLE` with a reason; a fabricated or stale reference is forbidden.
+
+Evidence additionally records:
 
 - `collector_identity` — role or node that collected the evidence
 - `collection_method` — how the evidence was collected (command, API call, file read, etc.)
 - `source_identity` — the external source (host, URL, file path, process)
 - `observed_at` — RFC 3339 UTC timestamp of observation
-- `integrity_digest` — SHA-256 hex digest of the raw payload at collection time
+- `raw_integrity_digest` — SHA-256 hex digest of the raw payload at collection time
+
+
+
+Type-specific field aliases (e.g., `artifact_id` / `artifact_version` / `artifact_digest` for Artifact, `packet_id` / `packet_version` / `packet_digest` for Packet, `receipt_id` / `receipt_version` / `receipt_digest` for Receipt, `evidence_id` / `evidence_version` / `evidence_digest` for Evidence) are **mandatory aliases** of the common envelope fields. The following equivalences are enforced:
+
+- `artifact_id == object_id`, `artifact_version == object_version`, `artifact_digest == canonical_digest`
+- `packet_id == object_id`, `packet_version == object_version`, `packet_digest == canonical_digest`
+- `receipt_id == object_id`, `receipt_version == object_version`, `receipt_digest == canonical_digest`
+- `evidence_id == object_id`, `evidence_version == object_version`, `evidence_digest == canonical_digest`
+
+Any alias inconsistency triggers `OBJECT_IDENTITY_ALIAS_MISMATCH → STOP`.
+
+`raw_digest` (in Evidence) is the digest of the raw payload only and must not be conflated with `evidence_digest` / `canonical_digest` of the Evidence object itself.
 
 #### §10.3.3 Object References (Triple Binding)
 
@@ -2824,9 +2848,9 @@ Minimum artifact types:
 
 #### §10.3.6 Claim
 
-Every substantive conclusion in an Artifact must use a stable `claim_id`. Each Claim must record at least:
+Every substantive conclusion in an Artifact must use a stable `claim_id`. Claim is a **canonical embedded subobject** within an Artifact; its full content is covered by the containing Artifact's `canonical_digest`. Each Claim must record at least:
 
-- `claim_id`
+- `claim_id` — unique within the containing Artifact
 - `claim_type`
 - `statement` — the substantive assertion
 - `producer` — role or entity that made the claim
@@ -2834,6 +2858,8 @@ Every substantive conclusion in an Artifact must use a stable `claim_id`. Each C
 - `evidence_refs` — one or more `id + version + digest` Evidence references
 - `status` — one of `ASSERTED`, `VERIFIED`, `CONTRADICTED`
 - `limitations` — any known limitations, assumptions, or scope restrictions
+
+**Cross-object Claim references**: when a Claim is referenced from outside its containing Artifact (from another Artifact, Packet, or Receipt), the reference must use the triple `containing_artifact_ref + claim_id + claim_digest`. A bare `claim_id` without the containing Artifact triple is forbidden. If a Claim is later promoted to an independent object, it must carry the full common envelope (§10.3.2); a `claim_id` alone must not serve as a cross-object reference.
 
 Repo / file state, test results, model invocations, route / node state, candidate tree, push / PR / Gate / review / post-merge conclusions must each be bound to at least one Evidence record. A bare "verified / tests pass / remote consistent / no issues" assertion must not form a PASS without supporting Evidence.
 
@@ -2884,14 +2910,14 @@ A Packet must record at least:
 
 - `packet_id` / `type` / `version` / `digest`
 - `assembler_identity` / `assembler_function`
-- `deterministic_ordered_membership` — ordered list of `id + version + digest` triples
+- `deterministic_ordered_membership` — ordered list of `id + version + digest` triples (members may be Artifact, Evidence, Receipt, or sub-Packet; unapproved object types must not enter membership)
 - `freeze_state` / `freeze_time` / `freeze_receipt_ref`
 - `intended_consumer_role` / `intended_consumer_stage`
 - `scope_ref` / `requirement_ref` / `candidate_ref`
 - `excluded_objects` — list of objects considered but excluded, with reason
 - `sensitivity_classification` / `public_projection_ref`
 
-After freeze, membership and order are immutable. A member version change requires a new Packet version; the old Packet enters `INVALIDATED` or `REVALIDATION_REQUIRED`. A consumer must bind to an exact Packet `id + version + digest` triple; implicit `latest` resolution is forbidden.
+After freeze, membership and order are immutable. A member version change or member invalidation requires a new Packet version; the old Packet enters `INVALIDATED`. If reassembly is needed, a new Packet version is created and re-frozen / re-validated. The `REVALIDATION_REQUIRED` state is not defined for Packet. A consumer must bind to an exact Packet `id + version + digest` triple; implicit `latest` resolution is forbidden.
 
 The assembler may select, reference, order, freeze, and digest members only. The assembler must not: rewrite a member, supplement a role's conclusion, delete unfavourable Evidence, change the meaning of a Claim, or downgrade a FAIL to a warning.
 
@@ -2927,7 +2953,13 @@ A Receipt must record at least:
 - `lifecycle_state` — one of `CURRENT`, `STALE`, `SUPERSEDED`, `REVOKED_BY_OPERATOR`
 - `cryptographic_attestation.enabled` — `false` (reserved for future PKI)
 
-The Receipt body is immutable. State transitions use the `lifecycle_state` field only.
+The Receipt body and digest are **permanently immutable** from creation. The initial `lifecycle_state` is recorded as `CURRENT`. Subsequent state transitions (`STALE`, `SUPERSEDED`, `REVOKED_BY_OPERATOR`) must be recorded by independent append-only Receipts:
+
+- `INVALIDATION_RECEIPT` — marks one or more subject Receipts as `STALE`
+- `SUPERSESSION_RECEIPT` — marks a subject Receipt as `SUPERSEDED` and links to the superseding Receipt
+- Operator revocation Receipt — marks a subject Receipt as `REVOKED_BY_OPERATOR`
+
+The authoritative current status of any Receipt is computed from the immutable Receipt chain, not from in-place field mutation. `state_created` records the business workflow state created by this Receipt (e.g., `GLOBAL_READINESS`, `GATE_PASS`) and must not be conflated with the Receipt's own lifecycle state.
 
 #### §10.3.10 Authority Matrix
 
@@ -2941,6 +2973,9 @@ Only the operator may issue:
 - `OPERATOR_AUTHORIZED_DRAFT_TO_READY`
 - `OPERATOR_AUTHORIZED_MERGE`
 - `OPERATOR_AUTHORIZED_BRANCH_DELETION`
+- `OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT` (§3.8 V3)
+- `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT` (§3.8 V5)
+- Any V4 checkpoint review Receipt that requires an operator checkpoint decision
 
 `vibedev` / orchestrator may issue within its authority:
 
@@ -2950,6 +2985,10 @@ Only the operator may issue:
 - Explorer / Plan validation receipts
 - Gate aggregation and cross-verification receipts
 - STOP receipts
+- Version inventory validation receipts (§3.8 V1)
+- Version proposal validation receipts (§3.8 V2)
+- `VERSION_QUALIFICATION_PASS_RECEIPT` / `VERSION_QUALIFICATION_FAIL_RECEIPT` (§3.8 V7) — with authority basis: V5 operator authorisation + V6 execution evidence
+- `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT` (§3.8 V8) — prerequisite: V7 qualification receipt + all prior V0–V7 objects
 
 A role submits only its own claim and report. The git-integrator submits only its execution and delivery evidence / claim; the final `VERIFIED` state is formed through the existing cross-verification chain.
 
@@ -2993,28 +3032,35 @@ Artifact lifecycle states: `VALID`, `INVALIDATED`, `SUPERSEDED`, `REVALIDATION_R
 
 **LIGHTWEIGHT_OPERATION**: only operator-approved roles and Gates are instantiated. A Work Order approval, Global Readiness, Activation, role artifacts / reports, independent verification Gate, Integration Packet, and Draft delivery receipt are still required.
 
-**VIBECODING_CONSULTATION_ONLY**: must not fabricate candidate, Gate, or Git objects. Only the following object types are permitted:
+**VIBECODING_CONSULTATION_ONLY**: must not fabricate candidate, Gate, or Git objects. Consultation-specific work product and endpoint objects are limited to:
 
 - `CONSULTATION_SOURCE_PACKET`
 - `CONSULTATION_DELIVERABLE`
 - `CONSULTATION_REPORT`
-- `GLOBAL_READINESS_RECEIPT`
 - `CONSULTATION_ENDPOINT_RECEIPT`
+
+The following common governance objects remain **permitted and required as applicable**:
+
+- Common operator approval Receipts (Intake, sub-mode, Work Order)
+- `GLOBAL_READINESS_RECEIPT`
+- Evidence records (including formal orchestrator model invocation Evidence)
+- `PUBLIC_EVIDENCE_PROJECTION_ARTIFACT`
+- `INVALIDATION_RECEIPT` / `SUPERSESSION_RECEIPT`
 - `STOP_RECEIPT`
+
+The following are **forbidden** in Consultation mode: non-orchestrator role assignment / Activation, candidate objects, test Gate objects, review Gate objects, Integration Packet, Git delivery objects, and Post-Draft objects.
 
 All Consultation objects must still carry `id + version + digest`, source / evidence / invocation bindings.
 
 #### §10.3.13 Public Projection
 
-Internal governance objects must not be directly published in full. Define a `PUBLIC_EVIDENCE_PROJECTION` containing:
+Internal governance objects must not be directly published in full. `PUBLIC_EVIDENCE_PROJECTION` is a **derived Artifact** (object_type = `PUBLIC_EVIDENCE_PROJECTION_ARTIFACT`) and must carry the full common object envelope (§10.3.2), including `object_id`, `object_version`, and `canonical_digest`. The existing `projection_id` is a mandatory alias of `object_id`; `projection_digest` is a mandatory alias of `canonical_digest`. A `PUBLIC_EVIDENCE_PROJECTION` must contain:
 
-- `projection_id`
 - `source_refs` — `id + version + digest` triples of source Evidence records
 - `allowed_fields` / `omitted_fields`
-- `projection_digest`
 - `public_safe_check_receipt_ref`
 
-PR bodies, commit messages, and public comments may reference only `PUBLIC_EVIDENCE_PROJECTION` objects. The following must never appear in a public projection: credential values, private host / IP / user / path, internal prompts, raw private logs, or secret-derived fingerprints. Redaction must not change the technical PASS / FAIL fact.
+PR bodies, commit messages, and public comments may reference only `PUBLIC_EVIDENCE_PROJECTION_ARTIFACT` objects. The following must never appear in a public projection: credential values, private host / IP / user / path, internal prompts, raw private logs, or secret-derived fingerprints. Redaction must not change the technical PASS / FAIL fact.
 
 #### §10.3.14 Version Governance Gate Object Bindings
 
@@ -3026,20 +3072,20 @@ The existing §3.8 `HERMES_OPENCODE_VERSION_GOVERNANCE_GATE` (V0–V8) is the so
 | V1 — Inventory | `VERSION_INVENTORY_ARTIFACT` |
 | V2 — Proposal | `VERSION_CHANGE_PROPOSAL_ARTIFACT` |
 | V3 — Preparation Approval | `VERSION_PREPARATION_PACKET` + `OPERATOR_APPROVED_VERSION_PREPARATION_RECEIPT` |
-| V4 — Pre-Execution Checkpoint | (review only) |
-| V5 — Second Confirmation | `VERSION_EXECUTION_PACKET` + `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT` |
-| V6 — Exact-Scope Execution | `VERSION_EXECUTION_PACKET` (execution evidence) |
+| V4 — Pre-Execution Checkpoint | `VERSION_PRE_EXECUTION_CHECKPOINT_PACKET` (binding scope/inventory/proposal/preparation evidence, target version/action/node/profile, backup/rollback point, qualification plan, V3 Receipt) + `VERSION_PRE_EXECUTION_CHECKPOINT_REVIEW_RECEIPT` (operator review record; must not substitute for V5) |
+| V5 — Second Confirmation | `VERSION_EXECUTION_AUTHORIZATION_PACKET` (frozen) + `OPERATOR_AUTHORIZED_VERSION_EXECUTION_RECEIPT` |
+| V6 — Exact-Scope Execution | Execution reads V5 frozen Packet only; actual commands/install/migration/restart/switch results and side effects → independent Evidence + `VERSION_EXECUTION_REPORT` / `VERSION_EXECUTION_EVIDENCE_PACKET` (must not write back into V5 Packet) |
 | V7 — Qualification | `VERSION_QUALIFICATION_PACKET` + `VERSION_QUALIFICATION_PASS_RECEIPT` / `VERSION_QUALIFICATION_FAIL_RECEIPT` |
 | V8 — Closeout | `VERSION_CLOSEOUT_REPORT` + `VERSION_GOVERNANCE_CLOSEOUT_RECEIPT` |
 
-V3 preparation approval must not authorise real installation. V5 second confirmation is the point at which the exact version, action, node / profile, backup / rollback point, and qualification plan are authorised. Any change to target version, component, node / profile, action, backup / rollback point, or qualification plan makes the V5 authorisation stale. V7 must bind binary / checksum, config / capability / provider / model / CMP / wrapper / bounded call / gate / evidence / secret / rollback / drift evidence. Failure at V7 triggers immediate STOP; no automatic version substitution, scope expansion, or rollback unless the operator has pre-approved an atomic rollback plan.
+V3 preparation approval must not authorise real installation. V4 checkpoint Packet must be reviewed by operator; the review Receipt must not substitute for V5 authorisation. V5 second confirmation is the point at which the exact version, action, node / profile, backup / rollback point, and qualification plan are authorised. V6 execution must read the V5 frozen Packet only; execution Evidence must be recorded independently and must not write back into the V5 Packet. Any change to target version, component, node / profile, action, backup / rollback point, or qualification plan makes the V5 authorisation stale. Any V4/V5/V6 object conflation triggers `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION → STOP`. V7 must bind binary / checksum, config / capability / provider / model / CMP / wrapper / bounded call / gate / evidence / secret / rollback / drift evidence. Failure at V7 triggers immediate STOP; no automatic version substitution, scope expansion, or rollback unless the operator has pre-approved an atomic rollback plan.
 
 #### §10.3.15 Version Gate Trigger Boundary
 
 §3.8 applies to Hermes / OpenCode and their direct service, adapter, config migration, restart, or switch. Ordinary business dependency upgrades proceed under `VIBECODING_MODE`. If a change affects the control plane, Hermes / OpenCode runtime, wrapper / provider compatibility, or a node-wide service, it must be split into §3.8. If a VERSION change and a CMP change occur simultaneously, they must be split into independent operations with independent authorisations; Receipts for one must not substitute for the other.
 
 
-### §10.3 Efficiency ≠ Skip
+#### §10.3.16 Efficiency ≠ Skip
 
 - No skipping roles / gates / evidence required by the operator-selected execution mode for efficiency. In `FULL_9_ROLE_VIBECODING`, the complete 9-role roster and dual-tester / dual-reviewer independence **must** be maintained. In `LIGHTWEIGHT_OPERATION`, only the operator-approved actual role set is executed.
 - Dual-tester / dual-reviewer independence applies **only** in `FULL_9_ROLE_VIBECODING` or when operator explicitly selects dual tester / dual reviewer. It **must not** be implied for `LIGHTWEIGHT_OPERATION` or dedicated governance gates.
@@ -3215,7 +3261,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | `V2 Effective Date` | [awaiting operator acceptance] |
 | `V2 Version` | `2.0` (DRAFT — awaiting acceptance) |
 | Historical reference | `v1.0` (PR #276, commits `9f7e8b1` + follow-up `8509a07`); preserved in Git history |
-| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role roster, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, workflow governance envelope, evidence levels, transfer-prompt delivery, drift handling, amendment procedure, Git delivery pipeline with candidate–commit tree binding, exact staging (approved new files permitted, manifest-external untracked forbidden, construction-specific paths not a universal constant), two-phase evidence model (pre-commit `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT` → post-commit `DRAFT_PR_EVIDENCE_BODY`), bounded push/PR recovery, mode-specific Draft PR plan provenance, Draft PR evidence body, post-push independent verification, completion report, and three-stage Draft→Ready→Merge governance chain with `POST_DRAFT_GIT_INTEGRATOR_BINDING` per Post-Draft operation, exact-binding authorisations, three independent structured completion reports (`READY_TRANSITION_COMPLETION_REPORT` / `MERGE_COMPLETION_REPORT` / `BRANCH_DELETION_COMPLETION_REPORT`) and cross-verification before corresponding `*_VERIFIED` and endpoint states, PASS / FAIL paths mutually exclusive with FAIL → `READY_TRANSITION_VERIFICATION_FAIL` / `POST_MERGE_VERIFICATION_FAIL`, method-level verification, post-merge verification, 2-attempt API budgets each with explicit exhaustion states (§4.16.8–§4.16.17). **Confirmed** in this contract: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); paused-and-revalidate path (§4.10.3); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR; FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16). **Still to be finalised by operator in future operator-approved operational workflow spec**: machine-executable serialisation format for Work Order fields, specific field encoding and validator implementation, task-specific role linear order / concurrency / handoff topology, task-specific test / review choreography, workspace and command implementation, packet / receipt physical storage format (logical schema fixed in §10.3), closeout schema, complete `VIBECODING_MODE` state machine. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
+| Contract scope | This contract hardens operator's governance requirements for identity, topology, node architecture, control-plane availability, transport-route failover, execution mode gate (VIBECODING_CONSULTATION_ONLY / LIGHTWEIGHT_OPERATION / FULL_9_ROLE_VIBECODING), dedicated governance gates (HERMES_OPENCODE_VERSION_GOVERNANCE_GATE §3.8, CENTRAL_MODEL_POOL_GOVERNANCE_GATE §6.9), complete 9-role roster, 8-role assignment pre-brief, Central Model Pool, operator checkpoints, workflow governance envelope, evidence levels, transfer-prompt delivery, drift handling, amendment procedure, Git delivery pipeline with candidate–commit tree binding, exact staging (approved new files permitted, manifest-external untracked forbidden, construction-specific paths not a universal constant), two-phase evidence model (pre-commit `PUBLIC_SAFE_EVIDENCE_PROJECTION_DRAFT` → post-commit `DRAFT_PR_EVIDENCE_BODY`), bounded push/PR recovery, mode-specific Draft PR plan provenance, Draft PR evidence body, post-push independent verification, completion report, and three-stage Draft→Ready→Merge governance chain with `POST_DRAFT_GIT_INTEGRATOR_BINDING` per Post-Draft operation, exact-binding authorisations, three independent structured completion reports (`READY_TRANSITION_COMPLETION_REPORT` / `MERGE_COMPLETION_REPORT` / `BRANCH_DELETION_COMPLETION_REPORT`) and cross-verification before corresponding `*_VERIFIED` and endpoint states, PASS / FAIL paths mutually exclusive with FAIL → `READY_TRANSITION_VERIFICATION_FAIL` / `POST_MERGE_VERIFICATION_FAIL`, method-level verification, post-merge verification, 2-attempt API budgets each with explicit exhaustion states (§4.16.8–§4.16.17). **Confirmed** in this contract: VC0–VC8 pre-stage; Work Order approval = job start; dual-layer readiness (§4.10); `ROLE_COMPLETION_REPORT` + cross-verification (§4.13); bounded corrective loop governance (§4.12); default return matrix and artifact invalidation (§4.14); paused-and-revalidate path (§4.10.3); `LIGHTWEIGHT_OPERATION` / `FULL_9_ROLE_VIBECODING` default endpoint is Draft PR; FULL default mid-to-late-stage topology with candidate freeze, dual tester, test gate, dual reviewer, review gate, and git-integrator hard gate (§4.16). **Still to be finalised by operator in future operator-approved operational workflow spec**: machine-executable serialisation format for Work Order fields, specific field encoding and validator implementation, task-specific role linear order / concurrency / handoff topology, task-specific test / review choreography, workspace and command implementation, packet / receipt physical storage format (logical schema provisionally fixed in §10.3 — `PROVISIONAL_ARTIFACT_EVIDENCE_SCHEMA_PENDING_GRAY4_VALIDATION`), closeout schema, complete `VIBECODING_MODE` state machine. Downstream runtime / model-pool / node-registry / audit / evidence specs **must comply** with these requirements. This contract **does not** define concrete code structure, schemas (`routes.yaml` or otherwise), script names, receipt / ledger field schemas, SSH-key paths, route-chain field schemas, or executor / wrapper internals. **Exception**: the canonical primary transport ports explicitly registered in §3.1.4 (`5bao` port `22222`, `9bao` port `22222`) are governance facts of this contract. Other ports, addresses, proxies, and implementation-level endpoint parameters live in the node-registry / runtime spec. |
 
 ---
 
@@ -3242,7 +3288,7 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Evidence levels | absent | 8 levels; anti-extrapolation rules; double-hash rule for untracked (§8.5, §8.6) |
 | `PRE_V2_HISTORICAL_EVIDENCE` | absent | hard rules against reinterpretation; full banner enforced (§8.8) and re-asserted in `PRE_V2_HISTORICAL_EVIDENCE_BANNER_MISSING` (§10.1) |
 | Prompt Delivery Contract | informal §7 guidance | full contract: text code fences, writing-block prohibition, per-segment split threshold (≤3000 single segment, >3000 split, each ≤3000, min segments, clarity first), exact closing line, full-replacement and incremental-revision markers, mobile one-tap copy (§11) |
-| Drift signals | 7 | expanded to 206-entry canonical signal catalog (31 new Artifact / Evidence / Packet / Receipt / Version governance signals) |
+| Drift signals | 7 | expanded to 215-entry canonical signal catalog (31 new Artifact / Evidence / Packet / Receipt / Version governance signals + 9 new identity/claim/projection/receipt/consultation/version governance signals) |
 | High-risk checkpoints | §4 vague | §9 explicit 4 categories (A/B/C/D), 12+ high-risk items, including `Hermes` / `OpenCode` install / update / downgrade / migration / restart / switch (§9.3) |
 | Top-line governance | role authority scattered | §1 GP-1 / GP-2 / GP-3 single page; recommend → assign → execute locked |
 | Effect mechanism | §10 "signing" (later corrected to Working Agreement) | effective only on operator explicit chat acceptance; on acceptance update existing file with `Version: 2.0` + `Supersedes: V1 / PR #276` + `Historical source retained in Git history` |
@@ -3253,9 +3299,9 @@ A transfer prompt **must not** state: "every agent's every prompt must follow th
 | Historical PR / report handling | unspecified | `PRE_V2_HISTORICAL_EVIDENCE` rules; historical files untouched |
 
 
-| Artifact / Evidence / Packet / Receipt schema | absent | §10.3 canonical governance schema (logical fields, authority matrix, lineage, invalidation); status: `PROVISIONAL_ARTIFACT_EVIDENCE_SCHEMA_PENDING_GRAY4_VALIDATION` — not V2 final acceptance or runtime E2E PASS |
-| Version governance objects | absent | §3.8 V0–V8 bound to Packet / Artifact / Receipt objects (§10.3.14); V3 authorises preparation only, V5 authorises exact-scope execution; V7 qualification failure = STOP |
-| Drift signals | 175 | expanded to 206-entry canonical signal catalog (31 new Artifact / Evidence / Packet / Receipt / Version governance signals) |
+| Artifact / Evidence / Packet / Receipt schema | absent | §10.3 canonical governance schema (10-field common envelope + type-specific aliases, conditional execution_record_ref, Claim as embedded subobject, Public Projection as derived Artifact, authority matrix, lineage, invalidation, append-only Receipt lifecycle); status: `PROVISIONAL_ARTIFACT_EVIDENCE_SCHEMA_PENDING_GRAY4_VALIDATION` — not V2 final acceptance or runtime E2E PASS |
+| Version governance objects | absent | §3.8 V0–V8 bound to Packet / Artifact / Receipt objects (§10.3.14); V3 authorises preparation only, V4 checkpoint Packet + review Receipt (not V5), V5 authorises exact-scope execution via frozen authorization Packet, V6 execution Evidence independent of V5 Packet; V7 qualification failure = STOP; V4/V5/V6 object conflation triggers `VERSION_GOVERNANCE_STAGE_OBJECT_CONFLATION → STOP` |
+| Drift signals | 175 | expanded to 215-entry canonical signal catalog (31 new Artifact / Evidence / Packet / Receipt / Version governance signals + 9 new identity/claim/projection/receipt/consultation/version governance signals) |
 
 ---
 
