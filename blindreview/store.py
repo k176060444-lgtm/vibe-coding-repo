@@ -29,16 +29,16 @@ class JobStore:
             )""")
 
     def submit(self, job: dict[str, str]) -> tuple[dict[str, Any], bool]:
+        """Idempotent insert guarded by SQLite's primary key even across processes."""
         with self._lock, self._db:
-            existing = self._db.execute("SELECT * FROM jobs WHERE job_id=?", (job["job_id"],)).fetchone()
-            if existing:
-                if existing["request"] != canonical_json(job):
-                    raise ProtocolError("Job ID already exists with a different request")
-                return self._serialize(existing), False
             now = time.time()
-            self._db.execute("INSERT INTO jobs (job_id,request,state,created_at,heartbeat_at) VALUES (?,?,?,?,?)",
-                             (job["job_id"], canonical_json(job), "QUEUED", now, now))
-            return self.get(job["job_id"]), True
+            cur = self._db.execute("""INSERT OR IGNORE INTO jobs
+                (job_id,request,state,created_at,heartbeat_at) VALUES (?,?,?,?,?)""",
+                (job["job_id"], canonical_json(job), "QUEUED", now, now))
+            row = self._db.execute("SELECT * FROM jobs WHERE job_id=?", (job["job_id"],)).fetchone()
+            if not row or row["request"] != canonical_json(job):
+                raise ProtocolError("Job ID already exists with a different request")
+            return self._serialize(row), cur.rowcount == 1
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -55,20 +55,25 @@ class JobStore:
     def transition(self, job_id: str, new_state: str, *, expected: tuple[str, ...] | None = None,
                    error: str | None = None, pid: int | None = None,
                    result_sha256: str | None = None) -> bool:
+        """Atomic compare-and-swap state change across SQLite connections."""
         with self._lock, self._db:
-            row = self.get(job_id)
-            if not row or row["state"] in TERMINAL:
+            old = self._db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not old or old["state"] in TERMINAL:
                 return False
-            if expected is not None and row["state"] not in expected:
+            allowed = expected if expected is not None else (old["state"],)
+            if old["state"] not in allowed:
                 return False
             now = time.time()
-            started = now if new_state == "RUNNING" else row["started_at"]
-            pid = pid if pid is not None else row["pid"]
-            ended = now if new_state in TERMINAL else row["finished_at"]
-            self._db.execute("""UPDATE jobs SET state=?, started_at=?, finished_at=?,
-                heartbeat_at=?, progress_at=?, pid=?, error=?, result_sha256=? WHERE job_id=?""",
-                (new_state, started, ended, now, now, pid, error, result_sha256, job_id))
-            return True
+            started = now if new_state == "RUNNING" else old["started_at"]
+            ended = now if new_state in TERMINAL else old["finished_at"]
+            placeholders = ",".join("?" for _ in allowed)
+            cur = self._db.execute(f"""UPDATE jobs SET state=?, started_at=?, finished_at=?,
+                heartbeat_at=?, progress_at=?, pid=?, error=?, result_sha256=?
+                WHERE job_id=? AND state IN ({placeholders})""",
+                (new_state, started, ended, now, now,
+                 pid if pid is not None else old["pid"], error, result_sha256,
+                 job_id, *allowed))
+            return cur.rowcount == 1
 
     def set_pid(self, job_id: str, pid: int) -> None:
         with self._lock, self._db:

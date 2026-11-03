@@ -6,6 +6,7 @@
   "nodes": [
     {
       "id": "5bao",
+      "physical_host_id": "REGISTERED-HOST-5BAO",
       "url": "http://127.0.0.1:8765",
       "token_env": "BLIND_REVIEW_TOKEN_5BAO",
       "harness": "codex",
@@ -13,6 +14,7 @@
     },
     {
       "id": "9bao",
+      "physical_host_id": "REGISTERED-HOST-9BAO",
       "url": "http://127.0.0.1:8766",
       "token_env": "BLIND_REVIEW_TOKEN_9BAO",
       "harness": "opencode",
@@ -20,6 +22,7 @@
     },
     {
       "id": "rusty",
+      "physical_host_id": "REGISTERED-HOST-RUSTY",
       "url": "http://127.0.0.1:8767",
       "token_env": "BLIND_REVIEW_TOKEN_RUSTY",
       "harness": "opencode",

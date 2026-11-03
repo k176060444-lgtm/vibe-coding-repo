@@ -29,15 +29,18 @@ def main() -> int:
             serve(config)
             return 0
         runner = Coordinator(config, args.state_dir)
-        if args.command == "reconcile":
-            runner.initialize(resume=True)
-            pending = runner.reconcile_cancellations()
-            print(json.dumps({"pending_cancellations": pending}, ensure_ascii=False))
-            return 3 if pending else 0
-        runner.initialize(resume=args.resume)
-        outcome = runner.run()
-        print(json.dumps({"outcome": outcome, "summary": str(args.state_dir / 'summary.json')}, ensure_ascii=False))
-        return 0 if outcome == "QUORUM_MET" else 2
+        try:
+            if args.command == "reconcile":
+                runner.initialize(resume=True)
+                pending = runner.reconcile_cancellations()
+                print(json.dumps({"pending_cancellations": pending}, ensure_ascii=False))
+                return 3 if pending else 0
+            runner.initialize(resume=args.resume)
+            outcome = runner.run()
+            print(json.dumps({"outcome": outcome, "summary": str(args.state_dir / 'summary.json')}, ensure_ascii=False))
+            return 0 if outcome == "QUORUM_MET" else 2
+        finally:
+            runner.close()
     except KeyboardInterrupt:
         print("Interrupted: persisted state can be resumed using --resume", file=sys.stderr)
         return 130

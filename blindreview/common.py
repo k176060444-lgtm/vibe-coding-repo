@@ -1,4 +1,4 @@
-"""Protocol and validation shared by the coordinator and review workers."""
+"""Versioned review contracts and canonical, cross-platform report bytes."""
 from __future__ import annotations
 
 import hashlib
@@ -15,19 +15,19 @@ SHA256 = re.compile(r"^[a-f0-9]{64}$")
 TERMINAL = frozenset({"COMPLETED", "FAILED", "TIMED_OUT", "CANCELLED", "INTERRUPTED"})
 VERDICTS = frozenset({"APPROVE", "APPROVE_WITH_COMMENTS", "REQUEST_CHANGES", "NEEDS_SPECIALIST"})
 SEVERITIES = frozenset({"BLOCKER", "IMPORTANT", "QUESTION", "NIT", "OPTIONAL", "FYI"})
-
+BINDING_FIELDS = ("job_id", "task_id", "commit_sha", "role", "contract_sha256", "harness", "model")
 
 class ProtocolError(ValueError):
     """Invalid or inconsistent request, response or artifact."""
 
-
 def canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
+def report_bytes(value: dict[str, Any]) -> bytes:
+    return (canonical_json(value) + "\n").encode("utf-8")
 
 def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
-
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -36,12 +36,10 @@ def sha256_file(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-
 def ensure_pattern(name: str, value: Any, pattern: re.Pattern[str]) -> str:
     if not isinstance(value, str) or not pattern.fullmatch(value):
         raise ProtocolError(f"Invalid {name}")
     return value
-
 
 def validate_request(raw: Any) -> dict[str, str]:
     if not isinstance(raw, dict):
@@ -58,27 +56,55 @@ def validate_request(raw: Any) -> dict[str, str]:
         raise ProtocolError("This P0 executor accepts the blind-review role only")
     return result
 
+def bind_worker_report(raw: Any, request: dict[str, str], node_id: str,
+                       physical_host_id: str) -> dict[str, Any]:
+    """Envelope metadata is set by Worker, not invented by the reviewer/model.
 
-def validate_report(raw: Any, job: dict[str, str]) -> dict[str, Any]:
+    Explicit conflicting reviewer metadata is rejected rather than overwritten.
+    The physical_host_id is an OPERATOR assertion, not hardware attestation.
+    """
     if not isinstance(raw, dict):
         raise ProtocolError("Review report must be a JSON object")
-    required = {"job_id", "commit_sha", "role", "verdict", "summary", "findings"}
-    if not required.issubset(raw.keys()):
+    out = dict(raw)
+    bindings = {key: request[key] for key in BINDING_FIELDS}
+    bindings.update({"node_id": node_id, "physical_host_id": physical_host_id})
+    for key, value in bindings.items():
+        if key in out and out[key] != value:
+            raise ProtocolError(f"Review output conflicts with approved {key}")
+        out[key] = value
+    return validate_report(out, request, node_id, physical_host_id)
+
+def validate_report(raw: Any, job: dict[str, str], node_id: str | None = None,
+                    physical_host_id: str | None = None) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ProtocolError("Review report must be a JSON object")
+    required = set(BINDING_FIELDS) | {"node_id", "physical_host_id", "verdict", "summary", "findings"}
+    if not required.issubset(raw):
         raise ProtocolError("Missing report fields: " + ", ".join(sorted(required - set(raw))))
-    for key in ("job_id", "commit_sha", "role"):
-        if raw[key] != job[key]:
+    for key in BINDING_FIELDS:
+        if not isinstance(raw[key], str) or raw[key] != job[key]:
             raise ProtocolError(f"Report {key} does not match the approved job")
-    if raw["verdict"] not in VERDICTS:
+    ensure_pattern("report.node_id", raw["node_id"], NAME)
+    ensure_pattern("report.physical_host_id", raw["physical_host_id"], NAME)
+    if node_id is not None and raw["node_id"] != node_id:
+        raise ProtocolError("Report node identity differs from registered endpoint")
+    if physical_host_id is not None and raw["physical_host_id"] != physical_host_id:
+        raise ProtocolError("Report physical host declaration differs from registered endpoint")
+    if not isinstance(raw["verdict"], str) or raw["verdict"] not in VERDICTS:
         raise ProtocolError("Invalid verdict")
     if not isinstance(raw["summary"], str) or not raw["summary"].strip():
         raise ProtocolError("Empty summary")
     if not isinstance(raw["findings"], list) or len(raw["findings"]) > 500:
         raise ProtocolError("findings must be an array with at most 500 entries")
     for finding in raw["findings"]:
-        if not isinstance(finding, dict) or finding.get("severity") not in SEVERITIES:
+        if not isinstance(finding, dict) or not isinstance(finding.get("severity"), str) or finding["severity"] not in SEVERITIES:
             raise ProtocolError("Invalid finding severity")
         if not isinstance(finding.get("description"), str) or not finding["description"].strip():
             raise ProtocolError("Finding missing description")
         if not isinstance(finding.get("location"), str) or not finding["location"].strip():
             raise ProtocolError("Finding missing file:line or evidence location")
+        location = finding["location"]
+        if not (re.fullmatch(r"[^\s:][^\n\r]*:[1-9][0-9]*(?:-[1-9][0-9]*)?", location)
+                or location.startswith("evidence://")):
+            raise ProtocolError("Finding location must be path:line or evidence:// reference")
     return raw

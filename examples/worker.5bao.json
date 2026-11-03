@@ -1,5 +1,6 @@
 {
   "node_id": "5bao",
+  "physical_host_id": "REGISTERED-HOST-5BAO",
   "listen": "127.0.0.1",
   "port": 8765,
   "token_env": "BLIND_REVIEW_WORKER_TOKEN",

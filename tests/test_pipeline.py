@@ -48,7 +48,9 @@ class ContractsTest(unittest.TestCase):
     def test_report_validation(self):
         report = {"job_id": "br-123", "commit_sha": "a"*40, "role": "blind-review", "verdict": "REQUEST_CHANGES",
                   "summary": "Found issue", "findings": [{"severity": "BLOCKER", "location": "hello.py:1", "description": "x"}]}
-        validate_report(report, self.request)
+        report.update({key: self.request[key] for key in ("task_id", "contract_sha256", "harness", "model")})
+        report.update({"node_id": "5bao", "physical_host_id": "host-5bao"})
+        validate_report(report, self.request, "5bao", "host-5bao")
         with self.assertRaises(ProtocolError):
             validate_report({**report, "commit_sha": "b"*40}, self.request)
         with self.assertRaises(ProtocolError):
@@ -85,7 +87,7 @@ class WorkerIntegrationTest(unittest.TestCase):
         self.request = {"job_id": "review-unique-1", "task_id": "TASK-1", "repository": "fixture",
                         "commit_sha": self.sha, "role": "blind-review", "harness": "fixture",
                         "model": "fixture-model", "contract_sha256": sha256_bytes(contract.read_bytes())}
-        self.config = {"node_id": "5bao", "workdir": str(root / "work"),
+        self.config = {"node_id": "5bao", "physical_host_id": "host-5bao", "workdir": str(root / "work"),
                        "contract_path": str(contract), "repositories": {"fixture": str(repo)},
                        "harnesses": {"fixture": {"command": [sys.executable, str(ROOT / "tests" / "mock_reviewer.py"),
                                                         "{report_path}", "{job_id}", "{commit_sha}", "{workspace}"]}},
@@ -180,23 +182,27 @@ class FakeClient:
     def status(self, job_id):
         state = "COMPLETED" if self.clock() >= self.finish_at else "RUNNING"
         report = self._report()
-        return {"node_id": self.node_id, "job_id": job_id, "state": state,
+        return {"node_id": self.node_id, "physical_host_id": "host-" + self.node_id, "job_id": job_id, "state": state,
                 "result_sha256": sha256_bytes((canonical_json(report) + "\n").encode()),
                 "error": None}
 
     def _report(self):
-        return {"job_id": self.job["job_id"], "role": "blind-review",
+        return {"job_id": self.job["job_id"], "task_id": self.job["task_id"],
+                "contract_sha256": self.job["contract_sha256"], "harness": self.job["harness"],
+                "model": self.job["model"], "node_id": self.node_id,
+                "physical_host_id": "host-" + self.node_id, "role": "blind-review",
                 "commit_sha": self.job["commit_sha"], "verdict": self.verdict,
                 "summary": f"Examined {self.node_id}", "findings": []}
 
     def report(self, job_id):
         report = self._report()
-        return {"job_id": job_id, "node_id": self.node_id, "report": report,
+        return {"job_id": job_id, "node_id": self.node_id, "physical_host_id": "host-" + self.node_id, "report": report,
                 "report_sha256": sha256_bytes((canonical_json(report) + "\n").encode())}
 
     def cancel(self, job_id):
         self.cancel_count += 1
-        return {"node_id": self.node_id, "job_id": job_id, "state": "CANCELLED", "error": None}
+        return {"node_id": self.node_id, "physical_host_id": "host-" + self.node_id,
+                "job_id": job_id, "state": "CANCELLED", "error": None}
 
 
 class CoordinatorTest(unittest.TestCase):
@@ -205,7 +211,7 @@ class CoordinatorTest(unittest.TestCase):
         self.now = 100_000.0
         self.clients = {}
         nodes = [{"id": name, "url": f"http://{name}.example", "harness": "codex", "model": "approved-model",
-                  "token_env": "FAKE_TOKEN"} for name in ("5bao", "9bao", "rusty")]
+                  "token_env": "FAKE_TOKEN_" + name.upper(), "physical_host_id": "host-" + name} for name in ("5bao", "9bao", "rusty")]
         self.config = {"task_id": "TASK-1", "repository": "fixture", "commit_sha": "a"*40,
                        "contract_sha256": "b"*64, "nodes": nodes,
                        "poll_interval_seconds": 60, "third_grace_seconds": 600,
@@ -215,6 +221,7 @@ class CoordinatorTest(unittest.TestCase):
         self.runner.initialize()
 
     def tearDown(self):
+        self.runner.close()
         self.tmp.cleanup()
 
     def _client(self, node):
@@ -254,7 +261,7 @@ class CoordinatorTest(unittest.TestCase):
         self.assertIsNone(self.runner.step())
         self.now += 2400
         self.assertEqual(self.runner.step(), "FAILED_QUORUM_TIMEOUT")
-        self.assertEqual(len(self.runner.state["accepted_nodes"]), 0)
+        self.assertEqual(len(self.runner.state["accepted_nodes"]), 1)
 
     def test_restart_preserves_quorum_deadline(self):
         self.clients["5bao"].finish_at = self.now
@@ -262,12 +269,14 @@ class CoordinatorTest(unittest.TestCase):
         self.clients["rusty"].finish_at = self.now + 9999
         self.runner.step()
         old_quorum_at = self.runner.state["quorum_at"]
+        self.runner.close()
         new = Coordinator(self.config, Path(self.tmp.name), clock=lambda: self.now,
                           sleep=lambda secs: None, client_factory=lambda node: self.clients[node["id"]])
         new.initialize(resume=True)
         self.assertEqual(new.state["quorum_at"], old_quorum_at)
         self.now += 601
         self.assertEqual(new.step(), "QUORUM_MET")
+        new.close()
 
     def test_reconcile_cancel_after_interrupted_network(self):
         self.clients["5bao"].finish_at = self.now
@@ -280,11 +289,13 @@ class CoordinatorTest(unittest.TestCase):
         self.assertEqual(self.clients["rusty"].cancel_count, 1)
 
     def test_changed_config_cannot_resume(self):
-        altered = dict(self.config, third_grace_seconds=2000)
+        self.runner.close()
+        altered = dict(self.config, overall_deadline_seconds=2500)
         new = Coordinator(altered, Path(self.tmp.name), clock=lambda: self.now,
                           client_factory=lambda node: self.clients[node["id"]])
         with self.assertRaises(ValueError):
             new.initialize(resume=True)
+        new.close()
 
 
 if __name__ == "__main__":

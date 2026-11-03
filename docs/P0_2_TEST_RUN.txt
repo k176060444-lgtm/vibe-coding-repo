@@ -1,0 +1,46 @@
+test_report_validation (test_pipeline.ContractsTest.test_report_validation) ... ok
+test_request_rejects_injection_and_unknown_role (test_pipeline.ContractsTest.test_request_rejects_injection_and_unknown_role) ... ok
+test_changed_config_cannot_resume (test_pipeline.CoordinatorTest.test_changed_config_cannot_resume) ... ok
+test_one_reviewer_never_sufficient (test_pipeline.CoordinatorTest.test_one_reviewer_never_sufficient) ... ok
+test_reconcile_cancel_after_interrupted_network (test_pipeline.CoordinatorTest.test_reconcile_cancel_after_interrupted_network) ... ok
+test_restart_preserves_quorum_deadline (test_pipeline.CoordinatorTest.test_restart_preserves_quorum_deadline) ... ok
+test_third_completes_in_grace_period (test_pipeline.CoordinatorTest.test_third_completes_in_grace_period) ... ok
+test_two_then_ten_minute_wait_and_cancel_third (test_pipeline.CoordinatorTest.test_two_then_ten_minute_wait_and_cancel_third) ... ok
+test_idempotence_and_recovery (test_pipeline.StoreTest.test_idempotence_and_recovery) ... ok
+test_authenticated_http_job_lifecycle (test_pipeline.WorkerIntegrationTest.test_authenticated_http_job_lifecycle) ... ok
+test_cancel_running_review (test_pipeline.WorkerIntegrationTest.test_cancel_running_review) ... ok
+test_opencode_jsonl_adapter (test_pipeline.WorkerIntegrationTest.test_opencode_jsonl_adapter) ... ok
+test_reject_contract_mismatch (test_pipeline.WorkerIntegrationTest.test_reject_contract_mismatch) ... ok
+test_worker_fixed_commit_report_and_idempotence (test_pipeline.WorkerIntegrationTest.test_worker_fixed_commit_report_and_idempotence) ... ok
+test_bad_evidence_location_rejected (test_remediation.Bindings.test_bad_evidence_location_rejected) ... ok
+test_bogus_verdict_type_normalized (test_remediation.Bindings.test_bogus_verdict_type_normalized) ... ok
+test_conflicting_contract_rejected (test_remediation.Bindings.test_conflicting_contract_rejected) ... ok
+test_conflicting_task_rejected (test_remediation.Bindings.test_conflicting_task_rejected) ... ok
+test_missing_context_rejected_at_coordinator (test_remediation.Bindings.test_missing_context_rejected_at_coordinator) ... ok
+test_worker_adds_trusted_context_to_report (test_remediation.Bindings.test_worker_adds_trusted_context_to_report) ... ok
+test_completed_report_fetch_retry (test_remediation.CoordinatorRegression.test_completed_report_fetch_retry) ... ok
+test_crash_second_report_quorum_recovers (test_remediation.CoordinatorRegression.test_crash_second_report_quorum_recovers) ... ok
+test_duplicate_physical_host_rejected (test_remediation.CoordinatorRegression.test_duplicate_physical_host_rejected) ... ok
+test_duplicate_token_env_rejected (test_remediation.CoordinatorRegression.test_duplicate_token_env_rejected) ... ok
+test_grace_over_600_rejected (test_remediation.CoordinatorRegression.test_grace_over_600_rejected) ... ok
+test_lock_prevents_two_coordinators (test_remediation.CoordinatorRegression.test_lock_prevents_two_coordinators) ... ok
+test_recovery_repairs_missing_quorum_stamp (test_remediation.CoordinatorRegression.test_recovery_repairs_missing_quorum_stamp) ... ok
+test_report_hash_matches_file_bytes (test_remediation.CoordinatorRegression.test_report_hash_matches_file_bytes) ... ok
+test_resume_rejects_modified_report (test_remediation.CoordinatorRegression.test_resume_rejects_modified_report) ... ok
+test_resume_restores_lost_summary (test_remediation.CoordinatorRegression.test_resume_restores_lost_summary) ... ok
+test_two_real_http_workers_quorum (test_remediation.EndToEndWire.test_two_real_http_workers_quorum) ... ok
+test_bearer_never_redirects_to_other_origin (test_remediation.HTTPRegression.test_bearer_never_redirects_to_other_origin) ... ok
+test_slow_drip_cannot_extend_entire_response (test_remediation.HTTPRegression.test_slow_drip_cannot_extend_entire_response) ... ok
+test_bounded_queue_no_per_job_threads (test_remediation.WorkerRegression.test_bounded_queue_no_per_job_threads) ... ok
+test_contract_changes_on_queue_recovery_fail_closed (test_remediation.WorkerRegression.test_contract_changes_on_queue_recovery_fail_closed) ... ok
+test_hard_deadline_even_when_stdin_not_read (test_remediation.WorkerRegression.test_hard_deadline_even_when_stdin_not_read) ... ok
+test_local_clone_not_hardlinked_to_source (test_remediation.WorkerRegression.test_local_clone_not_hardlinked_to_source) ... ok
+test_monitoring_error_cleans_up_subprocess (test_remediation.WorkerRegression.test_monitoring_error_cleans_up_subprocess) ... ok
+test_report_binding_present_and_same_binary_hash (test_remediation.WorkerRegression.test_report_binding_present_and_same_binary_hash) ... ok
+test_service_secret_not_inherited_by_harness (test_remediation.WorkerRegression.test_service_secret_not_inherited_by_harness) ... ok
+test_worker_directory_exclusive (test_remediation.WorkerRegression.test_worker_directory_exclusive) ... ok
+
+----------------------------------------------------------------------
+Ran 41 tests in 11.556s
+
+OK

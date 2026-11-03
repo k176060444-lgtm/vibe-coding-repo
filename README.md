@@ -113,3 +113,7 @@ python -m blindreview reconcile --config examples/coordinator.json --state-dir .
 ```
 
 返回 `pending_cancellations: []` 代表无需再补偿；非空表示仍有未确认项，建议交由外部定时任务在连通恢复后重试。若远端状态已经完成或终止，则会直接确认终态，不再发送无意义的取消。是否已经实际停掉模型服务端请求仍应依据供应商日志判断。
+
+## P0.2 security and robustness remediation candidate
+
+See [P0.2 remediation matrix](docs/P0_2_REMEDIATION.md). These changes are **breaking** for the report envelope and configuration: each node now requires a distinct `physical_host_id`, worker identity responses carry that operator-declared ID, and historical unfinished jobs without a pinned contract snapshot fail closed. A unique declared host identifier does not prove physical hardware independence. Deploy only after verifying separate host credentials and trusted transport, plus actual Harness read-only permissions. To run a model, add specifically required credential variables to the Worker `env_allowlist`; worker service tokens are not forwarded. The original P0 is still available in Git history and the third-party audit remains unchanged.
