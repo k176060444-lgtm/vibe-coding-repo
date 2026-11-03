@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blind-review-poller"
+version = "0.1.0"
+description = "Persistent 2-of-3 cross-node blind-review jobs with bounded polling"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["blindreview*"]

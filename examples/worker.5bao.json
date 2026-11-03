@@ -1,0 +1,51 @@
+{
+  "node_id": "5bao",
+  "listen": "127.0.0.1",
+  "port": 8765,
+  "token_env": "BLIND_REVIEW_WORKER_TOKEN",
+  "workdir": "/srv/blind-review/worker_data",
+  "contract_path": "/srv/blind-review/blind-review-contract.md",
+  "repositories": {
+    "bizguardian": "/srv/git/bizguardian.git"
+  },
+  "max_job_seconds": 1800,
+  "clone_timeout_seconds": 240,
+  "heartbeat_seconds": 60,
+  "stall_warn_seconds": 300,
+  "max_concurrent": 1,
+  "harnesses": {
+    "codex": {
+      "command": [
+        "codex",
+        "exec",
+        "--sandbox",
+        "read-only",
+        "--model",
+        "{model}",
+        "-C",
+        "{workspace}",
+        "--output-last-message",
+        "{report_path}",
+        "-"
+      ],
+      "stdin_prompt": true,
+      "report_mode": "file"
+    },
+    "opencode": {
+      "command": [
+        "opencode",
+        "run",
+        "--agent",
+        "blind-review",
+        "--model",
+        "{model}",
+        "--format",
+        "json",
+        "{prompt_text}"
+      ],
+      "stdin_prompt": false,
+      "report_mode": "opencode_jsonl"
+    }
+  },
+  "max_log_bytes": 20971520
+}

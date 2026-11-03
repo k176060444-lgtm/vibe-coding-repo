@@ -1,0 +1,33 @@
+{
+  "task_id": "TASK-001",
+  "repository": "bizguardian",
+  "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "contract_sha256": "2b809473b3d34b50e8df6b8c57bff326ec2ebbdcde7df38c722df70e68b0ded2",
+  "nodes": [
+    {
+      "id": "5bao",
+      "url": "http://127.0.0.1:8765",
+      "token_env": "BLIND_REVIEW_TOKEN_5BAO",
+      "harness": "codex",
+      "model": "REPLACE_WITH_APPROVED_MODEL"
+    },
+    {
+      "id": "9bao",
+      "url": "http://127.0.0.1:8766",
+      "token_env": "BLIND_REVIEW_TOKEN_9BAO",
+      "harness": "opencode",
+      "model": "REPLACE_WITH_PROVIDER_AND_MODEL"
+    },
+    {
+      "id": "rusty",
+      "url": "http://127.0.0.1:8767",
+      "token_env": "BLIND_REVIEW_TOKEN_RUSTY",
+      "harness": "opencode",
+      "model": "REPLACE_WITH_PROVIDER_AND_MODEL"
+    }
+  ],
+  "request_timeout_seconds": 8,
+  "poll_interval_seconds": 60,
+  "third_grace_seconds": 600,
+  "overall_deadline_seconds": 3600
+}

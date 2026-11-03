@@ -1,16 +1,13 @@
-HEAD
-ORIG_HEAD
-commondir
-gitdir
-index
-index.lock
-logs/
 __pycache__/
-*.pyc
-*.bak
-.opencode_model_pool.json
-.vibe/
-# Env/secret files
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+*.egg-info/
+*.sqlite3*
+review_state/
+worker_data/
+*.log
 .env
-.env.*
-!.env.example
