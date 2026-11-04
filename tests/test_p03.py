@@ -155,7 +155,6 @@ class WorkerReliability(unittest.TestCase):
             env=w._child_env()
             self.assertFalse(any(k.casefold()=="blind_review_secure_token" for k in env))
 
-    @unittest.skipIf(os.name=="nt","POSIX process-group test; Windows uses Job Object")
     def test_parent_exit_cannot_leave_writable_descendant(self):
         marker=Path(self.tmp.name)/"late-marker.txt"
         child_script="import time;from pathlib import Path;time.sleep(0.8);Path("+repr(str(marker))+").write_text('late')"
