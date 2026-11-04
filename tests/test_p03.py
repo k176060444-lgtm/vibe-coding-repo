@@ -72,9 +72,11 @@ class CoordinatorReliability(unittest.TestCase):
 
     def test_second_receipt_survives_state_crash_after_file_replace(self):
         c=self.coordinator()
-        self.clients["A"].finish_at=self.now
-        self.clients["B"].finish_at=self.now
+        self.clients["A"].finish_at=self.now+60
+        self.clients["B"].finish_at=self.now+60
         self.clients["C"].finish_at=self.now+9999
+        c.step()  # all three tasks are running before the receipt crash
+        self.now+=60
         original=c._save
         def crash_after_receipt():
             if (Path(self.tmp.name)/"receipts"/"B.json").is_file():
@@ -87,7 +89,7 @@ class CoordinatorReliability(unittest.TestCase):
         c.close()
         self.now+=601
         resumed=self.coordinator(resume=True)
-        self.assertEqual(resumed.state["quorum_at"],12000.0)
+        self.assertEqual(resumed.state["quorum_at"],12060.0)
         self.assertEqual(resumed.step(),"QUORUM_MET")
         self.assertEqual(set(resumed.state["accepted_nodes"]),{"A","B"})
         self.assertEqual(self.clients["C"].cancel_count,1)

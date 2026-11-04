@@ -40,6 +40,7 @@ class ReviewClient:
         conn = connection_type(self._parsed.hostname, self._parsed.port, timeout=timeout)
         expired = threading.Event()
         finished = threading.Event()
+        live_socket = [None]  # retain even if HTTPResponse takes ownership
 
         def abort() -> None:
             if finished.is_set():
@@ -48,7 +49,7 @@ class ReviewClient:
             # close() alone does not always interrupt another thread's
             # buffered HTTP header read. shutdown() on the socket does.
             try:
-                sock = conn.sock
+                sock = live_socket[0] if live_socket[0] is not None else conn.sock
                 if sock is not None:
                     sock.shutdown(socket.SHUT_RDWR)
             except (OSError, ValueError):
@@ -68,6 +69,7 @@ class ReviewClient:
                 "Content-Type": "application/json",
                 "Accept-Encoding": "identity",
                 "Connection": "close"})
+            live_socket[0] = conn.sock
             response = conn.getresponse()
             if response.status < 200 or response.status >= 300:
                 raise TransportError(f"HTTP status {response.status}; redirects are forbidden")

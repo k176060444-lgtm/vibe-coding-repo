@@ -316,7 +316,8 @@ class Coordinator:
             return
         if job["state"] == "NOT_SUBMITTED":
             job["state"] = "CANCELLED"
-            job["last_error"] = "Stopped before dispatch"
+            if not job.get("last_error"):
+                job["last_error"] = "Stopped before dispatch"
             self._save()
             return
         job["cancel_requested"] = True
