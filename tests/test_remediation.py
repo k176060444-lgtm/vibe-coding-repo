@@ -282,7 +282,11 @@ class WorkerRegression(unittest.TestCase):
         def tracked(*args, **kwargs):
             proc=original(*args, **kwargs)
             command=args[0] if args else kwargs.get("args",[])
-            if isinstance(command,list) and len(command)>2 and command[1]=="-c":
+            # On Windows the tracked root is the trusted launch shim, not
+            # the user-supplied python -c child; verify cleanup of that root.
+            if (isinstance(command,list) and len(command)>2 and
+                    (command[1]=="-c" or
+                     any(str(part).endswith("_win_launcher.py") for part in command))):
                 processes.append(proc)
             return proc
         with patch("blindreview.worker.subprocess.Popen",side_effect=tracked), \
