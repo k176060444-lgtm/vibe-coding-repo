@@ -15,26 +15,45 @@ from pathlib import Path
 
 
 def main() -> int:
-    if len(sys.argv) != 3 or sys.platform != "win32":
+    if len(sys.argv) != 4 or sys.platform != "win32":
         return 64
-    spec_file, event_name = sys.argv[1:]
+    spec_file, event_name, parent_pid_text = sys.argv[1:]
+    try:
+        parent_pid = int(parent_pid_text)
+        if parent_pid <= 0:
+            return 64
+    except ValueError:
+        return 64
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
     kernel.OpenEventW.restype = wintypes.HANDLE
-    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.WaitForMultipleObjects.argtypes = [wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE),
+                                              wintypes.BOOL, wintypes.DWORD]
+    kernel.WaitForMultipleObjects.restype = wintypes.DWORD
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
-    # SYNCHRONIZE only; launcher is physically incapable of signalling itself.
-    handle = kernel.OpenEventW(0x00100000, False, event_name)
-    if not handle:
+    # SYNCHRONIZE only; launcher cannot signal the event or control its parent.
+    gate = kernel.OpenEventW(0x00100000, False, event_name)
+    if not gate:
         return 74
+    parent = kernel.OpenProcess(0x00100000, False, parent_pid)
+    if not parent:
+        kernel.CloseHandle(gate)
+        return 75  # Worker exited before the launcher could be assigned.
     try:
-        outcome = kernel.WaitForSingleObject(handle, 30000)
+        handles = (wintypes.HANDLE * 2)(gate, parent)
+        # The Worker signals gate only after Job assignment. If it dies first,
+        # its process handle becomes signalled and this launcher exits promptly.
+        outcome = kernel.WaitForMultipleObjects(2, handles, False, 30000)
     finally:
-        kernel.CloseHandle(handle)
-    if outcome != 0:  # WAIT_OBJECT_0
+        kernel.CloseHandle(parent)
+        kernel.CloseHandle(gate)
+    if outcome == 1:  # WAIT_OBJECT_0 + 1: Worker exited before gate release.
         return 75
+    if outcome != 0:  # WAIT_OBJECT_0: gate released; timeout/WAIT_FAILED otherwise.
+        return 76
     try:
         config = json.loads(Path(spec_file).read_text(encoding="utf-8"))
         argv = config["argv"]

@@ -47,7 +47,12 @@ class Coordinator:
         self.deadline_s = int(config.get("overall_deadline_seconds", 3600))
         if self.poll_s <= 0 or not (0 <= self.grace_s <= 600) or self.deadline_s <= 0:
             raise ValueError("Poll/deadline must be positive; third-seat grace must not exceed 600 seconds")
-        self.config_sha = sha256_bytes(canonical_json(config).encode("utf-8"))
+        # Version the durable state format/dispatch policy. P0.3.1 states must
+        # not resume because they have no pre-dispatch peer verification.
+        self.config_sha = sha256_bytes(canonical_json({
+            "coordinator_version": "0.3.2",
+            "config": config,
+        }).encode("utf-8"))
         self.clients = {}
         configured_tokens = []
         for node in self.nodes:
@@ -155,9 +160,12 @@ class Coordinator:
             jobs[node["id"]] = {"request": request, "state": "NOT_SUBMITTED", "valid": False,
                                   "last_error": None, "last_seen_at": None,
                                   "report_sha256": None, "cancel_requested": False}
-        self.state = {"schema_version": 2, "config_sha256": self.config_sha,
+        self.state = {"schema_version": 3, "config_sha256": self.config_sha,
                       "run_id": run_id, "started_at": self.clock(), "max_observed_at": self.clock(), "quorum_at": None,
-                      "finished_at": None, "result": None, "accepted_nodes": [], "jobs": jobs}
+                      "finished_at": None, "result": None, "accepted_nodes": [],
+                      "protocol_preflight": {"status": "PENDING", "checked_at": None,
+                                             "peers": {}, "errors": {}},
+                      "jobs": jobs}
         self._save()
 
     def _save(self) -> None:
@@ -310,6 +318,106 @@ class Coordinator:
             job["last_error"] = str(ex)[:1000]
             self._save()
 
+    @staticmethod
+    def _preflight_http_status(error: TransportError) -> int | None:
+        marker = "HTTP status "
+        message = str(error)
+        if marker not in message:
+            return None
+        try:
+            return int(message.split(marker, 1)[1][:3])
+        except (TypeError, ValueError):
+            return None
+
+    def _preflight_peers(self) -> bool:
+        """Verify every peer and its pinned identity before the first dispatch."""
+        record = self.state.get("protocol_preflight", {})
+        pending_dispatch = any(not job["valid"] and job["state"] == "NOT_SUBMITTED"
+                               for job in self.state["jobs"].values())
+        if record.get("status") == "PASSED" and not pending_dispatch:
+            return True
+        if record.get("status") == "REJECTED":
+            if self.state.get("result") is None:
+                self._finalize("FAILED_PROTOCOL_PREFLIGHT")
+            return False
+
+        peers: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        transient = False
+        rejected = False
+        for node in self.nodes:
+            nid = node["id"]
+            try:
+                version = self.clients[nid].version()
+                if not isinstance(version, dict):
+                    raise ProtocolError("Version preflight returned a non-object")
+                if version.get("protocol_version") != 3:
+                    raise ProtocolError("Peer protocol version is not 3")
+                if version.get("node_id") != nid:
+                    raise ProtocolError("Peer node ID does not match enrollment")
+                if version.get("physical_host_id") != node["physical_host_id"]:
+                    raise ProtocolError("Peer physical host declaration does not match enrollment")
+                if version.get("host_fingerprint") != node["host_fingerprint"]:
+                    raise ProtocolError("Peer OS identity does not match pinned host enrollment")
+                capabilities = version.get("capabilities")
+                if not isinstance(capabilities, list) or "preflight-before-submit" not in capabilities:
+                    raise ProtocolError("Peer lacks mandatory preflight-before-submit capability")
+                peers[nid] = {
+                    "protocol_version": 3,
+                    "worker_version": str(version.get("worker_version", ""))[:32],
+                    "host_fingerprint": version["host_fingerprint"],
+                }
+            except ProtocolError as ex:
+                errors[nid] = str(ex)[:1000]
+                rejected = True
+            except TransportError as ex:
+                status = self._preflight_http_status(ex)
+                errors[nid] = str(ex)[:1000]
+                # A 404 is the expected response from P0.2/P0.3.1 workers:
+                # they do not implement this endpoint. Other permanent 4xx
+                # errors (including auth failure) also fail closed.
+                if status is not None and 400 <= status < 500 and status not in (408, 429):
+                    rejected = True
+                else:
+                    transient = True
+            except (AttributeError, KeyError, TypeError, ValueError) as ex:
+                errors[nid] = f"{type(ex).__name__}: {str(ex)[:900]}"
+                rejected = True
+
+        checked_at = self._now()
+        if rejected:
+            self.state["protocol_preflight"] = {
+                "status": "REJECTED", "checked_at": checked_at,
+                "peers": peers, "errors": errors,
+            }
+            for nid, job in self.state["jobs"].items():
+                if nid in errors:
+                    job["last_error"] = "Protocol preflight rejected: " + errors[nid]
+                else:
+                    job["last_error"] = "Protocol preflight aborted because another peer was incompatible; no jobs dispatched"
+            self._save()
+            self._finalize("FAILED_PROTOCOL_PREFLIGHT")
+            return False
+        if transient:
+            self.state["protocol_preflight"] = {
+                "status": "PENDING", "checked_at": checked_at,
+                "peers": peers, "errors": errors,
+            }
+            for nid, error in errors.items():
+                self.state["jobs"][nid]["last_error"] = "Protocol preflight pending: " + error
+            self._save()
+            return False
+
+        self.state["protocol_preflight"] = {
+            "status": "PASSED", "checked_at": checked_at,
+            "peers": peers, "errors": {},
+        }
+        for job in self.state["jobs"].values():
+            if str(job.get("last_error") or "").startswith("Protocol preflight pending:"):
+                job["last_error"] = None
+        self._save()
+        return True
+
     def _cancel_one(self, nid: str) -> None:
         job = self.state["jobs"][nid]
         if job["valid"] or job["state"] in TERMINAL:
@@ -358,14 +466,18 @@ class Coordinator:
         if self.state["result"] is not None:
             self._write_summary()  # rebuild after crash between state and summary writes
             return self.state["result"]
-        self._rebuild_quorum()
-        if self.state["quorum_at"] is not None:
-            self._save()
         absolute_deadline = self.state["started_at"] + self.deadline_s
-        if self._now() >= absolute_deadline and self.state["quorum_at"] is None:
+        if self._now() >= absolute_deadline and self.state.get("quorum_at") is None:
             for nid in self.state["jobs"]:
                 self._cancel_one(nid)
             return self._finalize("FAILED_QUORUM_TIMEOUT")
+        # No submit/status/report call is allowed until ALL configured peers
+        # prove protocol support and match their pinned OS identity.
+        if not self._preflight_peers():
+            return self.state.get("result")
+        self._rebuild_quorum()
+        if self.state["quorum_at"] is not None:
+            self._save()
         for nid in self.state["jobs"]:
             now = self._now()
             if now >= absolute_deadline:

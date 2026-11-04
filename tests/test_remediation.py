@@ -15,7 +15,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from blindreview.common import ProtocolError, bind_worker_report, local_host_fingerprint, report_bytes, validate_report
+from blindreview.common import (ProtocolError, bind_worker_report, canonical_json, local_host_fingerprint,
+                                 report_bytes, sha256_bytes, validate_report)
 from blindreview.coordinator import Coordinator
 from blindreview.http_client import ReviewClient, TransportError
 from blindreview.store import JobStore
@@ -193,6 +194,53 @@ class CoordinatorRegression(unittest.TestCase):
         self.assertEqual(c.step(), "QUORUM_MET")
 
 
+    def test_preflight_identity_mismatch_prevents_every_dispatch(self):
+        c = self.create()
+        original = self.clients["B"].version
+        def mismatched():
+            value = original()
+            value["host_fingerprint"] = "f" * 64
+            return value
+        self.clients["B"].version = mismatched
+        self.assertEqual(c.step(), "FAILED_PROTOCOL_PREFLIGHT")
+        self.assertEqual(self.clients["A"].submit_count, 0)
+        self.assertEqual(self.clients["B"].submit_count, 0)
+        self.assertEqual(self.clients["C"].submit_count, 0)
+        self.assertEqual(c.state["protocol_preflight"]["status"], "REJECTED")
+        self.assertIn("identity", c.state["jobs"]["B"]["last_error"].lower())
+        self.assertFalse(c.state["accepted_nodes"])
+
+    def test_preflight_transport_failure_retries_without_partial_dispatch(self):
+        c = self.create()
+        original = self.clients["B"].version
+        first = [True]
+        def flaky():
+            if first[0]:
+                first[0] = False
+                raise TransportError("Request failed: TimeoutError: synthetic")
+            return original()
+        self.clients["B"].version = flaky
+        self.assertIsNone(c.step())
+        self.assertEqual(c.state["protocol_preflight"]["status"], "PENDING")
+        self.assertEqual([x.submit_count for x in self.clients.values()], [0, 0, 0])
+        self.assertEqual(c.step(), "QUORUM_MET")
+        self.assertEqual([x.submit_count for x in self.clients.values()], [1, 1, 1])
+
+    def test_p031_state_cannot_resume_without_new_preflight_policy(self):
+        c = self.create()
+        c.close()
+        path = Path(self.tmp.name) / "state.json"
+        state = json.loads(path.read_text("utf-8"))
+        state["schema_version"] = 2
+        state["config_sha256"] = sha256_bytes(canonical_json(self.cfg).encode("utf-8"))
+        path.write_text(json.dumps(state), encoding="utf-8")
+        upgraded = Coordinator(self.cfg, Path(self.tmp.name), clock=lambda: self.now,
+                               client_factory=lambda n: self.clients[n["id"]])
+        with self.assertRaisesRegex(ValueError, "Task config changed"):
+            upgraded.initialize(resume=True)
+        upgraded.close()
+
+
 class WorkerRegression(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -364,7 +412,7 @@ class HTTPRegression(unittest.TestCase):
     def test_slow_drip_cannot_extend_entire_response(self):
         class Slow(BaseHTTPRequestHandler):
             def do_GET(self):
-                self.send_response(200);self.end_headers()
+                self.send_response(200);self.send_header("Content-Length", "14");self.end_headers()
                 for _ in range(12):
                     try:self.wfile.write(b" ");self.wfile.flush()
                     except (BrokenPipeError,ConnectionResetError):break
@@ -414,8 +462,8 @@ class EndToEndWire(unittest.TestCase):
                         url=f"http://127.0.0.1:{server.server_port}",token_env=env,
                         harness="fixture",model="fixture-model"))
                 cfg=dict(task_id="T1",repository="fixture",commit_sha=sha,contract_sha256=contract_sha,
-                         nodes=nodes,request_timeout_seconds=3,poll_interval_seconds=1,
-                         third_grace_seconds=0,overall_deadline_seconds=5)
+                         nodes=nodes,request_timeout_seconds=8,poll_interval_seconds=1,
+                         third_grace_seconds=0,overall_deadline_seconds=20)
                 c=Coordinator(cfg,root/"coordinator")
                 try:
                     c.initialize()
@@ -425,9 +473,14 @@ class EndToEndWire(unittest.TestCase):
                         if result is not None:
                             break
                         time.sleep(.1)
-                    self.assertNotEqual(result,"QUORUM_MET",c.state)
-                    self.assertLess(len(c.state["accepted_nodes"]),2)
+                    self.assertEqual(result,"FAILED_PROTOCOL_PREFLIGHT",c.state)
+                    self.assertFalse(c.state["accepted_nodes"])
                     self.assertIn("identity", str(c.state["jobs"]["B"]["last_error"]).lower())
+                    # Identity mismatch must be detected before either real
+                    # HTTP Worker receives a submit request.
+                    for name, worker in zip(("A", "B"), workers):
+                        job_id = c.state["jobs"][name]["request"]["job_id"]
+                        self.assertIsNone(worker.store.get(job_id))
                 finally:
                     c.close()
             finally:

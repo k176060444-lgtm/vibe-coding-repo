@@ -66,7 +66,7 @@ class ProtocolVersionTests(unittest.TestCase):
                 conn.close()
                 self.assertEqual(worker.store.unfinished(), [])
 
-                # Current P0.3.1 client is recognized (unknown job becomes 404,
+                # Current protocol client is recognized (unknown job becomes 404,
                 # not a protocol 426). No model or harness is actually invoked.
                 client = ReviewClient(f"http://127.0.0.1:{server.server_port}", token, timeout=2)
                 with self.assertRaises(TransportError) as ctx:

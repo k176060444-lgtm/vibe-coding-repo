@@ -368,7 +368,7 @@ class Worker:
                 launch_path.write_bytes(report_bytes({"argv": command}))
                 command = [sys.executable, "-I", "-u",
                            str(Path(__file__).with_name("_win_launcher.py")),
-                           str(launch_path), launch_gate.name]
+                           str(launch_path), launch_gate.name, str(os.getpid())]
                 flags["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             else:
                 flags["start_new_session"] = True
@@ -636,6 +636,16 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if not self._auth() or not self._protocol():
             return
         parts = self._parts()
+        if parts == ["v1", "version"]:
+            self._json(200, {
+                "protocol_version": 3,
+                "worker_version": "0.3.2",
+                "capabilities": ["preflight-before-submit", "host-fingerprint"],
+                "node_id": self.worker.node_id,
+                "physical_host_id": self.worker.physical_host_id,
+                "host_fingerprint": self.worker.host_fingerprint,
+            })
+            return
         if len(parts) < 3 or len(parts) > 4 or parts[:2] != ["v1", "jobs"] or not JOB_ID.fullmatch(parts[2]):
             self._json(404, {"error": "Unknown endpoint"})
             return

@@ -74,6 +74,17 @@ class ReviewClient:
             response = conn.getresponse()
             if response.status < 200 or response.status >= 300:
                 raise TransportError(f"HTTP status {response.status}; redirects are forbidden")
+            raw_length = response.getheader("Content-Length")
+            if raw_length is None:
+                raise TransportError("Missing Content-Length")
+            try:
+                expected_length = int(raw_length)
+            except (TypeError, ValueError) as ex:
+                raise TransportError("Invalid Content-Length") from ex
+            if expected_length < 0:
+                raise TransportError("Invalid negative Content-Length")
+            if expected_length > 2 * 1024 * 1024:
+                raise TransportError("Response too large")
             result_bytes = bytearray()
             while True:
                 if expired.is_set() or time.monotonic() - started >= timeout:
@@ -86,6 +97,9 @@ class ReviewClient:
                     raise TransportError("Response too large")
             if expired.is_set() or time.monotonic() - started >= timeout:
                 raise TransportError("Whole-request deadline exceeded")
+            if len(result_bytes) != expected_length:
+                raise TransportError(
+                    f"Incomplete response body: expected {expected_length} bytes, received {len(result_bytes)}")
             result = json.loads(result_bytes)
             if not isinstance(result, dict):
                 raise TransportError("Invalid response type")
@@ -98,6 +112,10 @@ class ReviewClient:
             finished.set()
             watchdog.cancel()
             conn.close()
+
+    def version(self) -> dict[str, Any]:
+        """Authenticated pre-dispatch capability and enrolled identity handshake."""
+        return self._call("GET", "/v1/version")
 
     def submit(self, request: dict[str, str]) -> dict[str, Any]:
         return self._call("POST", "/v1/jobs", request)
