@@ -68,6 +68,7 @@ class ReviewClient:
                 "Authorization": "Bearer " + self.token,
                 "Content-Type": "application/json",
                 "Accept-Encoding": "identity",
+                "X-Blind-Review-Protocol": "3",
                 "Connection": "close"})
             live_socket[0] = conn.sock
             response = conn.getresponse()
@@ -91,7 +92,7 @@ class ReviewClient:
             return result
         except TransportError:
             raise
-        except (http.client.HTTPException, OSError, TimeoutError, ValueError) as ex:
+        except (http.client.HTTPException, OSError, TimeoutError, ValueError, RecursionError) as ex:
             raise TransportError(f"Request failed: {type(ex).__name__}: {ex}") from ex
         finally:
             finished.set()

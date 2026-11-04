@@ -7,6 +7,8 @@ import json
 import os
 import signal
 import socket
+import sys
+import uuid
 import subprocess
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -86,6 +88,36 @@ class _WindowsJob:
             self.kernel.CloseHandle(handle)
 
 
+class _WindowsLaunchGate:
+    """Named kernel event; never release the launcher before Job assignment."""
+
+    def __init__(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.kernel.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL,
+                                             wintypes.BOOL, wintypes.LPCWSTR]
+        self.kernel.CreateEventW.restype = wintypes.HANDLE
+        self.kernel.SetEvent.argtypes = [wintypes.HANDLE]
+        self.kernel.SetEvent.restype = wintypes.BOOL
+        self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.kernel.CloseHandle.restype = wintypes.BOOL
+        self.name = "Local\\BlindReviewLaunch-" + uuid.uuid4().hex
+        self.handle = self.kernel.CreateEventW(None, False, False, self.name)
+        if not self.handle:
+            raise OSError(ctypes.get_last_error(), "CreateEventW failed")
+
+    def release(self) -> None:
+        import ctypes
+        if not self.handle or not self.kernel.SetEvent(self.handle):
+            raise OSError(ctypes.get_last_error(), "SetEvent failed")
+
+    def close(self) -> None:
+        if self.handle:
+            handle, self.handle = self.handle, None
+            self.kernel.CloseHandle(handle)
+
+
 class Worker:
     """One persistent worker; job identity and role bindings fail closed."""
     def __init__(self, config: dict[str, Any]) -> None:
@@ -124,6 +156,7 @@ class Worker:
         self._stopping = threading.Event()
         self._running: dict[str, subprocess.Popen[bytes]] = {}
         self._windows_jobs: dict[int, _WindowsJob] = {}
+        self._windows_launch_gates: dict[int, _WindowsLaunchGate] = {}
         self._process_lock = threading.Lock()
         self._started_recovered = False
 
@@ -265,6 +298,7 @@ class Worker:
 
     def _run(self, job_id: str) -> None:
         proc = None
+        launch_gate = None
         try:
             jobrow = self.store.get(job_id)
             if not jobrow or jobrow["state"] != "QUEUED":
@@ -325,6 +359,16 @@ class Worker:
                 "stderr": subprocess.STDOUT, "env": self._child_env(), "close_fds": True,
                 "bufsize": 0 if harness.get("stdin_prompt", False) else -1}
             if os.name == "nt":
+                # An ordinary Popen followed by AssignProcessToJobObject races
+                # with child process creation. Launch a trusted, gated Python
+                # wrapper: it cannot spawn the Harness before the Worker has
+                # assigned the wrapper to the Job Object.
+                launch_gate = _WindowsLaunchGate()
+                launch_path = job_dir / "approved-launch.json"
+                launch_path.write_bytes(report_bytes({"argv": command}))
+                command = [sys.executable, "-I", "-u",
+                           str(Path(__file__).with_name("_win_launcher.py")),
+                           str(launch_path), launch_gate.name]
                 flags["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             else:
                 flags["start_new_session"] = True
@@ -336,9 +380,14 @@ class Worker:
                 with self._process_lock:
                     self._running[job_id] = proc
                 if os.name == "nt":
+                    with self._process_lock:
+                        self._windows_launch_gates[proc.pid] = launch_gate
                     job_handle = _WindowsJob(proc)
                     with self._process_lock:
                         self._windows_jobs[proc.pid] = job_handle
+                    # This is the only instruction that permits the trusted
+                    # launcher to spawn any command (including grandchildren).
+                    launch_gate.release()
                 self.store.set_pid(job_id, proc.pid)
                 if harness.get("stdin_prompt", False):
                     # Never write a large prompt on the monitoring thread.
@@ -442,6 +491,9 @@ class Worker:
                 self.store.transition(job_id, "FAILED", expected=("RUNNING", "QUEUED"),
                                       error=f"{type(ex).__name__}: {str(ex)[:1000]}")
         finally:
+            if proc is None:
+                if launch_gate is not None:
+                    launch_gate.close()
             if proc is None or proc.poll() is not None:
                 with self._process_lock:
                     self._running.pop(job_id, None)
@@ -459,17 +511,24 @@ class Worker:
         if os.name == "nt":
             with self._process_lock:
                 group = self._windows_jobs.pop(proc.pid, None)
-            if group is not None:
-                try:
-                    group.terminate()
-                finally:
-                    group.close()
-            elif proc.poll() is None:
-                done = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                                      capture_output=True, timeout=10, check=False)
-                if done.returncode and proc.poll() is None:
-                    raise RuntimeError("taskkill failed; process tree status unknown")
-            proc.wait(timeout=5)
+                gate = self._windows_launch_gates.pop(proc.pid, None)
+            try:
+                if group is not None:
+                    try:
+                        group.terminate()
+                    finally:
+                        group.close()
+                elif proc.poll() is None:
+                    # The gated launcher has not been permitted to spawn a
+                    # Harness unless Job assignment succeeded.
+                    done = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                          capture_output=True, timeout=10, check=False)
+                    if done.returncode and proc.poll() is None:
+                        raise RuntimeError("taskkill failed; process tree status unknown")
+                proc.wait(timeout=5)
+            finally:
+                if gate is not None:
+                    gate.close()
             return
         # The process group may outlive its leader. Always target it, even
         # when the CLI returned zero and proc.poll() is already non-None.
@@ -529,6 +588,15 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _protocol(self) -> bool:
+        # Old P0.2 coordinators do not send this header. Refuse their calls
+        # rather than allowing mixed-version identity validation to be bypassed.
+        if self.headers.get("X-Blind-Review-Protocol") != "3":
+            self._json(426, {"error": "Incompatible P0 coordinator protocol",
+                             "required_protocol": "3"})
+            return False
+        return True
+
     def _body(self) -> dict[str, Any]:
         try:
             n = int(self.headers.get("Content-Length", "0"))
@@ -548,7 +616,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         return path.strip("/").split("/")
 
     def do_POST(self) -> None:
-        if not self._auth():
+        if not self._auth() or not self._protocol():
             return
         try:
             parts = self._parts()
@@ -565,7 +633,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self._json(409 if "already exists" in str(ex) else 400, {"error": str(ex)})
 
     def do_GET(self) -> None:
-        if not self._auth():
+        if not self._auth() or not self._protocol():
             return
         parts = self._parts()
         if len(parts) < 3 or len(parts) > 4 or parts[:2] != ["v1", "jobs"] or not JOB_ID.fullmatch(parts[2]):
@@ -584,13 +652,15 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return
             self._json(200, {"node_id": self.worker.node_id, "job_id": parts[2],
                              "report_sha256": job["result_sha256"], "physical_host_id": self.worker.physical_host_id,
-                             "host_fingerprint": self.worker.host_fingerprint, "report": json.loads(path.read_text("utf-8"))})
+                             "host_fingerprint": self.worker.host_fingerprint, "protocol_version": 3,
+                             "report": json.loads(path.read_text("utf-8"))})
         else:
             self._json(409, {"error": "Report not available"})
 
     def _status(self, job: dict[str, Any]) -> dict[str, Any]:
         return {"node_id": self.worker.node_id, "physical_host_id": self.worker.physical_host_id,
-                "host_fingerprint": self.worker.host_fingerprint, "job_id": job["job_id"],
+                "host_fingerprint": self.worker.host_fingerprint, "protocol_version": 3,
+                "job_id": job["job_id"],
                 "suspected_stall": bool(job["state"] == "RUNNING" and
                     self.worker.stall_warn_seconds and job["progress_at"] is not None and
                     time.time() - job["progress_at"] >= self.worker.stall_warn_seconds),
