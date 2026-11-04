@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import platform
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +38,38 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+def local_host_fingerprint() -> str:
+    """Best-effort stable OS host fingerprint for independent-node sanity checks.
+
+    This detects duplicate Workers on one honest OS installation. It is not
+    remote hardware attestation; trusted node enrollment and unique credentials
+    are still required. Never accept this value from caller configuration.
+    """
+    system = platform.system()
+    machine_id = ""
+    if system == "Windows":
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SOFTWARE\Microsoft\Cryptography") as key:
+            machine_id = winreg.QueryValueEx(key, "MachineGuid")[0]
+    elif system == "Linux":
+        for source in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            try:
+                machine_id = Path(source).read_text(encoding="ascii").strip()
+            except OSError:
+                continue
+            if machine_id:
+                break
+    elif system == "Darwin":
+        result = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                                capture_output=True, text=True, check=True, timeout=8)
+        match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', result.stdout)
+        machine_id = match.group(1) if match else ""
+    if not isinstance(machine_id, str) or len(machine_id.strip()) < 8:
+        raise RuntimeError("No trusted local OS machine identity; refusing to start review Worker")
+    return sha256_bytes(("blind-review-host-v1:" + system + ":" + machine_id.strip()).encode("utf-8"))
+
 
 def ensure_pattern(name: str, value: Any, pattern: re.Pattern[str]) -> str:
     if not isinstance(value, str) or not pattern.fullmatch(value):

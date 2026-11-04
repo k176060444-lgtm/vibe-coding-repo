@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 import time
@@ -9,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from .common import (ProtocolError, TERMINAL, canonical_json, report_bytes,
+from .common import (ProtocolError, TERMINAL, canonical_json, report_bytes, SHA256, ensure_pattern,
                      sha256_bytes, sha256_file, validate_report, validate_request)
 from .http_client import ReviewClient, TransportError
 
@@ -27,14 +28,16 @@ class Coordinator:
         if not (2 <= len(self.nodes) <= 3):
             raise ValueError("Require two or three independent review nodes")
         for node in self.nodes:
-            for key in ("id", "url", "harness", "model", "token_env", "physical_host_id"):
+            for key in ("id", "url", "harness", "model", "token_env", "physical_host_id", "host_fingerprint"):
                 if not node.get(key):
                     raise ValueError(f"Missing node field {key}")
+            ensure_pattern("host_fingerprint", node["host_fingerprint"], SHA256)
         for key, values in {
             "node ID": [n["id"] for n in self.nodes],
             "endpoint": [n["url"].rstrip("/") for n in self.nodes],
             "token environment": [n["token_env"] for n in self.nodes],
             "declared physical host": [n["physical_host_id"] for n in self.nodes],
+            "pinned OS host fingerprint": [n["host_fingerprint"] for n in self.nodes],
         }.items():
             if len(set(values)) != len(values):
                 raise ValueError(f"Duplicate {key} cannot count as independent reviewers")
@@ -46,13 +49,19 @@ class Coordinator:
             raise ValueError("Poll/deadline must be positive; third-seat grace must not exceed 600 seconds")
         self.config_sha = sha256_bytes(canonical_json(config).encode("utf-8"))
         self.clients = {}
+        configured_tokens = []
         for node in self.nodes:
             if client_factory:
                 self.clients[node["id"]] = client_factory(node)
             else:
                 token = os.environ.get(node["token_env"], "")
+                if len(token) < 24:
+                    raise ValueError("Missing/weak review token for " + node["id"])
+                configured_tokens.append(token)
                 self.clients[node["id"]] = ReviewClient(node["url"], token,
                     timeout=float(config.get("request_timeout_seconds", 8)))
+        if not client_factory and len(set(configured_tokens)) != len(configured_tokens):
+            raise ValueError("Different enrolled physical nodes must use distinct authentication tokens")
         self.state: dict[str, Any] = {}
         self._lock_file = None
 
@@ -147,12 +156,21 @@ class Coordinator:
                                   "last_error": None, "last_seen_at": None,
                                   "report_sha256": None, "cancel_requested": False}
         self.state = {"schema_version": 2, "config_sha256": self.config_sha,
-                      "run_id": run_id, "started_at": self.clock(), "quorum_at": None,
+                      "run_id": run_id, "started_at": self.clock(), "max_observed_at": self.clock(), "quorum_at": None,
                       "finished_at": None, "result": None, "accepted_nodes": [], "jobs": jobs}
         self._save()
 
     def _save(self) -> None:
         self._atomic_json(self.state_path, self.state)
+
+    def _now(self) -> float:
+        """Reject wall-clock regression rather than lengthening a grace window."""
+        now = float(self.clock())
+        high = self.state.get("max_observed_at")
+        if not math.isfinite(now) or (high is not None and now + 0.001 < high):
+            raise ProtocolError("Clock moved backwards; reconciliation required before proceeding")
+        self.state["max_observed_at"] = max(now, high if high is not None else now)
+        return now
 
     def _valid_nodes(self) -> list[str]:
         return sorted((nid for nid, job in self.state["jobs"].items() if job["valid"]),
@@ -165,16 +183,54 @@ class Coordinator:
             self.state["quorum_at"] = self.state["jobs"][accepted[1]]["accepted_at"]
 
     def _verify_resume_reports(self) -> None:
+        # A receipt is the durable acceptance transaction: it includes the
+        # verified report and original clock time in ONE atomic filesystem write.
+        # state.json and reports/*.json are recoverable derived views.
         for nid, job in self.state["jobs"].items():
-            if not job["valid"]:
-                continue
             path = self.state_dir / "reports" / (nid + ".json")
-            if not path.is_file() or sha256_file(path) != job["report_sha256"]:
-                raise ProtocolError(f"Persisted report has changed or disappeared for {nid}")
-            data = json.loads(path.read_bytes())
-            validate_report(data, job["request"], nid, self.node_map[nid]["physical_host_id"])
-            if report_bytes(data) != path.read_bytes():
-                raise ProtocolError("Persisted report is not canonical")
+            receipt_path = self.state_dir / "receipts" / (nid + ".json")
+            if receipt_path.is_file():
+                receipt = json.loads(receipt_path.read_bytes())
+                data = validate_report(receipt["report"], job["request"], nid,
+                                       self.node_map[nid]["physical_host_id"])
+                digest = sha256_bytes(report_bytes(data))
+                accepted_at = receipt["accepted_at"]
+                if (receipt.get("node_id") != nid or
+                        receipt.get("host_fingerprint") != self.node_map[nid]["host_fingerprint"] or
+                        receipt.get("report_sha256") != digest or
+                        not isinstance(accepted_at, (float, int)) or
+                        not math.isfinite(accepted_at) or
+                        accepted_at >= self.state["started_at"] + self.deadline_s):
+                    raise ProtocolError(f"Invalid durable acceptance receipt for {nid}")
+                if job["valid"] and (job.get("report_sha256") != digest or
+                                      job.get("accepted_at") != accepted_at):
+                    raise ProtocolError(f"Report/receipt disagreement for {nid}")
+                if path.exists() and path.read_bytes() != report_bytes(data):
+                    raise ProtocolError(f"Persisted report has changed for {nid}")
+                if not path.exists():
+                    self._atomic_bytes(path, report_bytes(data))
+                job.update({"valid": True, "accepted_at": accepted_at, "verdict": data["verdict"],
+                            "report_sha256": digest, "host_fingerprint": receipt["host_fingerprint"],
+                            "state": "COMPLETED"})
+            elif job["valid"]:
+                # Read-only compatibility for already completed P0.2 runs.
+                if not path.is_file() or sha256_file(path) != job["report_sha256"]:
+                    raise ProtocolError(f"Persisted report has changed or disappeared for {nid}")
+                data = json.loads(path.read_bytes())
+                validate_report(data, job["request"], nid, self.node_map[nid]["physical_host_id"])
+                if report_bytes(data) != path.read_bytes():
+                    raise ProtocolError("Persisted report is not canonical")
+            if job["valid"] and job.get("host_fingerprint", self.node_map[nid]["host_fingerprint"]) != self.node_map[nid]["host_fingerprint"]:
+                raise ProtocolError("Stored host identity conflicts with pinned enrollment")
+        accepted = self._valid_nodes()
+        if len({self.node_map[n]["host_fingerprint"] for n in accepted}) != len(accepted):
+            raise ProtocolError("Duplicate host identity in accepted reports")
+        if len(accepted) >= 3:
+            second_time = self.state["jobs"][accepted[1]]["accepted_at"]
+            third_time = self.state["jobs"][accepted[2]]["accepted_at"]
+            if third_time >= min(self.state["started_at"] + self.deadline_s,
+                                 second_time + self.grace_s):
+                raise ProtocolError("Third-seat receipt beyond the authorized window")
         self._rebuild_quorum()
         self._save()
         if self.state["result"] is not None:
@@ -185,6 +241,13 @@ class Coordinator:
             raise ProtocolError("Remote node ID mismatch")
         if payload.get("physical_host_id") != self.node_map[nid]["physical_host_id"]:
             raise ProtocolError("Remote physical host declaration mismatch")
+        fingerprint = payload.get("host_fingerprint")
+        if fingerprint != self.node_map[nid]["host_fingerprint"]:
+            raise ProtocolError("Remote OS identity does not match pinned host enrollment")
+        if any(other != nid and row.get("valid") and
+               self.node_map[other]["host_fingerprint"] == fingerprint
+               for other, row in self.state["jobs"].items()):
+            raise ProtocolError("Duplicate physical host identity")
         job = self.state["jobs"][nid]
         if payload.get("job_id") != job["request"]["job_id"]:
             raise ProtocolError("Remote Job ID mismatch")
@@ -192,7 +255,8 @@ class Coordinator:
         if not isinstance(status, str) or status not in ("QUEUED", "RUNNING", *TERMINAL):
             raise ProtocolError("Invalid remote state")
         job["state"] = status
-        job["last_seen_at"] = self.clock()
+        job["host_fingerprint"] = fingerprint
+        job["last_seen_at"] = self._now()
         if payload.get("error"):
             job["last_error"] = str(payload["error"])[:1000]
         if status == "COMPLETED" and not job["valid"] and collect:
@@ -206,21 +270,29 @@ class Coordinator:
             raise ProtocolError("Report response identity mismatch")
         if payload.get("physical_host_id") != self.node_map[nid]["physical_host_id"]:
             raise ProtocolError("Report physical host declaration mismatch")
+        if payload.get("host_fingerprint") != self.node_map[nid]["host_fingerprint"]:
+            raise ProtocolError("Report served by unexpected OS identity")
         report = validate_report(payload.get("report"), job["request"], nid, self.node_map[nid]["physical_host_id"])
         digest = sha256_bytes(report_bytes(report))
         if digest != payload.get("report_sha256") or digest != status.get("result_sha256"):
             raise ProtocolError("Report SHA256 mismatch")
-        now = self.clock()
+        now = self._now()
         absolute_deadline = self.state["started_at"] + self.deadline_s
         if now >= absolute_deadline:
             raise ProtocolError("Report arrived after absolute deadline")
         if self.state["quorum_at"] is not None and now >= self.state["quorum_at"] + self.grace_s:
             raise ProtocolError("Third-seat report arrived after grace deadline")
+        # Persist the report AND its original acceptance timestamp in a single
+        # crash-safe receipt before updating derived report/state files.
+        self._atomic_json(self.state_dir / "receipts" / (nid + ".json"),
+                          {"node_id": nid, "host_fingerprint": self.node_map[nid]["host_fingerprint"],
+                           "accepted_at": now, "report_sha256": digest, "report": report})
         path = self.state_dir / "reports" / (nid + ".json")
         self._atomic_bytes(path, report_bytes(report))
         job["report_sha256"] = digest
         job["valid"] = True
         job["accepted_at"] = now
+        job["host_fingerprint"] = self.node_map[nid]["host_fingerprint"]
         job["verdict"] = report["verdict"]
         self._rebuild_quorum()
         self._save()  # both the second acceptance and quorum_at in the same state write
@@ -241,6 +313,11 @@ class Coordinator:
     def _cancel_one(self, nid: str) -> None:
         job = self.state["jobs"][nid]
         if job["valid"] or job["state"] in TERMINAL:
+            return
+        if job["state"] == "NOT_SUBMITTED":
+            job["state"] = "CANCELLED"
+            job["last_error"] = "Stopped before dispatch"
+            self._save()
             return
         job["cancel_requested"] = True
         self._save()
@@ -264,9 +341,14 @@ class Coordinator:
         self._atomic_json(self.state_dir / "summary.json", summary)
 
     def _finalize(self, result: str) -> str:
+        # No terminal outcome may abandon an outstanding remote job. Record
+        # cancellation intent before any network request; reconcile can retry.
+        for nid, row in self.state["jobs"].items():
+            if not row["valid"] and row["state"] not in TERMINAL:
+                self._cancel_one(nid)
         self._rebuild_quorum()
         self.state["result"] = result
-        self.state["finished_at"] = self.clock()
+        self.state["finished_at"] = self._now()
         self._save()
         self._write_summary()
         return result
@@ -279,12 +361,12 @@ class Coordinator:
         if self.state["quorum_at"] is not None:
             self._save()
         absolute_deadline = self.state["started_at"] + self.deadline_s
-        if self.clock() >= absolute_deadline and self.state["quorum_at"] is None:
+        if self._now() >= absolute_deadline and self.state["quorum_at"] is None:
             for nid in self.state["jobs"]:
                 self._cancel_one(nid)
             return self._finalize("FAILED_QUORUM_TIMEOUT")
         for nid in self.state["jobs"]:
-            now = self.clock()
+            now = self._now()
             if now >= absolute_deadline:
                 break
             if self.state["quorum_at"] is not None:
@@ -304,7 +386,7 @@ class Coordinator:
             deadline = min(absolute_deadline, self.state["quorum_at"] + self.grace_s)
             outstanding = [nid for nid,j in self.state["jobs"].items()
                            if not j["valid"] and j["state"] not in TERMINAL]
-            if len(accepted) == len(self.nodes) or self.clock() >= deadline or not outstanding and all(
+            if len(accepted) == len(self.nodes) or self._now() >= deadline or not outstanding and all(
                 j["state"] != "COMPLETED" or j["valid"] for j in self.state["jobs"].values()):
                 for nid in outstanding:
                     self._cancel_one(nid)
@@ -314,7 +396,7 @@ class Coordinator:
                         if not j["valid"] and (j["state"] not in TERMINAL or j["state"] == "COMPLETED"))
         if len(accepted) + remaining < 2:
             return self._finalize("FAILED_INSUFFICIENT_REVIEWERS")
-        if self.clock() >= absolute_deadline:
+        if self._now() >= absolute_deadline:
             for nid in self.state["jobs"]:
                 self._cancel_one(nid)
             return self._finalize("FAILED_QUORUM_TIMEOUT")
@@ -350,7 +432,7 @@ class Coordinator:
                 absolute = self.state["started_at"] + self.deadline_s
                 if self.state["quorum_at"] is not None:
                     absolute = min(absolute, self.state["quorum_at"] + self.grace_s)
-                remaining = absolute - self.clock()
+                remaining = absolute - self._now()
                 if remaining > 0:
                     self.sleep(min(self.poll_s, remaining))
         finally:

@@ -166,6 +166,10 @@ class WorkerIntegrationTest(unittest.TestCase):
         self.assertEqual(self.wait(self.request["job_id"])["state"], "CANCELLED")
 
 
+def synthetic_host_fingerprint(node_id):
+    return sha256_bytes(("mock-host:" + node_id).encode("utf-8"))
+
+
 class FakeClient:
     def __init__(self, node_id: str, clock):
         self.node_id = node_id
@@ -182,7 +186,8 @@ class FakeClient:
     def status(self, job_id):
         state = "COMPLETED" if self.clock() >= self.finish_at else "RUNNING"
         report = self._report()
-        return {"node_id": self.node_id, "physical_host_id": "host-" + self.node_id, "job_id": job_id, "state": state,
+        return {"node_id": self.node_id, "physical_host_id": "host-" + self.node_id, "host_fingerprint": synthetic_host_fingerprint(self.node_id),
+                "job_id": job_id, "state": state,
                 "result_sha256": sha256_bytes((canonical_json(report) + "\n").encode()),
                 "error": None}
 
@@ -196,12 +201,14 @@ class FakeClient:
 
     def report(self, job_id):
         report = self._report()
-        return {"job_id": job_id, "node_id": self.node_id, "physical_host_id": "host-" + self.node_id, "report": report,
+        return {"job_id": job_id, "node_id": self.node_id, "physical_host_id": "host-" + self.node_id, "host_fingerprint": synthetic_host_fingerprint(self.node_id),
+                "report": report,
                 "report_sha256": sha256_bytes((canonical_json(report) + "\n").encode())}
 
     def cancel(self, job_id):
         self.cancel_count += 1
         return {"node_id": self.node_id, "physical_host_id": "host-" + self.node_id,
+                "host_fingerprint": synthetic_host_fingerprint(self.node_id),
                 "job_id": job_id, "state": "CANCELLED", "error": None}
 
 
@@ -211,7 +218,8 @@ class CoordinatorTest(unittest.TestCase):
         self.now = 100_000.0
         self.clients = {}
         nodes = [{"id": name, "url": f"http://{name}.example", "harness": "codex", "model": "approved-model",
-                  "token_env": "FAKE_TOKEN_" + name.upper(), "physical_host_id": "host-" + name} for name in ("5bao", "9bao", "rusty")]
+                  "token_env": "FAKE_TOKEN_" + name.upper(), "physical_host_id": "host-" + name,
+                  "host_fingerprint": synthetic_host_fingerprint(name)} for name in ("5bao", "9bao", "rusty")]
         self.config = {"task_id": "TASK-1", "repository": "fixture", "commit_sha": "a"*40,
                        "contract_sha256": "b"*64, "nodes": nodes,
                        "poll_interval_seconds": 60, "third_grace_seconds": 600,

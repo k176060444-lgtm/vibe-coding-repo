@@ -1,4 +1,4 @@
-# Blind Review Poller (P0) · 异步跨机盲审
+> **P0.3 scoped A2A reliability candidate:** see [docs/P0_3_A2A_RELIABILITY.md](docs/P0_3_A2A_RELIABILITY.md) for pinned host enrollment, crash-safe acceptance receipts, cancellation reconciliation, process-tree cleanup, restricted child environments and machine-readable P0 CLI. Prior P0.2 results remain historical, not production approval.\n\n# Blind Review Poller (P0) · 异步跨机盲审
 
 **状态：0.1.0 P0 验证版。** 目标是为 Hermes Coding Pipeline 的 Phase 5.0 提供独立、轻量、可恢复的远端盲审任务执行与轮询回收，不需要改造 Hermes A2A 内核。**尚未在真实 5bao / 9bao / rusty 环境或真实 Codex/OpenCode 模型上验收。**
 

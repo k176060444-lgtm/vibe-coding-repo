@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import signal
+import socket
 import subprocess
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -15,8 +16,74 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .common import JOB_ID, NAME, ProtocolError, TERMINAL, canonical_json, sha256_bytes, sha256_file, bind_worker_report, ensure_pattern, report_bytes, validate_request
+from .common import JOB_ID, NAME, ProtocolError, TERMINAL, canonical_json, sha256_bytes, sha256_file, bind_worker_report, ensure_pattern, local_host_fingerprint, report_bytes, validate_request
 from .store import JobStore
+
+
+class _WindowsJob:
+    """Windows kernel Job Object: descendants die even if the CLI parent exits.
+
+    Assign after spawning, before processing output. Assignment failure is fatal:
+    this worker must not report a successful review without process-tree control.
+    """
+    def __init__(self, proc: subprocess.Popen[bytes]) -> None:
+        import ctypes
+        from ctypes import wintypes
+        class Basic(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
+                        ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD),
+                        ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t),
+                        ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t),
+                        ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+        class Counters(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_uint64) for name in
+                        ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                         "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+        class Extended(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", Basic), ("IoInfo", Counters),
+                        ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        self.kernel.CreateJobObjectW.restype = wintypes.HANDLE
+        self.kernel.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                       ctypes.c_void_p, wintypes.DWORD]
+        self.kernel.SetInformationJobObject.restype = wintypes.BOOL
+        self.kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        self.kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+        self.kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self.kernel.TerminateJobObject.restype = wintypes.BOOL
+        self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.kernel.CloseHandle.restype = wintypes.BOOL
+        self.handle = self.kernel.CreateJobObjectW(None, None)
+        if not self.handle:
+            raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+        limits = Extended()
+        limits.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        try:
+            if not self.kernel.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+                raise OSError(ctypes.get_last_error(), "SetInformationJobObject failed")
+            if not self.kernel.AssignProcessToJobObject(self.handle, wintypes.HANDLE(int(proc._handle))):
+                raise OSError(ctypes.get_last_error(), "AssignProcessToJobObject failed")
+        except BaseException:
+            self.close()
+            raise
+
+    def terminate(self) -> None:
+        import ctypes
+        if self.handle and not self.kernel.TerminateJobObject(self.handle, 1):
+            raise OSError(ctypes.get_last_error(), "TerminateJobObject failed")
+
+    def close(self) -> None:
+        if self.handle:
+            handle, self.handle = self.handle, None
+            self.kernel.CloseHandle(handle)
 
 
 class Worker:
@@ -25,6 +92,7 @@ class Worker:
         self.config = config
         self.node_id = ensure_pattern("node_id", config["node_id"], NAME)
         self.physical_host_id = ensure_pattern("physical_host_id", config["physical_host_id"], NAME)
+        self.host_fingerprint = local_host_fingerprint()  # derived from OS, never from config
         self.root = Path(config["workdir"]).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self._worker_lock = None
@@ -55,6 +123,7 @@ class Worker:
         self._submit_lock = threading.RLock()
         self._stopping = threading.Event()
         self._running: dict[str, subprocess.Popen[bytes]] = {}
+        self._windows_jobs: dict[int, _WindowsJob] = {}
         self._process_lock = threading.Lock()
         self._started_recovered = False
 
@@ -188,8 +257,11 @@ class Worker:
         names = self.config.get("env_allowlist", ["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "LANG", "LC_ALL"])
         if not isinstance(names, list) or any(not isinstance(n, str) for n in names):
             raise ValueError("env_allowlist must be a list of environment variable names")
-        forbidden = {self.config.get("token_env", "BLIND_REVIEW_WORKER_TOKEN")}
-        return {k: os.environ[k] for k in names if k in os.environ and k not in forbidden}
+        forbidden = {str(self.config.get("token_env", "BLIND_REVIEW_WORKER_TOKEN")).casefold()}
+        # Windows environment variable names are case-insensitive. Normalize before
+        # comparing, and never forward the server authentication secret to a child.
+        return {k: os.environ[k] for k in names
+                if k in os.environ and k.casefold() not in forbidden}
 
     def _run(self, job_id: str) -> None:
         proc = None
@@ -209,19 +281,21 @@ class Worker:
             report_file = job_dir / "report.json"
             stdout_file = job_dir / "execution.log"
             source = str(self.repositories[job["repository"]])
-            # --no-local stops Git from creating hard links to a trusted local repo.
+            # The Git helper, hooks and configured filters must never inherit the
+            # service authentication token either.
+            git_env = self._child_env()
             clone = subprocess.run(["git", "clone", "--no-local", "--no-checkout", "--", source, str(worktree)],
-                                   capture_output=True, timeout=self.clone_seconds, check=False)
+                                   capture_output=True, timeout=self.clone_seconds, check=False, env=git_env)
             if clone.returncode:
                 raise RuntimeError("Clone failed: " + clone.stderr.decode(errors="replace")[-700:])
             checkout = subprocess.run(["git", "-C", str(worktree), "checkout", "--detach", job["commit_sha"]],
-                                      capture_output=True, timeout=self.clone_seconds, check=False)
+                                      capture_output=True, timeout=self.clone_seconds, check=False, env=git_env)
             if checkout.returncode:
                 raise RuntimeError("Requested Git commit unavailable: " + checkout.stderr.decode(errors="replace")[-500:])
             if self.store.get(job_id)["cancel_requested"]:
                 self.store.transition(job_id, "CANCELLED", expected=("RUNNING",), error="Cancelled before harness")
                 return
-            verified = subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD"], timeout=15).decode().strip()
+            verified = subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD"], timeout=15, env=git_env).decode().strip()
             if verified != job["commit_sha"]:
                 raise RuntimeError("Verified commit differs from request")
             contract = (job_dir / "contract.snapshot").read_bytes()
@@ -259,9 +333,13 @@ class Worker:
             with stdout_file.open("wb") as output:
                 flags["stdout"] = output
                 proc = subprocess.Popen(command, **flags)
-                self.store.set_pid(job_id, proc.pid)
                 with self._process_lock:
                     self._running[job_id] = proc
+                if os.name == "nt":
+                    job_handle = _WindowsJob(proc)
+                    with self._process_lock:
+                        self._windows_jobs[proc.pid] = job_handle
+                self.store.set_pid(job_id, proc.pid)
                 if harness.get("stdin_prompt", False):
                     # Never write a large prompt on the monitoring thread.
                     def feed() -> None:
@@ -302,6 +380,9 @@ class Worker:
                         last_heartbeat = time.monotonic()
                     time.sleep(0.1)
                 proc.wait(timeout=10)
+            # Ensure all descendants are terminated before a terminal status;
+            # root-process exit alone is not sufficient (e.g. detached CLI child).
+            self._terminate(proc)
             if stdout_file.stat().st_size > self.max_log_bytes:
                 output_limited = True
             if output_limited:
@@ -339,9 +420,9 @@ class Worker:
                 raise RuntimeError("Invalid report_mode")
             if not report_file.is_file() or report_file.stat().st_size > 1_000_000:
                 raise RuntimeError("Missing or oversized structured report")
-            if subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD"], timeout=10).decode().strip() != verified:
+            if subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD"], timeout=10, env=git_env).decode().strip() != verified:
                 raise RuntimeError("Harness changed reviewed HEAD")
-            changed = subprocess.check_output(["git", "-C", str(worktree), "status", "--porcelain", "--ignored=matching", "--untracked-files=all"], timeout=15)
+            changed = subprocess.check_output(["git", "-C", str(worktree), "status", "--porcelain", "--ignored=matching", "--untracked-files=all"], timeout=15, env=git_env)
             if changed.strip():
                 raise RuntimeError("Reviewer modified review worktree (including ignored files)")
             original = json.loads(report_file.read_bytes())
@@ -373,29 +454,42 @@ class Worker:
             arg = arg.replace("{" + key + "}", value)
         return arg
 
-    @staticmethod
-    def _terminate(proc: subprocess.Popen[bytes]) -> None:
-        if proc.poll() is not None:
-            return
+    def _terminate(self, proc: subprocess.Popen[bytes]) -> None:
+        """Terminate the process tree, including after root-process exit."""
         if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True,
-                           timeout=10, check=False)
-        else:
+            with self._process_lock:
+                group = self._windows_jobs.pop(proc.pid, None)
+            if group is not None:
+                try:
+                    group.terminate()
+                finally:
+                    group.close()
+            elif proc.poll() is None:
+                done = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                      capture_output=True, timeout=10, check=False)
+                if done.returncode and proc.poll() is None:
+                    raise RuntimeError("taskkill failed; process tree status unknown")
+            proc.wait(timeout=5)
+            return
+        # The process group may outlive its leader. Always target it, even
+        # when the CLI returned zero and proc.poll() is already non-None.
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
             try:
-                os.killpg(proc.pid, signal.SIGTERM)
+                os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            proc.wait(timeout=5)
+        # Terminate descendants that survived their root process.
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            if os.name == "nt":
-                proc.kill()
-            else:
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-            proc.wait(timeout=5)
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
     def shutdown(self) -> None:
         self._stopping.set()
@@ -489,12 +583,14 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 self._json(409, {"error": "Report missing or hash mismatch"})
                 return
             self._json(200, {"node_id": self.worker.node_id, "job_id": parts[2],
-                             "report_sha256": job["result_sha256"], "physical_host_id": self.worker.physical_host_id, "report": json.loads(path.read_text("utf-8"))})
+                             "report_sha256": job["result_sha256"], "physical_host_id": self.worker.physical_host_id,
+                             "host_fingerprint": self.worker.host_fingerprint, "report": json.loads(path.read_text("utf-8"))})
         else:
             self._json(409, {"error": "Report not available"})
 
     def _status(self, job: dict[str, Any]) -> dict[str, Any]:
-        return {"node_id": self.worker.node_id, "physical_host_id": self.worker.physical_host_id, "job_id": job["job_id"],
+        return {"node_id": self.worker.node_id, "physical_host_id": self.worker.physical_host_id,
+                "host_fingerprint": self.worker.host_fingerprint, "job_id": job["job_id"],
                 "suspected_stall": bool(job["state"] == "RUNNING" and
                     self.worker.stall_warn_seconds and job["progress_at"] is not None and
                     time.time() - job["progress_at"] >= self.worker.stall_warn_seconds),

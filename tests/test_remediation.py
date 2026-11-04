@@ -15,12 +15,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from blindreview.common import ProtocolError, bind_worker_report, report_bytes, validate_report
+from blindreview.common import ProtocolError, bind_worker_report, local_host_fingerprint, report_bytes, validate_report
 from blindreview.coordinator import Coordinator
 from blindreview.http_client import ReviewClient, TransportError
 from blindreview.store import JobStore
 from blindreview.worker import Worker, ReviewHandler
-from test_pipeline import FakeClient, make_repo
+from test_pipeline import FakeClient, make_repo, synthetic_host_fingerprint
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -63,7 +63,8 @@ class CoordinatorRegression(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.now = 10000.0
         self.clients = {}
-        self.nodes = [dict(id=n, physical_host_id="host-"+n, url=f"http://{n}.example",
+        self.nodes = [dict(id=n, physical_host_id="host-"+n, host_fingerprint=synthetic_host_fingerprint(n),
+                           url=f"http://{n}.example",
                            token_env=f"TOKEN_{n}", harness="fixture", model="test") for n in ("A","B","C")]
         self.cfg = dict(task_id="TASK", repository="fixture", commit_sha="a"*40,
                         contract_sha256="b"*64, nodes=self.nodes, third_grace_seconds=600,
@@ -379,7 +380,7 @@ class HTTPRegression(unittest.TestCase):
 
 class EndToEndWire(unittest.TestCase):
     """Coordinator -> two HTTP Workers -> local Git -> mock harness -> reports."""
-    def test_two_real_http_workers_quorum(self):
+    def test_two_same_host_http_workers_cannot_quorum(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td)
             repo=root/"repo";repo.mkdir()
@@ -405,28 +406,24 @@ class EndToEndWire(unittest.TestCase):
                     environments[env]=os.environ.get(env)
                     os.environ[env]=token
                     nodes.append(dict(id=name,physical_host_id="physical-"+name,
+                        host_fingerprint=(worker.host_fingerprint if name=="A" else "b"*64),
                         url=f"http://127.0.0.1:{server.server_port}",token_env=env,
                         harness="fixture",model="fixture-model"))
                 cfg=dict(task_id="T1",repository="fixture",commit_sha=sha,contract_sha256=contract_sha,
                          nodes=nodes,request_timeout_seconds=3,poll_interval_seconds=1,
-                         third_grace_seconds=0,overall_deadline_seconds=20)
+                         third_grace_seconds=0,overall_deadline_seconds=5)
                 c=Coordinator(cfg,root/"coordinator")
                 try:
                     c.initialize()
-                    finish=time.monotonic()+15
+                    finish=time.monotonic()+10
                     while time.monotonic()<finish:
                         result=c.step()
                         if result is not None:
                             break
                         time.sleep(.1)
-                    self.assertEqual(result,"QUORUM_MET",c.state)
-                    self.assertEqual(len(c.state["accepted_nodes"]),2)
-                    self.assertEqual({json.loads((root/"coordinator"/"reports"/(n+".json")).read_bytes())["physical_host_id"] for n in ("A","B")},
-                                     {"physical-A","physical-B"})
-                    for node in nodes:
-                        path=root/"coordinator"/"reports"/(node["id"]+".json")
-                        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
-                                         c.state["jobs"][node["id"]]["report_sha256"])
+                    self.assertNotEqual(result,"QUORUM_MET",c.state)
+                    self.assertLess(len(c.state["accepted_nodes"]),2)
+                    self.assertIn("identity", str(c.state["jobs"]["B"]["last_error"]).lower())
                 finally:
                     c.close()
             finally:
