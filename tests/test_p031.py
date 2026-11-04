@@ -52,7 +52,7 @@ class ProtocolVersionTests(unittest.TestCase):
                 response = conn.getresponse()
                 payload = json.loads(response.read())
                 self.assertEqual(response.status, 426)
-                self.assertEqual(payload["required_protocol"], "3")
+                self.assertEqual(payload["required_protocol"], "4")
                 conn.close()
 
                 # POST must also fail closed, without ever creating a Job ID.

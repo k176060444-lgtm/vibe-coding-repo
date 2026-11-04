@@ -591,9 +591,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
     def _protocol(self) -> bool:
         # Old P0.2 coordinators do not send this header. Refuse their calls
         # rather than allowing mixed-version identity validation to be bypassed.
-        if self.headers.get("X-Blind-Review-Protocol") != "3":
+        if self.headers.get("X-Blind-Review-Protocol") != "4":
             self._json(426, {"error": "Incompatible P0 coordinator protocol",
-                             "required_protocol": "3"})
+                             "required_protocol": "4"})
             return False
         return True
 
@@ -626,7 +626,12 @@ class ReviewHandler(BaseHTTPRequestHandler):
             elif len(parts) == 4 and parts[:2] == ["v1", "jobs"] and parts[3] == "cancel" and JOB_ID.fullmatch(parts[2]):
                 self.worker.store.cancel(parts[2])
                 job = self.worker.store.get(parts[2])
-                self._json(200, self._status(job)) if job else self._json(404, {"error": "Unknown job"})
+                if job:
+                    self._json(200, self._status(job))
+                else:
+                    # Cancel-before-submit tombstone: a delayed POST cannot
+                    # later start the job after an ambiguous network failure.
+                    self._json(200, self._cancelled_unknown(parts[2]))
             else:
                 self._json(404, {"error": "Unknown endpoint"})
         except (ProtocolError, json.JSONDecodeError, UnicodeDecodeError) as ex:
@@ -638,9 +643,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
         parts = self._parts()
         if parts == ["v1", "version"]:
             self._json(200, {
-                "protocol_version": 3,
-                "worker_version": "0.3.2",
-                "capabilities": ["preflight-before-submit", "host-fingerprint"],
+                "protocol_version": 4,
+                "worker_version": "0.3.3",
+                "capabilities": ["preflight-before-submit", "host-fingerprint", "cancel-tombstone"],
                 "node_id": self.worker.node_id,
                 "physical_host_id": self.worker.physical_host_id,
                 "host_fingerprint": self.worker.host_fingerprint,
@@ -651,7 +656,10 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return
         job = self.worker.store.get(parts[2])
         if not job:
-            self._json(404, {"error": "Unknown job"})
+            if len(parts) == 3 and self.worker.store.is_tombstoned(parts[2]):
+                self._json(200, self._cancelled_unknown(parts[2]))
+            else:
+                self._json(404, {"error": "Unknown job"})
             return
         if len(parts) == 3:
             self._json(200, self._status(job))
@@ -662,14 +670,23 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return
             self._json(200, {"node_id": self.worker.node_id, "job_id": parts[2],
                              "report_sha256": job["result_sha256"], "physical_host_id": self.worker.physical_host_id,
-                             "host_fingerprint": self.worker.host_fingerprint, "protocol_version": 3,
+                             "host_fingerprint": self.worker.host_fingerprint, "protocol_version": 4,
                              "report": json.loads(path.read_text("utf-8"))})
         else:
             self._json(409, {"error": "Report not available"})
 
+    def _cancelled_unknown(self, job_id: str) -> dict[str, Any]:
+        return self._status({
+            "job_id": job_id, "state": "CANCELLED",
+            "created_at": None, "started_at": None, "finished_at": None,
+            "heartbeat_at": None, "progress_at": None,
+            "error": "Cancelled before job submission",
+            "result_sha256": None, "pid": None, "cancel_requested": True,
+        })
+
     def _status(self, job: dict[str, Any]) -> dict[str, Any]:
         return {"node_id": self.worker.node_id, "physical_host_id": self.worker.physical_host_id,
-                "host_fingerprint": self.worker.host_fingerprint, "protocol_version": 3,
+                "host_fingerprint": self.worker.host_fingerprint, "protocol_version": 4,
                 "job_id": job["job_id"],
                 "suspected_stall": bool(job["state"] == "RUNNING" and
                     self.worker.stall_warn_seconds and job["progress_at"] is not None and

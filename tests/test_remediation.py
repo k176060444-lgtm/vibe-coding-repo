@@ -210,7 +210,7 @@ class CoordinatorRegression(unittest.TestCase):
         self.assertIn("identity", c.state["jobs"]["B"]["last_error"].lower())
         self.assertFalse(c.state["accepted_nodes"])
 
-    def test_preflight_transport_failure_retries_without_partial_dispatch(self):
+    def test_transient_third_preflight_does_not_block_two_healthy_nodes(self):
         c = self.create()
         original = self.clients["B"].version
         first = [True]
@@ -221,10 +221,65 @@ class CoordinatorRegression(unittest.TestCase):
             return original()
         self.clients["B"].version = flaky
         self.assertIsNone(c.step())
-        self.assertEqual(c.state["protocol_preflight"]["status"], "PENDING")
-        self.assertEqual([x.submit_count for x in self.clients.values()], [0, 0, 0])
+        self.assertEqual(c.state["protocol_preflight"]["status"], "PARTIAL")
+        self.assertEqual([x.submit_count for x in self.clients.values()], [1, 0, 1])
+        self.assertEqual(set(c.state["accepted_nodes"]), {"A", "C"})
         self.assertEqual(c.step(), "QUORUM_MET")
         self.assertEqual([x.submit_count for x in self.clients.values()], [1, 1, 1])
+
+    def test_two_healthy_nodes_complete_without_third_at_grace_deadline(self):
+        c = self.create()
+        def unavailable():
+            raise TransportError("Request failed: ConnectionRefusedError: offline")
+        self.clients["B"].version = unavailable
+        self.assertIsNone(c.step())
+        self.assertEqual(set(c.state["accepted_nodes"]), {"A", "C"})
+        self.assertEqual(self.clients["B"].submit_count, 0)
+        self.now += 601
+        self.assertEqual(c.step(), "QUORUM_MET")
+        self.assertEqual(set(c.state["accepted_nodes"]), {"A", "C"})
+        self.assertEqual(self.clients["B"].submit_count, 0)
+
+    def test_post_ack_lost_retries_same_job_id_without_false_quorum(self):
+        c = self.create()
+        original = self.clients["A"].submit
+        first = [True]
+        recorded = []
+        def lost_ack(req):
+            recorded.append(req["job_id"])
+            reply = original(req)
+            if first[0]:
+                first[0] = False
+                raise TransportError("Request failed: ConnectionResetError: lost POST response")
+            return reply
+        self.clients["A"].submit = lost_ack
+        self.assertIsNone(c.step())
+        job = c.state["jobs"]["A"]
+        self.assertTrue(job["submit_attempted"])
+        self.assertEqual(job["state"], "NOT_SUBMITTED")
+        # B and C may legitimately form the first two physical seats.
+        # A's unconfirmed POST must not be counted as a third report.
+        self.assertNotIn("A", c.state["accepted_nodes"])
+        self.assertEqual(len(c.state["accepted_nodes"]), 2)
+        self.assertEqual(c.step(), "QUORUM_MET")
+        self.assertEqual(len(set(recorded)), 1)
+        self.assertEqual(recorded[0], job["request"]["job_id"])
+
+    def test_uncertain_post_is_cancelled_on_coordinator_timeout(self):
+        c = self.create()
+        def lost_ack(req):
+            self.clients["A"].job = req
+            raise TransportError("Request failed: ConnectionResetError: uncertain POST")
+        self.clients["A"].submit = lost_ack
+        self.clients["B"].finish_at = self.now + 99999
+        self.clients["C"].finish_at = self.now + 99999
+        self.assertIsNone(c.step())
+        self.assertTrue(c.state["jobs"]["A"]["submit_attempted"])
+        self.now += 3601
+        self.assertEqual(c.step(), "FAILED_QUORUM_TIMEOUT")
+        self.assertTrue(c.state["jobs"]["A"]["cancel_requested"])
+        self.assertEqual(self.clients["A"].cancel_count, 1)
+        self.assertEqual(c.state["jobs"]["A"]["state"], "CANCELLED")
 
     def test_p031_state_cannot_resume_without_new_preflight_policy(self):
         c = self.create()

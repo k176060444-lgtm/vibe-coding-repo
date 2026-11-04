@@ -83,8 +83,8 @@ class PreDispatchCompatibility(unittest.TestCase):
             def __init__(self):
                 self.submit_calls = 0
             def version(self):
-                return {"protocol_version": 3, "worker_version": "0.3.2",
-                        "capabilities": ["preflight-before-submit", "host-fingerprint"],
+                return {"protocol_version": 4, "worker_version": "0.3.3",
+                        "capabilities": ["preflight-before-submit", "host-fingerprint", "cancel-tombstone"],
                         "node_id": "A", "physical_host_id": "physical-A",
                         "host_fingerprint": synthetic_host_fingerprint("A")}
             def submit(self, request):

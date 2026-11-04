@@ -27,6 +27,11 @@ class JobStore:
                 progress_at REAL, pid INTEGER, result_sha256 TEXT,
                 error TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0
             )""")
+            # A cancel must remain effective even when a delayed POST from an
+            # earlier network retry arrives *after* the cancel response.
+            self._db.execute("""CREATE TABLE IF NOT EXISTS job_tombstones (
+                job_id TEXT PRIMARY KEY, cancelled_at REAL NOT NULL
+            )""")
 
     def submit(self, job: dict[str, str]) -> tuple[dict[str, Any], bool]:
         """Idempotent insert guarded by SQLite's primary key even across processes."""
@@ -36,6 +41,11 @@ class JobStore:
                 (job_id,request,state,created_at,heartbeat_at) VALUES (?,?,?,?,?)""",
                 (job["job_id"], canonical_json(job), "QUEUED", now, now))
             row = self._db.execute("SELECT * FROM jobs WHERE job_id=?", (job["job_id"],)).fetchone()
+            tombstone = self._db.execute(
+                "SELECT 1 FROM job_tombstones WHERE job_id=?", (job["job_id"],)).fetchone()
+            if tombstone and cur.rowcount == 1:
+                # Roll back the newly inserted job, retaining the tombstone.
+                raise ProtocolError("Job cancelled before submission; refusing delayed dispatch")
             if not row or row["request"] != canonical_json(job):
                 raise ProtocolError("Job ID already exists with a different request")
             return self._serialize(row), cur.rowcount == 1
@@ -44,6 +54,11 @@ class JobStore:
         with self._lock:
             row = self._db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
             return self._serialize(row) if row else None
+
+    def is_tombstoned(self, job_id: str) -> bool:
+        with self._lock:
+            return self._db.execute(
+                "SELECT 1 FROM job_tombstones WHERE job_id=?", (job_id,)).fetchone() is not None
 
     @staticmethod
     def _serialize(row: sqlite3.Row) -> dict[str, Any]:
@@ -90,6 +105,12 @@ class JobStore:
 
     def cancel(self, job_id: str) -> bool:
         with self._lock, self._db:
+            # The first SQL write acquires SQLite's writer lock. Therefore a
+            # concurrent submit either commits first and is cancelled below,
+            # or sees this durable tombstone and cannot create a new job.
+            self._db.execute(
+                "INSERT OR IGNORE INTO job_tombstones (job_id, cancelled_at) VALUES (?, ?)",
+                (job_id, time.time()))
             row = self.get(job_id)
             if not row or row["state"] in TERMINAL:
                 return False

@@ -68,7 +68,7 @@ class ReviewClient:
                 "Authorization": "Bearer " + self.token,
                 "Content-Type": "application/json",
                 "Accept-Encoding": "identity",
-                "X-Blind-Review-Protocol": "3",
+                "X-Blind-Review-Protocol": "4",
                 "Connection": "close"})
             live_socket[0] = conn.sock
             response = conn.getresponse()

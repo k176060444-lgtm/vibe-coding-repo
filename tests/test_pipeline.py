@@ -181,8 +181,8 @@ class FakeClient:
         self.verdict = "APPROVE"
 
     def version(self):
-        return {"protocol_version": 3, "worker_version": "0.3.2",
-                "capabilities": ["preflight-before-submit", "host-fingerprint"],
+        return {"protocol_version": 4, "worker_version": "0.3.3",
+                "capabilities": ["preflight-before-submit", "host-fingerprint", "cancel-tombstone"],
                 "node_id": self.node_id, "physical_host_id": "host-" + self.node_id,
                 "host_fingerprint": synthetic_host_fingerprint(self.node_id)}
 
